@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 
@@ -94,8 +94,10 @@ describe('GET /api/health', () => {
     expect(res.body.status).toBe('degraded');
     expect(res.body.services.supabase).toBe('failed');
     expect(loggerErrorSpy).toHaveBeenCalledWith(
-      { err: expect.any(Error) },
-      '[health] Supabase check failed'
+      // 7226f91d8 deliberately renamed the health events to *_CHECK_FAILED
+      // and dropped the '[health]' message prefix.
+      { event: 'HEALTH_SUPABASE_CHECK_FAILED', error: 'Supabase network error' },
+      'Supabase check failed'
     );
   });
 
@@ -130,8 +132,8 @@ describe('GET /api/health', () => {
     expect(res.body.status).toBe('degraded');
     expect(res.body.services.mongodb).toBe('failed');
     expect(loggerErrorSpy).toHaveBeenCalledWith(
-      { err: expect.any(Error) },
-      '[health] MongoDB check failed'
+      { event: 'HEALTH_MONGODB_CHECK_FAILED', error: 'MongoDB timeout' },
+      'MongoDB check failed'
     );
   });
 
@@ -144,8 +146,8 @@ describe('GET /api/health', () => {
     expect(res.body.status).toBe('ok');
     expect(res.body.services.redis).toBe('failed');
     expect(loggerErrorSpy).toHaveBeenCalledWith(
-      { err: expect.any(Error) },
-      '[health] Redis check failed'
+      { event: 'HEALTH_REDIS_CHECK_FAILED', error: 'Redis connection refused' },
+      'Redis check failed'
     );
   });
 
@@ -218,14 +220,47 @@ describe('GET /api/health/ready', () => {
 
 describe('GET /api/health/sentry-debug', () => {
   let app;
+  let previousNodeEnv;
+  let previousDebugFlag;
 
   beforeEach(() => {
+    previousNodeEnv = process.env.NODE_ENV;
+    previousDebugFlag = process.env.SENTRY_DEBUG_ENABLED;
+    process.env.NODE_ENV = 'development';
+    delete process.env.SENTRY_DEBUG_ENABLED;
     app = buildApp();
     mockCaptureDebugException.mockReset();
   });
 
+  afterEach(() => {
+    if (previousNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
+    if (previousDebugFlag === undefined) {
+      delete process.env.SENTRY_DEBUG_ENABLED;
+    } else {
+      process.env.SENTRY_DEBUG_ENABLED = previousDebugFlag;
+    }
+  });
+
   it('returns 404 when the debug route is not enabled', async () => {
-    delete process.env.SENTRY_DEBUG_ENABLED;
+    const res = await request(app).get('/api/health/sentry-debug');
+    expect(res.status).toBe(404);
+    expect(mockCaptureDebugException).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the debug flag is false', async () => {
+    process.env.SENTRY_DEBUG_ENABLED = 'false';
+    const res = await request(app).get('/api/health/sentry-debug');
+    expect(res.status).toBe(404);
+    expect(mockCaptureDebugException).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 in production even when debug is enabled', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.SENTRY_DEBUG_ENABLED = 'true';
     const res = await request(app).get('/api/health/sentry-debug');
     expect(res.status).toBe(404);
     expect(mockCaptureDebugException).not.toHaveBeenCalled();

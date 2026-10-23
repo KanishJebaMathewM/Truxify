@@ -31,4 +31,4 @@ def test_zero_edge_graph_has_no_route_between_distinct_nodes():
     )
     data = builder.get_pytorch_data()
 
-    assert RouteOptimizer().optimize_route("A", "B", data) is None
+    assert RouteOptimizer(allow_untrained=True).optimize_route("A", "B", data) is None

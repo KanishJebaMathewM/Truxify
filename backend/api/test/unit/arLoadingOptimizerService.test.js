@@ -32,7 +32,7 @@ describe('arLoadingOptimizerService', () => {
     });
 
     expect(plan).toBeDefined();
-    expect(plan.planId).toMatch(/^AR-PLAN-\d+$/);
+    expect(plan.planId).toMatch(/^PLAN-[0-9a-f-]{36}$/);
     expect(plan.totalWeightKg).toBe(1800);
     expect(plan.maxPayloadKg).toBe(20000);
     expect(plan.volumeUtilizationPercent).toBeGreaterThan(0);

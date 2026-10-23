@@ -88,7 +88,7 @@ class _BrokerCreditScoringScreenState extends State<BrokerCreditScoringScreen> {
                   width: 64,
                   height: 64,
                   decoration: BoxDecoration(
-                    color: getScoreColor().withOpacity(0.1),
+                    color: getScoreColor().withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                     border: Border.all(color: getScoreColor(), width: 3),
                   ),

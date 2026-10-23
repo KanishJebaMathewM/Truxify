@@ -7,7 +7,12 @@ class DriverUtils {
     final uuidRegex = RegExp(
       r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
     );
-    return !uuidRegex.hasMatch(name.trim());
+    final trimmed = name.trim();
+    if (uuidRegex.hasMatch(trimmed)) return false;
+    // Permuted/reshuffled UUIDs (hex groups in any order) are still not names
+    final looseUuid = RegExp(r'^[0-9a-fA-F]{4,}(?:-[0-9a-fA-F]{4,})+$');
+    if (looseUuid.hasMatch(trimmed)) return false;
+    return true;
   }
 
   /// Resolves the driver display name, falling back to 'Driver Assigned'

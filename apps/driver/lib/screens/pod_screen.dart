@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 import '../services/sync_service.dart';
+import '../services/trip_service.dart';
 import '../services/image_compression_service.dart';
 import '../theme/app_theme.dart';
 
@@ -18,13 +19,13 @@ class ProofOfDeliveryScreen extends StatefulWidget {
   final Future<void> Function(String? photoPath, String? signaturePath)? onComplete;
 
   const ProofOfDeliveryScreen({
-    Key? key,
+    super.key,
     required this.tripDisplayId,
     required this.stopId,
     this.orderId,
     this.earnings,
     this.onComplete,
-  }) : super(key: key);
+  });
 
   @override
   State<ProofOfDeliveryScreen> createState() => _ProofOfDeliveryScreenState();
@@ -132,8 +133,10 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
         double? lng;
         try {
           final position = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.high,
-            timeLimit: const Duration(seconds: 4),
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              timeLimit: Duration(seconds: 4),
+            ),
           );
           lat = position.latitude;
           lng = position.longitude;
@@ -162,6 +165,7 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
         // If geofence failed, request manual OTP
         if (!paymentReleased) {
           _updateStatus('Awaiting OTP verification...');
+          if (!mounted) return;
           final enteredOtp = await showDialog<String>(
             context: context,
             barrierDismissible: false,
@@ -401,7 +405,7 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
                     child: ElevatedButton(
                       onPressed: _submit,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: TruxifyColors.primary,
+                        backgroundColor: TruxifyColors.accent,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                       ),
                       child: Text('Complete Delivery', style: GoogleFonts.dmSans(fontSize: 16, fontWeight: FontWeight.bold)),

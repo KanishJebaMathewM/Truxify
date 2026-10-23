@@ -78,12 +78,17 @@ class VoiceAiAssistantService {
       entities['message'] = transcribedText;
     }
 
-    return VoiceCommand(
-      rawText: transcribedText,
+    final command = VoiceCommand(
+      transcript: transcribedText,
       intent: intent,
       entities: entities,
-      confidenceScore: 0.92,
-      timestamp: DateTime.now(),
+      assistantResponse: '',
+    );
+    return VoiceCommand(
+      transcript: command.transcript,
+      intent: command.intent,
+      entities: command.entities,
+      assistantResponse: executeIntent(command),
     );
   }
 

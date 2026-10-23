@@ -17,4 +17,6 @@ COPY --from=builder /app/telemetry-ingestion .
 
 EXPOSE 8085
 
+USER nobody
+
 CMD ["./telemetry-ingestion"]

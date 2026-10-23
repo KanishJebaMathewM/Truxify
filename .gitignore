@@ -77,3 +77,6 @@ dart_defines/*.env
 
 # Local VC status-list allocation state
 **/.truxify-vc-status-index.json
+
+*.sqlite
+*.sqlite-journal

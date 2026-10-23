@@ -1,6 +1,48 @@
 /**
  * Baseline rate multipliers per equipment type ($/mile baseline).
  */
+// backend/api/src/services/pricing.js (Excerpt)
+
+import logger from '../middleware/logger.js';
+
+/**
+ * Calculates estimated trip pricing including distance, base fare, and scaled toll estimates.
+ * @param {Object} params - Pricing calculation parameters
+ * @param {number} params.distanceKm - Trip distance in kilometers
+ * @param {string} params.vehicleType - Category of truck/vehicle
+ * @param {number} [params.tollFactor=1.0] - Optional dynamic multiplier factor for toll estimates
+ */
+export function calculateTripPrice({ distanceKm, vehicleType, tollFactor = 1.0 }) {
+  if (distanceKm < 0) {
+    throw new Error('Distance cannot be negative.');
+  }
+
+  // Base rate card lookups
+  const baseFare = 50.00;
+  const perKmRate = 18.00;
+  const staticBaseToll = distanceKm * 2.50; // Base toll estimate per km
+
+  // ✅ Apply dynamic tollFactor scaling (defaulting to 1.0)
+  const normalizedTollFactor = typeof tollFactor === 'number' && !isNaN(tollFactor) ? tollFactor : 1.0;
+  const calculatedToll = Number((staticBaseToll * normalizedTollFactor).toFixed(2));
+
+  const distanceFare = distanceKm * perKmRate;
+  const subtotal = baseFare + distanceFare + calculatedToll;
+
+  logger.info({ distanceKm, vehicleType, tollFactor: normalizedTollFactor, calculatedToll }, 'Calculated trip price with dynamic toll factor');
+
+  return {
+    success: true,
+    currency: 'INR',
+    breakdown: {
+      baseFare,
+      distanceFare,
+      tollAmount: calculatedToll,
+      tollFactor: normalizedTollFactor,
+      subtotal: Number(subtotal.toFixed(2)),
+    },
+  };
+}
 const BASELINE_RATES_PER_MILE = {
     DRY_VAN: 2.35,
     REEFER: 2.85,

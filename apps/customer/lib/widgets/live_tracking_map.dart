@@ -83,7 +83,7 @@ class _LiveTrackingMapState extends State<LiveTrackingMap> {
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
+                          color: Colors.black.withValues(alpha: 0.2),
                           blurRadius: 6,
                           offset: const Offset(0, 3),
                         ),

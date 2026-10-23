@@ -10,6 +10,9 @@ vi.mock('../src/config/db.js', () => ({
   get redisClient() { return db.redis; },
   get firebaseAdmin() { return null; },
   get supabase() { return null; },
+  // tracker.js also imports supabaseAdmin (it persists gps_logs when present);
+  // null keeps that path disabled, as it already is for supabase above.
+  get supabaseAdmin() { return null; },
 }));
 
 vi.mock('../src/middleware/logger.js', () => ({

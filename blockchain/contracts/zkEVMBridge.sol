@@ -69,7 +69,8 @@ contract zkEVMBridge is Ownable, ReentrancyGuard {
         require(amount > 0, "No pending withdrawal");
 
         pendingWithdrawals[msg.sender] = 0;
-        payable(msg.sender).transfer(amount);
+        (bool success, ) = payable(msg.sender).call{value: amount}("");
+        require(success, "Withdrawal transfer failed");
     }
 
     function setBridgeFee(uint256 newFee) external onlyOwner {
@@ -84,7 +85,8 @@ contract zkEVMBridge is Ownable, ReentrancyGuard {
         uint256 amount = collectedFees;
         require(amount > 0, "No fees to withdraw");
         collectedFees = 0;
-        payable(owner()).transfer(amount);
+        (bool success, ) = payable(owner()).call{value: amount}("");
+        require(success, "Fee withdrawal failed");
     }
 
     receive() external payable {

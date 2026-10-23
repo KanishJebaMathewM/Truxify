@@ -2,6 +2,88 @@
  * Strict pagination middleware to prevent memory exhaustion from large 'limit' values.
  * Parses and caps limit and offset parameters.
  */
+/**
+ * Pagination Middleware
+ * 
+ * Validates and parses query parameters for pagination (page, limit),
+ * attaching standardized pagination metadata to the request object.
+ * Uses structured logging for validation errors to ensure request tracing via requestId.
+ */
+
+import logger from './logger.js';
+
+export function pagination(defaultLimit = 20, maxLimit = 100) {
+  return (req, res, next) => {
+    try {
+      let page = parseInt(req.query.page, 10);
+      let limit = parseInt(req.query.limit, 10);
+
+      let hasError = false;
+      let errorMessage = '';
+
+      if (isNaN(page) || page < 1) {
+        if (req.query.page !== undefined) {
+          hasError = true;
+          errorMessage = `Invalid page parameter: "${req.query.page}"`;
+        }
+        page = 1;
+      }
+
+      if (isNaN(limit) || limit < 1) {
+        if (req.query.limit !== undefined) {
+          hasError = true;
+          errorMessage = errorMessage 
+            ? `${errorMessage}; Invalid limit parameter: "${req.query.limit}"` 
+            : `Invalid limit parameter: "${req.query.limit}"`;
+        }
+        limit = defaultLimit;
+      } else if (limit > maxLimit) {
+        limit = maxLimit;
+      }
+
+      if (hasError) {
+        logger.error(
+          {
+            requestId: req.requestId || req.id,
+            event: 'PAGINATION_VALIDATION_ERROR',
+            page: req.query.page,
+            limit: req.query.limit,
+            error: errorMessage,
+          },
+          'Pagination validation error detected'
+        );
+      }
+
+      const skip = (page - 1) * limit;
+
+      req.pagination = {
+        page,
+        limit,
+        skip,
+      };
+
+      next();
+    } catch (err) {
+      logger.error(
+        {
+          requestId: req.requestId || req.id,
+          event: 'PAGINATION_MIDDLEWARE_ERROR',
+          error: err?.message || err,
+        },
+        'Unexpected error in pagination middleware'
+      );
+      
+      req.pagination = {
+        page: 1,
+        limit: defaultLimit,
+        skip: 0,
+      };
+      next();
+    }
+  };
+}
+
+export default pagination;
 export function validatePagination(options = {}) {
   const maxLimit = options.maxLimit || 100;
   const maxOffset = options.maxOffset || 10000;
@@ -28,14 +110,20 @@ export function validatePagination(options = {}) {
 
     // 2. Parse offset (or page)
     let offset = defaultOffset;
-    if (req.query.offset) {
-      const parsed = parseInteger(req.query.offset);
-      if (Number.isFinite(parsed) && parsed >= 0) {
-        offset = Math.min(parsed, maxOffset);
-      } else {
-        return res.status(400).json({ error: 'Invalid offset parameter' });
-      }
-    } else if (req.query.page) {
+if (req.query.offset) {
+  const rawOffset = String(req.query.offset);
+
+  if (!/^-?\d+$/.test(rawOffset)) {
+    return res.status(400).json({ error: 'Invalid offset parameter' });
+  }
+
+  const parsed = Number.parseInt(rawOffset, 10);
+
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return res.status(400).json({ error: 'Invalid offset parameter' });
+  }
+  offset = Math.min(parsed, maxOffset);
+} else if (req.query.page) {
       const parsedPage = parseInteger(req.query.page);
       if (parsedPage !== null && parsedPage < 1) {
         return res.status(400).json({ error: 'Invalid page parameter: must be >= 1' });

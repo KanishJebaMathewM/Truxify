@@ -154,11 +154,11 @@ class KafkaConfig {
         topic,
         messages: [
           {
-            key: key || event.eventId || event.orderId,
+            key: key || event.aggregateId || event.orderId || event.eventId,
             value: JSON.stringify({
               ...event,
               timestamp: event.timestamp || new Date().toISOString(),
-              version: '1.0',
+              version: event.version || '1.0',
             }),
             headers: traceHeaders,
             timestamp: Date.now(),
@@ -186,11 +186,11 @@ class KafkaConfig {
         topic,
         messages: [
           {
-            key: key || event.eventId,
+            key: key || event.aggregateId || event.orderId || event.eventId,
             value: JSON.stringify({
               ...event,
               timestamp: event.timestamp || new Date().toISOString(),
-              version: '1.0',
+              version: event.version || '1.0',
             }),
             headers: traceHeaders,
             timestamp: Date.now(),
@@ -318,7 +318,7 @@ export default new KafkaConfig();
 // === Spec 32: ===
 // === Spec 32: connection leak ===
 export async function recreateConsumer(oldC, factory) {
-  try { if (oldC?.disconnect) await oldC.disconnect(); } catch (_) {}
+  try { if (oldC?.disconnect) await oldC.disconnect(); } catch (err) { logger.debug('Failed to disconnect old Kafka client:', err); }
   return factory();
 }
 

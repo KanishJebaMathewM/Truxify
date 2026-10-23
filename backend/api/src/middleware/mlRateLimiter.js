@@ -11,7 +11,7 @@ const DEFAULT_CAPACITY = 5; // Max requests allowed in burst
 const DEFAULT_REFILL_RATE = 0.5; // 1 request every 2 seconds
 const IN_MEMORY_TTL_MS = 3600000; // 1 hour
 
-class TokenBucketRateLimiter {
+export class TokenBucketRateLimiter {
     constructor(options = {}) {
         this.capacity = options.capacity || DEFAULT_CAPACITY;
         this.refillRate = options.refillRate || DEFAULT_REFILL_RATE;
@@ -105,6 +105,14 @@ class TokenBucketRateLimiter {
         const ip = req.ip || req.connection.remoteAddress || 'unknown_ip';
         const ua = req.headers['user-agent'] || 'unknown_ua';
         return `anon:${crypto.createHash('sha256').update(`${ip}:${ua}`).digest('hex').substring(0, 16)}`;
+    }
+
+    /** Stops the in-memory cleanup interval (tests, graceful shutdown). */
+    destroy() {
+        if (this.cleanupInterval) {
+            clearInterval(this.cleanupInterval);
+            this.cleanupInterval = null;
+        }
     }
 
     _cleanupInMemory() {

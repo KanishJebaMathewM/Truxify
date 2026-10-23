@@ -16,4 +16,6 @@ COPY --from=builder /app/build/route-matrix-cpp .
 
 EXPOSE 8086
 
+USER nobody
+
 CMD ["./route-matrix-cpp"]

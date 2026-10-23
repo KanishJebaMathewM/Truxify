@@ -100,7 +100,7 @@ class _DynamicFuelHedgingWalletScreenState extends State<DynamicFuelHedgingWalle
                 const Text('Unrealized Hedge Savings:', style: TextStyle(color: Colors.white70)),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(color: Colors.greenAccent.withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
+                  decoration: BoxDecoration(color: Colors.greenAccent.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(12)),
                   child: Text('+\$${totalSavings.toStringAsFixed(2)}', style: const TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold)),
                 )
               ],

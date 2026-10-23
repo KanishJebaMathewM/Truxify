@@ -31,7 +31,8 @@ contract MockZkEVM {
         require(amount > 0, "Amount must be > 0");
         require(balances[msg.sender] >= amount, "Insufficient balance");
         balances[msg.sender] -= amount;
-        payable(msg.sender).transfer(amount);
+        (bool sent, ) = payable(msg.sender).call{value: amount}("");
+        require(sent, "Withdrawal transfer failed");
     }
 
     /// @notice Test-only bridge withdrawal preserving the original user's identity.
@@ -46,7 +47,8 @@ contract MockZkEVM {
         require(amount > 0, "Amount must be > 0");
         require(balances[user] >= amount, "Insufficient balance");
         balances[user] -= amount;
-        payable(msg.sender).transfer(amount);
+        (bool sent, ) = payable(msg.sender).call{value: amount}("");
+        require(sent, "Withdrawal transfer failed");
     }
 
     function getBalance(address user) external view returns (uint256) {

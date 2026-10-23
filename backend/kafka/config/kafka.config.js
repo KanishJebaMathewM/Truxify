@@ -1,7 +1,45 @@
 import { Kafka } from 'kafkajs';
 import { context, propagation } from '@opentelemetry/api';
 import logger from '../../api/src/middleware/logger.js';
+// backend/kafka/config/kafka.config.js (Excerpt)
 
+import { Kafka } from 'kafkajs';
+import logger from '../middleware/logger.js';
+
+// ... existing Kafka instance configuration ...
+
+export async function resetConsumerOffsets(groupId, topicPartitions) {
+  const admin = kafka.admin();
+  
+  try {
+    await admin.connect();
+    logger.info({ groupId }, 'Kafka admin client connected for offset reset');
+
+    const currentOffsets = await admin.fetchOffsets({ groupId, topics: topicPartitions.map(tp => tp.topic) });
+    
+    // Perform offset adjustments / resets...
+    for (const tp of topicPartitions) {
+      await admin.setConsumerGroupOffsets({
+        groupId,
+        topics: [{ topic: tp.topic, partitions: [{ partition: tp.partition, offset: tp.offset }] }],
+      });
+    }
+
+    logger.info({ groupId }, 'Consumer group offsets successfully reset');
+    return { success: true };
+  } catch (err) {
+    logger.error({ err, groupId }, 'Failed to reset consumer group offsets');
+    throw err;
+  } finally {
+    // ✅ Fixed: Guaranteed disconnection in finally block to prevent resource leaks on error
+    try {
+      await admin.disconnect();
+      logger.info({ groupId }, 'Kafka admin client disconnected safely');
+    } catch (disconnectErr) {
+      logger.error({ err: disconnectErr }, 'Error while disconnecting Kafka admin client');
+    }
+  }
+}
 const kafka = new Kafka({
   clientId: 'truxify',
   brokers: process.env.KAFKA_BROKERS ? process.env.KAFKA_BROKERS.split(',') : ['localhost:9092'],

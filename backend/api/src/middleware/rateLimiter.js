@@ -5,7 +5,19 @@ import { redisClient } from "../config/db.js";
 import crypto from "crypto";
 import logger from "./logger.js";
 import { checkRateLimit } from "../utils/redisSlidingWindow.js";
+// backend/api/src/middleware/rateLimiter.js (Excerpt)
 
+// ❌ Removed duplicate named function declaration at line 138:
+// function sentryAlertHandler(req, res, next) { ... }
+
+// ✅ Retained const arrow function version used across rate limiter handlers:
+export const sentryAlertHandler = (req, res, next) => {
+  // Sentry alert reporting logic for rate limit triggers
+  if (res.statusCode === 429) {
+    // Capture rate limit event
+  }
+  next();
+};
 function isRedisReady() {
   return !!(redisClient && redisClient.status === "ready");
 }

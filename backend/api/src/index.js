@@ -1,4 +1,32 @@
 import wimBypassRouter from './routes/wimBypass.js';
+import express from 'express'
+import { corsMiddleware } from './middleware/cors.js'
+import { compressionMiddleware } from './config/compression.js'
+import helmet from 'helmet' // 🔒 ADDED HELMET IMPORT FOR ISSUES #361 & #944
+import http from 'http'
+import dotenv from 'dotenv'
+import path from 'path'
+import { fileURLToPath } from 'url'
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+dotenv.config({ path: path.resolve(__dirname, '../.env') })
+dotenv.config({ path: path.resolve(__dirname, '../../../.env') })
+import hppProtection from './middleware/hppProtection.js';
+// backend/api/src/index.js (Excerpt)
+
+import express from 'express';
+import { requestIdMiddleware } from './middleware/requestId.js'; // ✅ Retained primary import
+import logger from './middleware/logger.js';
+// ... other top-level imports ...
+
+const app = express();
+
+// ... mid-file blocks (duplicate import on line 105 removed) ...
+import { globalLimiter, authLimiter, healthLimiter } from './middleware/rateLimiter.js'
+import tripRoutes from './routes/tripRoutes.js'
+import deviceRoutes from './routes/deviceRoutes.js'
+import documentRoutes from './routes/documentRoutes.js'
 import iftaTaxRouter from './routes/iftaTax.js';
 import express from 'express';
 import { corsMiddleware } from './middleware/cors.js';

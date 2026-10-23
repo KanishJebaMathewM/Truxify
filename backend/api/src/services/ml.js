@@ -1,7 +1,37 @@
 import logger from '../middleware/logger.js';
 import { validatePricePrediction, convertToPaisa } from '../lib/predictionValidator.js';
 import { LRUCache } from '../utils/cache.js';
+// backend/api/src/services/ml.js (Excerpt)
 
+import axios from 'axios';
+import logger from '../middleware/logger.js';
+
+const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://localhost:8000';
+
+/**
+ * Validates that the ML API key is configured when required.
+ */
+function guardMlApiKey() {
+  if (!process.env.ML_API_KEY) {
+    logger.warn('ML_API_KEY is not configured in environment variables.');
+    // Depending on strictness, throw or log warning
+  }
+}
+
+// Optional runtime check setup if conditional initialization was intended
+if (!process.env.ML_API_KEY) {
+  logger.info('Running ML service in unauthenticated development mode.');
+}
+
+export async function predictDemand(payload) {
+  // ✅ Always defined and safely callable regardless of environment configuration
+  guardMlApiKey();
+
+  const response = await axios.post(`${ML_SERVICE_URL}/ml/predict-demand`, payload, {
+    headers: { 'Authorization': `Bearer ${process.env.ML_API_KEY || ''}` }
+  });
+  return response.data;
+}
 const demandCache = new LRUCache(100, 15 * 60 * 1000);
 const priceCache = new LRUCache(100, 15 * 60 * 1000);
 

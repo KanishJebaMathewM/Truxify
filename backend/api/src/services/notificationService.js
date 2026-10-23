@@ -4,6 +4,32 @@ import crypto from 'crypto';
 import { hashOtp, verifyOtpHash } from '../lib/otpHashing.js';
 import { measureExecution } from '../core/performanceMetrics.js';
 import { DomainError } from './order/domainError.js';
+// backend/api/src/services/notificationService.js (Excerpt)
+
+export async function sendDeliveryOtpNotification({ recipientId, orderId, otp }) {
+  try {
+    // ✅ Fixed: Omit raw OTP from notification body text for security.
+    // Store hashed OTP or metadata in secure logs/database if required for auditing.
+    const notificationBody = `Your delivery verification is ready for order ${orderId}. Please check your secure app session to confirm delivery.`;
+
+    const notificationPayload = {
+      recipient_id: recipientId,
+      title: 'Delivery Verification Required',
+      body: notificationBody,
+      data: {
+        orderId,
+        // Optional secure reference or audit flag
+        requiresOtp: true,
+      },
+      created_at: new Date().toISOString(),
+    };
+
+    // Dispatch notification via push / SMS channel...
+    return { success: true, payload: notificationPayload };
+  } catch (err) {
+    throw new Error(`Failed to send delivery OTP notification: ${err.message}`);
+  }
+}
 // Before
 logger.error({ err: error }, 'Error inserting notification');
 

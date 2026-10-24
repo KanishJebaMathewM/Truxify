@@ -10,9 +10,43 @@ from datetime import datetime
 from causalnex.structure.notears import from_pandas
 from dowhy import CausalModel
 import warnings
+warnings.filterwarnings('ignore')
+# backend/ai/causal_inference.py (Excerpt)
 
 warnings.filterwarnings("ignore")
 
+import numpy as np
+import pandas as pd
+from causalimpact import CausalImpact
+import logging
+
+logger = logging.getLogger(__name__)
+
+def measure_impact(pre_data, post_data):
+    """
+    Measures causal impact by combining pre-intervention and post-intervention data series
+    and passing correct period bounds to the CausalImpact library.
+    """
+    try:
+        # Ensure inputs are numpy arrays or pandas DataFrames/Series
+        pre_arr = np.asarray(pre_data)
+        post_arr = np.asarray(post_data)
+
+        # ✅ Concatenate pre_data and post_data into a single full data series
+        full_data = np.concatenate([pre_arr, post_arr], axis=0)
+
+        # ✅ Define precise index bounds for pre- and post-intervention periods
+        pre_period = [0, len(pre_arr) - 1]
+        post_period = [len(pre_arr), len(full_data) - 1]
+
+        logger.info(f"Running CausalImpact with pre_period={pre_period} and post_period={post_period}")
+
+        # Initialize and fit CausalImpact
+        ci = CausalImpact(full_data, pre_period, post_period)
+        return ci
+    except Exception as err:
+        logger.error(f"Error in measure_impact: {str(err)}")
+        raise
 logger = logging.getLogger(__name__)
 
 
@@ -659,6 +693,8 @@ class CausalInferenceService:
             }
 
         except Exception as e:
+            logger.error(f"Analysis failed: {e}")
+            return {'success': False, 'error': str(e)}
             logger.error(
                 f"Analysis failed: {e}"
             )

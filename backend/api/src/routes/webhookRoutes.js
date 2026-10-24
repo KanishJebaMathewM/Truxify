@@ -4,7 +4,121 @@ import logger from '../middleware/logger.js';
 import { redisClient } from '../config/db.js';
 import { dlqService } from '../services/webhook/dlqService.js';
 import { processEscrowWebhookEvent } from '../services/webhook/escrowWebhookProcessor.js';
+// backend/api/src/routes/webhookRoutes.js
+import express from 'express';
+import crypto from 'crypto';
+import logger from '../middleware/logger.js';
 
+const router = express.Router();
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || 'truxify_webhook_secret_key';
+
+// ✅ Register express.raw middleware to capture exact raw body buffer for HMAC verification
+router.post('/webhook', express.raw({ type: '*/*' }), async (req, res) => {
+  try {
+    const signatureHeader = req.headers['x-signature'] || req.headers['x-hub-signature-256'] || '';
+    const rawBodyBuffer = req.body;
+
+    if (!rawBodyBuffer || !Buffer.isBuffer(rawBodyBuffer)) {
+      logger.warn('Webhook received without raw body buffer');
+      return res.status(400).json({ error: 'Invalid request body' });
+    }
+
+    // Compute expected HMAC signature using raw bytes
+    const expectedSignature = crypto
+      .createHmac('sha256', WEBHOOK_SECRET)
+      .update(rawBodyBuffer)
+      .digest('hex');
+
+    const providedSignature = signatureHeader.startsWith('sha256=')
+      ? signatureHeader.replace('sha256=', '')
+      : signatureHeader;
+
+    let isValid = false;
+    try {
+      if (providedSignature.length === expectedSignature.length) {
+        isValid = crypto.timingSafeEqual(
+          Buffer.from(expectedSignature, 'hex'),
+          Buffer.from(providedSignature, 'hex')
+        );
+      }
+    } catch {
+      isValid = false;
+    }
+
+    if (!isValid) {
+      logger.warn({ providedSignature, expectedSignature }, 'Webhook HMAC signature verification failed');
+      return res.status(401).json({ error: 'Invalid signature' });
+    }
+
+    // Parse verified payload safely after HMAC validation
+    const payload = JSON.parse(rawBodyBuffer.toString('utf8'));
+
+    logger.info({ event: payload.event || 'unknown' }, 'Webhook successfully verified and processed');
+    return res.status(200).json({ success: true, received: true });
+  } catch (err) {
+    logger.error({ err }, 'Internal error processing webhook endpoint');
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+export default router;// backend/api/src/routes/webhookRoutes.js
+import express from 'express';
+import crypto from 'crypto';
+import logger from '../middleware/logger.js';
+
+const router = express.Router();
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || 'truxify_webhook_secret_key';
+
+// ✅ Register express.raw middleware to capture exact raw body buffer for HMAC verification
+router.post('/webhook', express.raw({ type: '*/*' }), async (req, res) => {
+  try {
+    const signatureHeader = req.headers['x-signature'] || req.headers['x-hub-signature-256'] || '';
+    const rawBodyBuffer = req.body;
+
+    if (!rawBodyBuffer || !Buffer.isBuffer(rawBodyBuffer)) {
+      logger.warn('Webhook received without raw body buffer');
+      return res.status(400).json({ error: 'Invalid request body' });
+    }
+
+    // Compute expected HMAC signature using raw bytes
+    const expectedSignature = crypto
+      .createHmac('sha256', WEBHOOK_SECRET)
+      .update(rawBodyBuffer)
+      .digest('hex');
+
+    const providedSignature = signatureHeader.startsWith('sha256=')
+      ? signatureHeader.replace('sha256=', '')
+      : signatureHeader;
+
+    let isValid = false;
+    try {
+      if (providedSignature.length === expectedSignature.length) {
+        isValid = crypto.timingSafeEqual(
+          Buffer.from(expectedSignature, 'hex'),
+          Buffer.from(providedSignature, 'hex')
+        );
+      }
+    } catch {
+      isValid = false;
+    }
+
+    if (!isValid) {
+      logger.warn({ providedSignature, expectedSignature }, 'Webhook HMAC signature verification failed');
+      return res.status(401).json({ error: 'Invalid signature' });
+    }
+
+    // Parse verified payload safely after HMAC validation
+    const payload = JSON.parse(rawBodyBuffer.toString('utf8'));
+
+    logger.info({ event: payload.event || 'unknown' }, 'Webhook successfully verified and processed');
+    return res.status(200).json({ success: true, received: true });
+  } catch (err) {
+    logger.error({ err }, 'Internal error processing webhook endpoint');
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+export default router;
 const router = express.Router();
 
 // Replay defense: reject webhooks whose timestamp is outside this window. The

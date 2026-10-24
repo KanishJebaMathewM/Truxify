@@ -162,7 +162,36 @@ import multer from 'multer';
 import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
+// backend/api/src/routes/orderRoutes.js (Excerpt around confirm-otp handler)
 
+router.post('/orders/:id/confirm-otp', authenticate, async (req, res) => {
+  try {
+    const orderId = req.params.id;
+    const { otp } = req.body;
+
+    const order = await orderLifecycleService.getOrderById(orderId);
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    // Verify OTP logic...
+    const isValid = await orderLifecycleService.verifyOtp(orderId, otp);
+    if (!isValid) {
+      return res.status(400).json({ error: 'Invalid or expired OTP' });
+    }
+
+    // ✅ Fixed: Renamed second 'const order' declaration to 'confirmedOrder'
+    const confirmedOrder = await orderLifecycleService.completeOrderConfirmation(orderId);
+
+    return res.status(200).json({
+      success: true,
+      data: confirmedOrder,
+    });
+  } catch (err) {
+    logger.error({ err }, 'Error in confirm-otp endpoint');
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
 import {
   bidLimiter,
   userLimiter,

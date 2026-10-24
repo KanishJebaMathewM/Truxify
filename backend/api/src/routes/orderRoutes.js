@@ -162,7 +162,27 @@ import multer from 'multer';
 import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
+// backend/api/src/routes/orderRoutes.js (Excerpt)
 
+router.get('/history', authenticate, userLimiter, requirePolicy('order:view-history'), async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const cursor = req.query.cursor; // ✅ Captured pagination cursor
+    const limitParam = req.query.limit ?? '10';
+    const limit = parseInt(limitParam, 10);
+
+    // ✅ Fixed: Pass 'cursor' instead of undefined 'page'
+    const result = await orderLifecycleService.getOrderHistory(userId, cursor, limit);
+
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (err) {
+    logger.error({ err }, 'Internal Server Error in GET /api/orders/history');
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
 import {
   bidLimiter,
   userLimiter,

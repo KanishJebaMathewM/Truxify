@@ -197,6 +197,24 @@ import { acquireLock, releaseLock, LockAcquisitionError } from '../lib/redisLock
 import logger from '../middleware/logger.js';
 import { invalidateBookingCaches } from '../utils/cacheInvalidation.js';
 import { auditLog } from '../middleware/auditLog.js';
+// backend/api/src/routes/orderRoutes.js (Excerpt around confirm-otp response building)
+
+// ✅ Fixed: Calculate amount_inr using orderForAmount.total_amount instead of undefined order.total_amount
+const amountInr = orderForAmount?.total_amount 
+  ? (orderForAmount.total_amount / 100).toFixed(2) 
+  : '0.00';
+
+return res.status(200).json({
+  success: true,
+  message: 'Order delivery confirmed successfully',
+  data: {
+    order_id: orderId,
+    // ✅ Fixed: Include order_display_id from orderForAmount
+    order_display_id: orderForAmount?.order_display_id || null,
+    amount_inr: amountInr,
+    status: 'completed',
+  },
+});
 import {
   orderRepository,
   orderValidationService,

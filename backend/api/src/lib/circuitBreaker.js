@@ -143,7 +143,6 @@ export class CircuitBreaker {
   }
 
   onSuccess() {
-    this.successCount += 1;
     if (this.state === CircuitState.HALF_OPEN) {
       this.reset();
       this.successCount = 1;

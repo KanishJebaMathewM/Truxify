@@ -1,6 +1,17 @@
 import { z } from 'zod';
 import { VALID_LANGUAGES } from '../schemas/profile.js';
+// backend/api/src/validation/requestSchemas.js (Excerpt)
 
+import { z } from 'zod';
+
+export const deviceRegistrationSchema = z.object({
+  device_token: z.string().min(1, 'Device token is required.'),
+  platform: z.enum(['ios', 'android', 'web'], {
+    errorMap: () => ({ message: 'Platform must be ios, android, or web.' }),
+  }),
+  // ✅ New: Optional flexible metadata object for device telemetry & attributes
+  metadata: z.record(z.any()).optional().default({}),
+});
 // Generic field validation helpers
 function isValidPhone(phone) {
   return /^\+?[\d\s\-()]{7,15}$/.test(phone);

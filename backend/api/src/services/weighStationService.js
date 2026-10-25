@@ -5,6 +5,44 @@
 
 import logger from '../middleware/logger.js';
 
+import crypto from 'crypto';
+import { logger } from '../utils/logger.js';
+export async function checkBypassEligibility({ lat, lng, vehicleId }) {
+  try {
+    if (lat === undefined || lng === undefined) {
+      throw new Error('Latitude and longitude are required for weigh station check');
+    }
+
+    // FIX: Generate deterministic station ID derived from coordinates per issue #6527
+    const normalizedLat = Number(lat).toFixed(4);
+    const normalizedLng = Number(lng).toFixed(4);
+    const stationId = `STATION_${normalizedLat}_${normalizedLng}`;
+
+    // FIX: Replace Math.random() with crypto.randomInt() for secure randomness
+    // 30% baseline chance of bypass eligibility in mock mode
+    const randomVal = crypto.randomInt(0, 100);
+    const isBypassGranted = randomVal < 30;
+
+    logger.info(
+      { stationId, vehicleId, isBypassGranted },
+      '[weighStationService] Bypass eligibility evaluated (Mock)'
+    );
+
+    return {
+      success: true,
+      stationId,
+      bypassGranted: isBypassGranted,
+      provider: 'MOCK_COMPLIANCE_PROVIDER',
+      timestamp: new Date().toISOString(),
+    };
+  } catch (err) {
+    logger.error({ err, lat, lng, vehicleId }, '[weighStationService] Failed to check bypass eligibility');
+    return {
+      success: false,
+      error: `Weigh station check failed: ${err.message}`,
+    };
+  }
+}
 /**
  * Checks weigh station bypass eligibility for a given trip/truck.
  * NOTE: This is currently a mock service and must be replaced with a real regulatory API integration before production rollout.
@@ -47,8 +85,25 @@ export const FHWA_LIMITS = {
     MIN_TANDEM_SPACING_INCHES: 40,
     MAX_TANDEM_SPACING_INCHES: 96,
 };
+// backend/api/src/services/weighStationService.js
 
 /**
+ * Checks bypass eligibility for a weigh station.
+ * NOTE: This is currently a deterministic mock service. It must be replaced
+ * with a real regulatory API integration before production deployment.
+ * Fixed per issue #8955 / #8956.
+ */
+export async function checkBypassEligibility(vehicleId, stationId, metadata = {}) {
+  // Deterministic mock response instead of Math.random() coin-flip
+  return {
+    action: 'BYPASS',
+    simulated: true,
+    reason: 'Deterministic mock compliance check passed',
+    vehicleId,
+    stationId,
+    timestamp: new Date().toISOString()
+  };
+}
  * Calculates the maximum allowable gross weight for a group of two or more consecutive axles
  * using the Federal Bridge Gross Weight Formula:
  * W = 500 * [ (L * N) / (N - 1) + 12N + 36 ]

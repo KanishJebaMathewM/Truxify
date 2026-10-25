@@ -14,7 +14,107 @@
  * Run with:  npx vitest run test/unit/digilockerService.test.js
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// backend/api/test/unit/digilockerService.test.js
 
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as DigilockerService from '../../src/services/digilockerService.js';
+import axios from 'axios';
+
+vi.mock('axios');
+
+describe('DigilockerService Unit Tests', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('verifyDocument', () => {
+    it('should successfully verify a valid government identity document', async () => {
+      const mockApiResponse = {
+        data: {
+          success: true,
+          status: 'VERIFIED',
+          documentDetails: {
+            docType: 'DRIVING_LICENCE',
+            issuedTo: 'Joshua Miracle J',
+            issueDate: '2024-05-12'
+          }
+        }
+      };
+
+      axios.post.mockResolvedValueOnce(mockApiResponse);
+
+      const result = await DigilockerService.verifyDocument({
+        docType: 'DL',
+        documentId: 'TN0720240012345',
+        consent: 'Y'
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.status).toBe('VERIFIED');
+      expect(result.details.issuedTo).toBe('Joshua Miracle J');
+      expect(axios.post).toHaveBeenCalledTimes(1);
+    });
+
+    it('should handle invalid document numbers and return verification failure', async () => {
+      const mockErrorResponse = {
+        response: {
+          status: 400,
+          data: {
+            success: false,
+            error: 'INVALID_DOCUMENT_NUMBER',
+            message: 'No record found matching the provided document metadata'
+          }
+        }
+      };
+
+      axios.post.mockRejectedValueOnce(mockErrorResponse);
+
+      const result = await DigilockerService.verifyDocument({
+        docType: 'DL',
+        documentId: 'INVALID_ID_999',
+        consent: 'Y'
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('INVALID_DOCUMENT_NUMBER');
+    });
+
+    it('should handle network timeouts and external service failures gracefully', async () => {
+      axios.post.mockRejectedValueOnce(new Error('ETIMEDOUT'));
+
+      const result = await DigilockerService.verifyDocument({
+        docType: 'PAN',
+        documentId: 'ABCDE1234F',
+        consent: 'Y'
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('DigiLocker service unavailable');
+    });
+  });
+
+  describe('sessionTokenManagement', () => {
+    it('should successfully retrieve and cache OAuth session access tokens', async () => {
+      const mockTokenResponse = {
+        data: {
+          access_token: 'mock_digilocker_oauth_token_xyz',
+          expires_in: 3600
+        }
+      };
+
+      axios.post.mockResolvedValueOnce(mockTokenResponse);
+
+      const token = await DigilockerService.getAccessToken();
+
+      expect(token).toBe('mock_digilocker_oauth_token_xyz');
+      expect(axios.post).toHaveBeenCalledWith(
+        expect.stringContaining('/oauth/token'),
+        expect.any(Object),
+        expect.any(Object)
+      );
+    });
+  });
+});
 const ORIGINAL_ENV = { ...process.env };
 
 const mockLogger = vi.hoisted(() => ({

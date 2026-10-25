@@ -29,6 +29,11 @@ function sanitize(value) {
     for (const [key, val] of Object.entries(value)) {
       if (val === undefined) continue;
       if (DEFAULT_PRIVATE_FIELDS.includes(key)) continue;
+      // JSON can contain an own "__proto__" key. Assigning it to a normal
+      // object mutates the prototype of the sanitized response instead of
+      // creating a data property, which can expose inherited fields or
+      // corrupt downstream serialization.
+      if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
 
       cleaned[key] = sanitize(val);
     }

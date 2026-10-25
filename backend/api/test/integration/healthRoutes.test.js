@@ -1,7 +1,55 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import express from 'express';
+// test/integration/healthRoutes.test.js (Excerpt)
 
+describe('GET /api/health - Integration Tests', () => {
+  it('logs HEALTH_SUPABASE_CHECK_FAILED when Supabase ping fails', async () => {
+    // Mock Supabase failure
+    supabaseMock.rpc.mockRejectedValueOnce(new Error('Connection timeout'));
+
+    const res = await request(app).get('/api/health');
+
+    expect(res.status).toBe(503);
+    // FIX: Align assertion with updated event name per issue #18634
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'HEALTH_SUPABASE_CHECK_FAILED',
+        error: expect.stringContaining('Connection timeout'),
+      })
+    );
+  });
+
+  it('logs HEALTH_MONGO_CHECK_FAILED when MongoDB connection fails', async () => {
+    mongoMock.db.admin().ping.mockRejectedValueOnce(new Error('Mongo unreachable'));
+
+    const res = await request(app).get('/api/health');
+
+    expect(res.status).toBe(503);
+    // FIX: Align assertion with updated event name per issue #18634
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'HEALTH_MONGO_CHECK_FAILED',
+        error: expect.stringContaining('Mongo unreachable'),
+      })
+    );
+  });
+
+  it('logs HEALTH_REDIS_CHECK_FAILED when Redis ping fails', async () => {
+    redisMock.ping.mockRejectedValueOnce(new Error('Redis connection lost'));
+
+    const res = await request(app).get('/api/health');
+
+    expect(res.status).toBe(503);
+    // FIX: Align assertion with updated event name per issue #18634
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'HEALTH_REDIS_CHECK_FAILED',
+        error: expect.stringContaining('Redis connection lost'),
+      })
+    );
+  });
+});
 // Define mocks that we can mutate per-test
 let mockSupabase = null;
 let mockSupabaseAdmin = null;

@@ -2,7 +2,11 @@ import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { ValidationError } from '../utils/errors.js';
-import { generateIftaReport } from '../services/iftaTax.js';
+import {
+  generateIftaReport,
+  MAX_IFTA_FUEL_PURCHASES,
+  MAX_IFTA_WAYPOINTS,
+} from '../services/iftaTax.js';
 
 const router = express.Router();
 
@@ -110,6 +114,8 @@ const router = express.Router();
  *                       format: date-time
  *       400:
  *         description: Missing truckId/waypoints, non-array fuelPurchases, or invalid waypoint/amount values
+ *       413:
+ *         description: Waypoint or fuel purchase batch exceeds the maximum size
  *       401:
  *         description: Authentication required
  *       403:
@@ -137,6 +143,18 @@ router.post(
       // turned a client mistake into a 500.
       if (fuelPurchases !== undefined && fuelPurchases !== null && !Array.isArray(fuelPurchases)) {
         return res.status(400).json({ error: 'fuelPurchases must be an array.' });
+      }
+
+      if (waypoints.length > MAX_IFTA_WAYPOINTS) {
+        return res.status(413).json({
+          error: `waypoints must contain at most ${MAX_IFTA_WAYPOINTS} entries.`
+        });
+      }
+
+      if (Array.isArray(fuelPurchases) && fuelPurchases.length > MAX_IFTA_FUEL_PURCHASES) {
+        return res.status(413).json({
+          error: `fuelPurchases must contain at most ${MAX_IFTA_FUEL_PURCHASES} entries.`
+        });
       }
 
       const report = generateIftaReport({

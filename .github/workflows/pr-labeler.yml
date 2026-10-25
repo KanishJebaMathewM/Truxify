@@ -20,6 +20,7 @@ jobs:
     name: Apply safe PR labels
     if: github.event.pull_request.head.repo.fork == false
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Check out trusted labeler code

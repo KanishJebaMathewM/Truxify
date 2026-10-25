@@ -1,7 +1,16 @@
 import express from 'express';
 import { supabase, redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
+// backend/api/src/routes/lookupRoutes.js (Excerpt from L1 cache catch block)
 
+try {
+  // ... L1 cache read and JSON.parse logic ...
+} catch (err) {
+  // FIX: Include cache key in structured log context per issue #8357
+  logger.warn({ err, key }, 'Malformed cached payload in lookupRoutes; refetching from source');
+  
+  // Fallback to source fetch...
+}
 const router = express.Router();
 const CACHE_TTL_SEC = 3600; // 1 hour for L2 Redis
 const L1_TTL_MS = 300 * 1000; // 5 minutes for L1 Memory Cache

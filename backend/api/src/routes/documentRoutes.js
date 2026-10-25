@@ -13,7 +13,62 @@
  *         message:
  *           type: string
  */
+// backend/api/src/routes/documentRoutes.js (Excerpt)
 
+import { Router } from 'express';
+import { authenticate } from '../middleware/auth.js';
+import { verifyDigiLockerDocument, anchorHashOnChain } from '../services/documentService.js';
+import { logger } from '../utils/logger.js';
+
+const router = Router();
+
+/**
+ * POST /api/documents/verify-digilocker
+ * Exchanges OAuth code, fetches RC/Licence, hashes via keccak256, and stores on Polygon.
+ */
+router.post('/verify-digilocker', authenticate, async (req, res) => {
+  try {
+    const { authCode, documentType } = req.body; // documentType: 'RC' | 'DL'
+    const driverId = req.user.id;
+
+    if (!authCode || !['RC', 'DL'].includes(documentType)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid request parameters: authCode and valid documentType (RC/DL) are required',
+      });
+    }
+
+    // Step A: Fetch and verify document from DigiLocker API
+    const docResult = await verifyDigiLockerDocument(authCode, documentType);
+    if (!docResult.success) {
+      logger.warn({ driverId, documentType, error: docResult.error }, '[documents] DigiLocker verification failed');
+      return res.status(400).json({ success: false, error: docResult.error });
+    }
+
+    // Step B: Anchor hash on Polygon blockchain via DocumentRegistry contract
+    const txReceipt = await anchorHashOnChain({
+      driverId,
+      documentType,
+      documentHash: docResult.documentHash,
+      metadataUri: docResult.metadataUri,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        verified: true,
+        documentType,
+        txHash: txReceipt.transactionHash,
+        status: 'Govt Verified',
+      },
+    });
+  } catch (err) {
+    logger.error({ err, userId: req.user?.id }, '[documents] Unexpected error in POST /verify-digilocker');
+    return res.status(500).json({ success: false, error: 'Internal server error during document verification' });
+  }
+});
+
+export default router;
 import express from 'express';
 import multer from 'multer';
 import { uploadDriverDocument } from '../controllers/documentController.js';

@@ -8,9 +8,32 @@ import {
   isFamilyRevoked,
 } from '../security/tokenFamilyManager.js';
 
-const supabaseUrl = process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || 'placeholder-key';
-export const supabase = createClient(supabaseUrl, supabaseKey);
+let supabaseClient = null;
+
+/**
+ * Returns the service-role Supabase client used for refresh-token persistence.
+ * Fails closed instead of falling back to the anon key or a placeholder host.
+ */
+export function getSupabaseClient() {
+  if (supabaseClient) return supabaseClient;
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error(
+      'Refresh token service is not configured: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required'
+    );
+  }
+
+  supabaseClient = createClient(supabaseUrl, supabaseKey);
+  return supabaseClient;
+}
+
+export const supabase = {
+  from(...args) {
+    return getSupabaseClient().from(...args);
+  },
+};
 
 export const REFRESH_TOKEN_EXPIRY_DAYS = 30;
 

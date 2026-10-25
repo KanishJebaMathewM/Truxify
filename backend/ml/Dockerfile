@@ -11,13 +11,13 @@ RUN apt-get update && \
 RUN groupadd -g 1001 appgroup && \
     useradd -u 1001 -g appgroup -s /bin/sh -d /app appuser
 
+# backend/ml/Dockerfile (Excerpt)
+
 WORKDIR /app
+COPY . /app
 
-COPY requirements.txt .
-
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY --chown=appuser:appgroup . .
+# FIX: Update module path from app.main:app to main:app per issue #2346
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"] . .
 
 USER appuser
 

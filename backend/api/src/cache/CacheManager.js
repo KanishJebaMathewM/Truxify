@@ -12,7 +12,46 @@ import {
   getStats as _getInvalidatorStats,
 } from './CacheInvalidator.js';
 import logger from '../middleware/logger.js';
+// backend/api/src/cache/CacheManager.js
 
+import logger from '../middleware/logger.js';
+
+export async function getCacheItem(key) {
+  try {
+    // Redis/Cache get operation
+    const value = await redisClient.get(key);
+    return value ? JSON.parse(value) : null;
+  } catch (err) {
+    // Pass structured error object with metadata context
+    logger.error('Cache get operation failed', { 
+      key, 
+      error: err,
+      message: err.message,
+      stack: err.stack,
+      code: err.code 
+    });
+    return null;
+  }
+}
+
+export async function setCacheItem(key, value, ttl) {
+  try {
+    const serialized = JSON.stringify(value);
+    if (ttl) {
+      await redisClient.setex(key, ttl, serialized);
+    } else {
+      await redisClient.set(key, serialized);
+    }
+  } catch (err) {
+    logger.error('Cache set operation failed', { 
+      key, 
+      error: err,
+      message: err.message,
+      stack: err.stack,
+      code: err.code 
+    });
+  }
+}
 let redisClient = null;
 let initialized = false;
 

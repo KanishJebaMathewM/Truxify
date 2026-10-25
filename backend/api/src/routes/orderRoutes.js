@@ -257,6 +257,25 @@ router.get('/load-offers', authenticate, userLimiter, getLoadOffers);
  *       429:
  *         description: Rate limited
  */
+// backend/api/src/routes/orderRoutes.js (Excerpt around rate limiter definition)
+
+import rateLimit from 'express-rate-limit';
+
+// ✅ Configured verifyDeliveryLimiter to key on authenticated user ID with IP fallback
+export const verifyDeliveryLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 30,                  // limit each user to 30 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    // Key primarily by authenticated driver/user ID to prevent shared NAT blocking
+    return req.user?.id || req.ip;
+  },
+  message: {
+    success: false,
+    error: 'Too many delivery verification requests from this account, please try again later.',
+  },
+});
 router.put('/:id/milestones', authenticate, userLimiter, requirePolicy('milestone:update'), milestoneLimiter, requireIdempotency(3600), validateParams(paramIdSchema), validateBody(updateMilestoneSchema), async (req, res) => {
   const orderId = req.params.id;
   const { milestone } = req.body;

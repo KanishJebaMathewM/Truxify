@@ -11,6 +11,7 @@ import os
 from cryptography.fernet import Fernet, MultiFernet, InvalidToken
 
 from threading import RLock
+from .subscription_owner import SubscriptionOwner
 
 from .round_recovery import (
     MAX_CLIENTS, RoundRecoveryError, SnapshotUnavailableError, SnapshotWriteError, commit as commit_snapshot,
@@ -137,8 +138,7 @@ class FederatedServer:
         self.round_completed = False
         self.selected_clients = []
         self.current_round = None
-        self.pubsub = None
-        self._consumer_thread = None
+        self._subscription = SubscriptionOwner()
         self.encryption_key: Optional[bytes] = None
         self.historical_keys: List[bytes] = []
         self.cipher = None
@@ -493,54 +493,43 @@ class FederatedServer:
                     consumed += 1
         return consumed
 
+    @property
+    def pubsub(self):
+        return self._subscription.pubsub
+
+    @property
+    def _consumer_thread(self):
+        return self._subscription.thread
+
     def start_update_consumer(self):
-        """Start a background listener thread on federated:updates channel."""
-        if getattr(self, '_consumer_thread', None) is not None:
-            return
+        """Idempotently start one native listener; refuse draining overlap."""
+        def _on_message(message):
+            if not message or message.get('type') != 'message':
+                return
+            try:
+                raw_data = message.get('data')
+                if isinstance(raw_data, bytes):
+                    raw_data = raw_data.decode('utf-8')
+                event = json.loads(raw_data)
+                if event.get('type') == 'client_update':
+                    client_id = event.get('client_id')
+                    if client_id and client_id in self.selected_clients:
+                        key = f'federated:update:{client_id}'
+                        encrypted = atomic_getdel(self.redis, key)
+                        if encrypted:
+                            self.receive_client_update(client_id, encrypted)
+            except Exception as exc:
+                logger.error(f"Error in federated update consumer: {exc}")
 
         try:
-            self.pubsub = self.redis.pubsub()
+            return self._subscription.start(self.redis, 'federated:updates', _on_message)
+        except Exception as exc:
+            logger.warning(f"Could not start federated subscription: {exc}")
+            return False
 
-            def _on_message(message):
-                if not message or message.get('type') != 'message':
-                    return
-                try:
-                    raw_data = message.get('data')
-                    if isinstance(raw_data, bytes):
-                        raw_data = raw_data.decode('utf-8')
-                    event = json.loads(raw_data)
-                    if event.get('type') == 'client_update':
-                        client_id = event.get('client_id')
-                        if client_id and client_id in self.selected_clients:
-                            key = f'federated:update:{client_id}'
-                            encrypted = atomic_getdel(self.redis, key)
-                            if encrypted:
-                                self.receive_client_update(client_id, encrypted)
-                except Exception as exc:
-                    logger.error(f"Error in federated update consumer: {exc}")
-
-            self.pubsub.subscribe(**{'federated:updates': _on_message})
-            self._consumer_thread = self.pubsub.run_in_thread(daemon=True, sleep_time=0.01)
-            logger.info("📡 Federated update consumer started")
-        except Exception as e:
-            logger.warning(f"Could not start Pub/Sub update consumer: {e}")
-            self.pubsub = None
-            self._consumer_thread = None
-
-    def stop_update_consumer(self):
-        """Stop background listener thread."""
-        if getattr(self, '_consumer_thread', None) is not None:
-            try:
-                self._consumer_thread.stop()
-            except Exception:
-                pass
-            self._consumer_thread = None
-        if getattr(self, 'pubsub', None) is not None:
-            try:
-                self.pubsub.close()
-            except Exception:
-                pass
-            self.pubsub = None
+    def stop_update_consumer(self, timeout=1.0):
+        """Retire admission; return True only when the native worker drained."""
+        return self._subscription.stop(timeout)
 
     @round_synchronized
     def receive_client_update(self, client_id, encrypted_weights):

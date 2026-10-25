@@ -13,8 +13,6 @@ import 'providers/text_scale_provider.dart';
 import 'providers/language_provider.dart';
 import 'services/background_sync_service.dart';
 
-import 'package:provider/provider.dart';
-
 Future<void> main() async {
   // Ensure Flutter engine is initialized.
   WidgetsFlutterBinding.ensureInitialized();

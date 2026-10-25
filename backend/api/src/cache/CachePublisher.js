@@ -14,7 +14,57 @@
  *   - If Redis is unavailable, publish/subscribe becomes a no-op.
  *   - If the subscriber disconnects, it reconnects automatically (ioredis built-in).
  */
+// backend/api/src/cache/CachePublisher.js (Excerpt)
 
+import logger from '../middleware/logger.js';
+
+export class CachePublisher {
+  constructor(redisClient) {
+    this.redisClient = redisClient;
+  }
+
+  /**
+   * Safely parses an incoming pub/sub message.
+   * @param {string} channel - The Redis channel name
+   * @param {string|Buffer} rawMessage - The raw message payload
+   * @returns {Object|null} Parsed JSON object or null if parsing fails
+   */
+  parseMessage(channel, rawMessage) {
+    try {
+      if (typeof rawMessage !== 'string') {
+        rawMessage = String(rawMessage);
+      }
+      return JSON.parse(rawMessage);
+    } catch (err) {
+      // ✅ Truncate message preview to prevent log flooding (max 100 chars)
+      const messagePreview = typeof rawMessage === 'string' 
+        ? rawMessage.substring(0, 100) 
+        : '[Non-string payload]';
+
+      // ✅ Log structured warning with channel and message preview for diagnostics
+      logger.error(
+        {
+          err: err.message,
+          channel,
+          messagePreview,
+        },
+        'Failed to parse incoming cache pub/sub message as JSON'
+      );
+
+      return null;
+    }
+  }
+
+  async publish(channel, messageObj) {
+    try {
+      const serialized = JSON.stringify(messageObj);
+      await this.redisClient.publish(channel, serialized);
+    } catch (err) {
+      logger.error({ err, channel }, 'Failed to publish message to Redis channel');
+      throw err;
+    }
+  }
+}
 import Redis from 'ioredis';
 import { CacheNamespace } from './CacheNamespace.js';
 import { CacheKeyBuilder } from './CacheKeyBuilder.js';

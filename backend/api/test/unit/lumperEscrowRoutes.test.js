@@ -81,6 +81,7 @@ describe('lumperEscrowRoutes', () => {
       booking_id: 'BK-10928',
       broker_address: '0x71C8418320499D12345678901234567890123456',
       estimated_fee: 350.50,
+      driver_id: 'driver-10',
     };
 
     it('successfully deposits lumper fee when requested by authorized broker', async () => {
@@ -106,6 +107,8 @@ describe('lumperEscrowRoutes', () => {
         bookingId: 'BK-10928',
         brokerAddress: validPayload.broker_address,
         estimatedFeeAmount: 350.50,
+        brokerUserId: 'broker-42',
+        driverId: 'driver-10',
       });
     });
 
@@ -200,6 +203,12 @@ describe('lumperEscrowRoutes', () => {
 
     beforeEach(() => {
       mockCurrentUser = { id: 'driver-10', role: 'driver' };
+      lumperEscrowServiceMock.getEscrowStatus.mockResolvedValue({
+        escrowId: validReleasePayload.escrow_id,
+        brokerUserId: 'broker-1',
+        driverId: 'driver-10',
+        status: 'HELD_IN_ESCROW',
+      });
     });
 
     it('successfully releases funds when driver submits valid receipt', async () => {
@@ -287,19 +296,43 @@ describe('lumperEscrowRoutes', () => {
       expect(res.body.error).toMatch(/positive finite number/i);
     });
 
-    it('returns 400 when escrow contract is not found', async () => {
-      // The service signals not-found with a ValidationError, which the route
-      // surfaces as a 400 client error.
-      lumperEscrowServiceMock.processReceiptAndRelease.mockRejectedValue(
-        new ValidationError('Lumper fee escrow not found')
-      );
+    it('returns 404 when escrow contract is not found', async () => {
+      lumperEscrowServiceMock.getEscrowStatus.mockResolvedValue(null);
 
       const res = await request(makeApp())
         .post('/api/lumper-escrow/release')
         .send(validReleasePayload);
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(404);
       expect(res.body.error).toMatch(/not found/i);
+      expect(lumperEscrowServiceMock.processReceiptAndRelease).not.toHaveBeenCalled();
+    });
+
+    it('rejects a driver who is not assigned to the escrow', async () => {
+      mockCurrentUser = { id: 'driver-99', role: 'driver' };
+
+      const res = await request(makeApp())
+        .post('/api/lumper-escrow/release')
+        .send(validReleasePayload);
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/assigned driver/i);
+      expect(lumperEscrowServiceMock.processReceiptAndRelease).not.toHaveBeenCalled();
+    });
+
+    it('fails closed for a legacy escrow without an assigned driver', async () => {
+      lumperEscrowServiceMock.getEscrowStatus.mockResolvedValue({
+        escrowId: validReleasePayload.escrow_id,
+        brokerUserId: 'broker-1',
+        status: 'HELD_IN_ESCROW',
+      });
+
+      const res = await request(makeApp())
+        .post('/api/lumper-escrow/release')
+        .send(validReleasePayload);
+
+      expect(res.status).toBe(403);
+      expect(lumperEscrowServiceMock.processReceiptAndRelease).not.toHaveBeenCalled();
     });
 
     it('returns 400 when claimedAmount exceeds estimated escrow amount', async () => {
@@ -335,6 +368,8 @@ describe('lumperEscrowRoutes', () => {
       const mockRecord = {
         escrowId: 'LMP-BK-10928-171000',
         bookingId: 'BK-10928',
+        brokerUserId: 'user-broker-1',
+        driverId: 'driver-10',
         status: 'HELD_IN_ESCROW',
       };
       lumperEscrowServiceMock.getEscrowStatus.mockResolvedValue(mockRecord);
@@ -351,6 +386,22 @@ describe('lumperEscrowRoutes', () => {
 
       const res = await request(makeApp())
         .get('/api/lumper-escrow/LMP-NONEXISTENT');
+
+      expect(res.status).toBe(404);
+      expect(res.body.error).toMatch(/not found/i);
+    });
+
+    it('hides an escrow from an unrelated driver', async () => {
+      mockCurrentUser = { id: 'driver-99', role: 'driver' };
+      lumperEscrowServiceMock.getEscrowStatus.mockResolvedValue({
+        escrowId: 'LMP-BK-10928-171000',
+        brokerUserId: 'user-broker-1',
+        driverId: 'driver-10',
+        status: 'HELD_IN_ESCROW',
+      });
+
+      const res = await request(makeApp())
+        .get('/api/lumper-escrow/LMP-BK-10928-171000');
 
       expect(res.status).toBe(404);
       expect(res.body.error).toMatch(/not found/i);

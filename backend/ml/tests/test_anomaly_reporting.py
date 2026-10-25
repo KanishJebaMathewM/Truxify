@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -94,7 +94,8 @@ def native_service(store, kind="driver_behavior", features=2):
     assert model.threshold > 0  # Actual native calibration; no neural mock.
     service.models = {kind: model}
     service.scalers = {kind: scaler}
-    service._feature_buffers = {}
+    service._max_feature_buffers = 4096
+    service._feature_buffers = OrderedDict()
     service.anomaly_history = deque(maxlen=1000)
     service.alert_thresholds = {"low": 1.5, "medium": 2.0, "high": 3.0}
     # Warm actual TensorFlow prediction before concurrency barriers.
@@ -327,3 +328,19 @@ def test_actual_mounted_asgi_cancellation_retains_native_delivery_owner(
             )
 
     asyncio.run(scenario())
+
+
+def test_native_reporting_retains_commit_order_across_window_eviction(service, store):
+    service._max_feature_buffers = 2
+    reports = [service.detect_anomaly(
+        "driver_behavior", np.array([[100.0, 100.0]]), entity
+    ) for entity in ("a", "b", "c", "b")]
+    assert all(r["alert_delivery"] == "published" for r in reports)
+    assert [r["sequence"] for r in reports] == [1, 2, 3, 4]
+    assert [r["window_observations"] for r in reports] == [1, 1, 1, 2]
+    assert list(service._feature_buffers) == [
+        ("driver_behavior", "c"), ("driver_behavior", "b")
+    ]
+    assert [r["entity_key"] for r in service.get_anomaly_history()] == ["a", "b", "c", "b"]
+    cached = json.loads(store.client.get("anomaly:latest:driver_behavior"))
+    assert cached["sequence"] == 4 and cached["window_observations"] == 2

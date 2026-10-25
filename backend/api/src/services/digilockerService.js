@@ -5,6 +5,29 @@ import { supabase, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 
 const DIGILOCKER_TIMEOUT_MS = 10000;
+// backend/api/src/services/digilockerService.js (Excerpt)
+
+export async function storeDigiLockerVerification({ driverId, documentType, documentData, blockchainTxHash }) {
+  try {
+    // FIX: Use correct schema columns (is_govt_verified, blockchain_tx_hash) and remove phantom columns per issue #8821
+    const { data, error } = await supabase
+      .from('driver_documents')
+      .upsert({
+        driver_id: driverId,
+        document_type: documentType,
+        document_data: documentData,
+        is_govt_verified: true,
+        blockchain_tx_hash: blockchainTxHash,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'driver_id, document_type' });
+
+    if (error) {
+      logger.error({ err: error, driverId }, '[digilockerService] Failed to persist driver document verification in Supabase');
+      return {
+        success: false,
+        error: `Database upsert failed: ${error.message}`,
+      };
+    }
 // Inside backend/api/src/services/digilockerService.js
 
 // --- BEFORE (Incorrect columns & swallowed errors):
@@ -42,6 +65,18 @@ return { success: true };
 // truthy string, so it must be compared explicitly before any on-chain write.
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
+    return {
+      success: true,
+      data,
+    };
+  } catch (err) {
+    logger.error({ err, driverId }, '[digilockerService] Unexpected exception during DigiLocker document storage');
+    return {
+      success: false,
+      error: `Internal error: ${err.message}`,
+    };
+  }
+}
 class DigilockerService {
   constructor() {
     this.clientId = process.env.DIGILOCKER_CLIENT_ID;

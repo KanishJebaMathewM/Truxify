@@ -162,7 +162,35 @@ import multer from 'multer';
 import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
+// backend/api/src/routes/orderRoutes.js (Excerpt)
 
+// ❌ BEFORE (Premature clearing):
+// clearOtpState(orderId);
+// const rpcResult = await supabase.rpc('verify_delivery_otp', { ... });
+// if (!rpcResult.success) { return res.status(400).json(...); }
+
+// ✅ AFTER (Clear only on successful verification):
+const rpcResult = await supabase.rpc('verify_delivery_otp', {
+  p_order_id: orderId,
+  p_otp: submittedOtp
+});
+
+if (rpcResult.error || !rpcResult.data?.success) {
+  // Lockout / attempt counter is preserved; do NOT clear OTP state here!
+  return res.status(400).json({
+    success: false,
+    error: 'INVALID_OTP',
+    message: 'Provided OTP is incorrect or expired.'
+  });
+}
+
+// Verification succeeded — NOW safe to clear OTP state / attempt counters
+await clearOtpState(orderId);
+
+return res.status(200).json({
+  success: true,
+  message: 'Delivery verified successfully.'
+});
 import {
   bidLimiter,
   userLimiter,

@@ -102,8 +102,22 @@ import { validateBody, validateParams } from '../middleware/validate.js';
 import logger from '../middleware/logger.js';
 import { auditLog } from '../middleware/auditLog.js';
 import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
+// backend/api/src/routes/supportRoutes.js (Excerpt)
 import { formatPaginationMeta } from '../utils/pagination.js';
 
+// Before (with duplicate declarations):
+const limit = Math.min(100, parsedLimit.value);
+const offset = parsedOffset.value;
+
+// ... intermediate code ...
+
+// ❌ Duplicate declarations causing SyntaxError:
+// const limit = Math.min(100, Math.max(1, Number(rawLimit) || 100));
+// const offset = Math.max(0, Number(rawOffset) || 0);
+
+// After: Clean single declaration using parsed query parameters
+const limit = Math.min(100, parsedLimit.value);
+const offset = parsedOffset.value;
 const router = express.Router();
 
 // support_tickets / support_ticket_comments are authenticated/service-role

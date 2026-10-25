@@ -64,6 +64,36 @@ import { checkEscrowHealth } from '../services/escrow.js';
 import logger from '../middleware/logger.js';
 import { createDefaultAggregator } from '../core/health/index.js';
 import { captureDebugException } from '../middleware/sentry.js';
+// backend/api/src/routes/healthRoutes.js (Excerpt)
+
+import express from 'express';
+import os from 'os';
+
+const router = express.Router();
+
+router.get('/', (req, res) => {
+  const memoryUsage = process.memoryUsage();
+
+  return res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    system: {
+      loadAvg: os.loadavg(),
+      freeMemory: os.freemem(),
+      totalMemory: os.totalmem(),
+    },
+    // ✅ New: Include process memory usage statistics for monitoring
+    memory: {
+      rss: memoryUsage.rss,             // Resident Set Size
+      heapTotal: memoryUsage.heapTotal,   // V8 heap total
+      heapUsed: memoryUsage.heapUsed,     // V8 heap used
+      external: memoryUsage.external,     // C++ objects bound to JavaScript objects
+      arrayBuffers: memoryUsage.arrayBuffers || 0,
+    },
+  });
+});
+
 import express from 'express';
 import * as Sentry from '@sentry/node';
 import logger from '../middleware/logger.js';

@@ -102,8 +102,31 @@ import { validateBody, validateParams } from '../middleware/validate.js';
 import logger from '../middleware/logger.js';
 import { auditLog } from '../middleware/auditLog.js';
 import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
+// backend/api/src/routes/supportRoutes.js (Excerpt)
 import { formatPaginationMeta } from '../utils/pagination.js';
 
+import express from 'express';
+import { supabase } from '../config/supabase.js';
+import logger from '../middleware/logger.js'; // ✅ Added logger import
+
+const router = express.Router();
+
+// Example endpoint catch block update across all 8 handlers:
+router.post('/tickets', async (req, res) => {
+  try {
+    const { subject, description, priority } = req.body;
+    
+    // ... ticket creation logic ...
+
+    return res.status(201).json({ success: true, data: {} });
+  } catch (err) {
+    // ✅ Added server-side error logging with route context
+    logger.error({ err }, 'Internal Server Error in POST /api/support/tickets');
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+export default router;
 const router = express.Router();
 
 // support_tickets / support_ticket_comments are authenticated/service-role

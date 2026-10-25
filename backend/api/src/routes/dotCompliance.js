@@ -24,7 +24,7 @@ router.post('/evaluate', (req, res) => {
             data: report
         });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return res.status(error.statusCode || 500).json({ error: error.message });
     }
 });
 

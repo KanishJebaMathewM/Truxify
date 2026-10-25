@@ -50,23 +50,29 @@ export const SOCKET_RATE_LIMIT_DEFAULTS = {
  */
 export function createSocketRateLimiter(options = {}) {
   // Token refill measures elapsed time, independent of wall-clock adjustments.
-  const now = options.now ?? (() => performance.now());
+  const now = typeof options.now === 'function' ? options.now : () => performance.now();
 
   let refillPerSecond = options.refillPerSecond ?? SOCKET_RATE_LIMIT_DEFAULTS.refillPerSecond;
   let capacity = options.capacity ?? SOCKET_RATE_LIMIT_DEFAULTS.capacity;
-  const maxOverRate = options.maxOverRate ?? SOCKET_RATE_LIMIT_DEFAULTS.maxOverRate;
+  let maxOverRate = options.maxOverRate ?? SOCKET_RATE_LIMIT_DEFAULTS.maxOverRate;
 
   if (!Number.isFinite(refillPerSecond) || refillPerSecond <= 0) {
     refillPerSecond = SOCKET_RATE_LIMIT_DEFAULTS.refillPerSecond;
   }
   if (!Number.isFinite(capacity) || capacity <= 0) capacity = SOCKET_RATE_LIMIT_DEFAULTS.capacity;
+  if (!Number.isSafeInteger(maxOverRate) || maxOverRate < 0) {
+    maxOverRate = SOCKET_RATE_LIMIT_DEFAULTS.maxOverRate;
+  }
 
   let tokens = capacity;
   let lastRefill = now();
+  if (!Number.isFinite(lastRefill)) lastRefill = 0;
   let overRateCount = 0;
 
   function refill() {
     const current = now();
+    if (!Number.isFinite(current)) return;
+    if (!Number.isFinite(lastRefill)) lastRefill = current;
     const elapsedMs = current - lastRefill;
     if (elapsedMs <= 0) return;
     lastRefill = current;

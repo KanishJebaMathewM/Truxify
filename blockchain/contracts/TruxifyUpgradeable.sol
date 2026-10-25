@@ -184,7 +184,7 @@ contract TruxifyUpgradeable is
         // ERC20 has no such selector, so every vote() would revert. Reject tokens
         // that do not implement IVotes at configuration time.
         (bool success, ) = token.staticcall(
-            abi.encodeWithSelector(IVotes.getPastVotes.selector, address(this), block.number)
+            abi.encodeWithSelector(IVotes.getPastVotes.selector, address(this), block.number - 1)
         );
         require(success, "Governance token must implement IVotes");
         governanceToken = IERC20(token);

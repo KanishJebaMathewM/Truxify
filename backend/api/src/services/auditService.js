@@ -6,11 +6,12 @@
 import { supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { signLogBatch, generateLogId } from '../lib/logSigner.js';
+import { getAuditSigningSecret } from '../config/auditSigningSecret.js';
 import { getEventSeverity } from '../lib/auditEventTypes.js';
 
 const BATCH_SIZE = 50;
 const FLUSH_INTERVAL_MS = 2000;
-const SIGNING_SECRET = process.env.AUDIT_SIGNING_SECRET || 'truxify-audit-signing-secret';
+
 export const MAX_AUDIT_EXPORT_ROWS = 10000;
 const AUDIT_EXPORT_PAGE_SIZE = 1000;
 
@@ -105,7 +106,7 @@ async function flushAuditLogs() {
 
     try {
         // Sign the batch for tamper detection
-        const signature = signLogBatch(batchToWrite, SIGNING_SECRET);
+        const signature = signLogBatch(batchToWrite, getAuditSigningSecret());
 
         const { error } = await supabaseAdmin
             .from('audit_logs')

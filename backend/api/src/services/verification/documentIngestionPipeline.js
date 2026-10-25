@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import logger from '../../middleware/logger.js';
 import { validateDocumentBuffer, detectDocumentMimeType } from '../../lib/documentValidation.js';
-import { scanBuffer } from '../../lib/malwareScanner.js';
+import { scanDocument } from '../../lib/malwareScanner.js';
 
 export class DocumentIngestionPipeline {
   /**
@@ -33,10 +33,10 @@ export class DocumentIngestionPipeline {
     const detectedMimeType = detectDocumentMimeType(buffer) || verifiedMime;
 
     // 2. Malware & Antivirus Scan
-    const scanResult = await scanBuffer(buffer);
-    if (!scanResult.isClean) {
-      logger.warn({ threat: scanResult.threat }, '[DocumentIngestionPipeline] Malware detected in upload');
-      throw new Error(`Malware scan rejected file: ${scanResult.threat || 'Threat detected'}`);
+    const scanResult = await scanDocument(buffer);
+    if (!scanResult?.clean) {
+      logger.warn({ threat: scanResult?.reason }, '[DocumentIngestionPipeline] Malware detected in upload');
+      throw new Error(`Malware scan rejected file: ${scanResult?.reason || 'Threat detected'}`);
     }
 
     // 3. SHA-256 Content Hash Calculation

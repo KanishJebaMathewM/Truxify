@@ -81,4 +81,18 @@ describe('iotTelemetryWorker SLA windows', () => {
     expect(res.isCriticalBreach).toBe(true);
     expect(res.maxAllowedExcursionMins).toBe(0);
   });
+
+  it('fails closed without calling the ML service when ML_API_KEY is not configured', async () => {
+    vi.resetModules();
+    vi.stubEnv('ML_API_KEY', '');
+    const freshWorker = await import('../../src/services/iotTelemetryWorker.js');
+    const id = load();
+    freshWorker.registerCargoSLA(id, { minTempCelsius: 2, maxTempCelsius: 8 });
+    await freshWorker.ingestTelemetryFrame(frame(id, 5));
+
+    await expect(freshWorker.evaluateViaMlService(id)).rejects.toMatchObject({
+      status: 503,
+    });
+    vi.unstubAllEnvs();
+  });
 });

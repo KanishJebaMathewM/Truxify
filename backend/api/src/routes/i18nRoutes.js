@@ -60,8 +60,12 @@ router.post('/translate', async (req, res) => {
     try {
         const { key, variables, locale = 'en-IN' } = req.body;
 
-        if (!key) {
-            return res.status(400).json({ error: 'key is required' });
+        if (typeof key !== 'string' || key.trim() === '' || key.length > 256) {
+            return res.status(400).json({ error: 'key must be a non-empty string of at most 256 characters' });
+        }
+
+        if (!SUPPORTED_LOCALES.includes(locale)) {
+            return res.status(400).json({ error: 'Unsupported locale' });
         }
 
         const translated = await translate(key, variables || {}, locale);

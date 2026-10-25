@@ -1,5 +1,25 @@
 import { DomainError } from './domainError.js';
 import { policy } from '../../security/policyEngine.js';
+import { orderRepository } from '../../core/container.js';
+// backend/api/src/services/order/orderValidationService.js (Excerpt)
+
+import logger from '../../middleware/logger.js';
+
+// ... inside assertLoadOfferAvailable function ...
+
+try {
+  // validation logic for load offer
+} catch (error) {
+  // Before: console.log("assertLoadOfferAvailable:", loadOfferId, "offer:", offer, "error:", error);
+  
+  // After: Secure, structured debug/error logging
+  logger.debug('[OrderValidation] Failed to assert load offer availability', {
+    loadOfferId,
+    error: error.message
+  });
+  
+  throw error;
+}
 
 export class OrderValidationService {
   constructor({ supabase, orderRepository, logger } = {}) {

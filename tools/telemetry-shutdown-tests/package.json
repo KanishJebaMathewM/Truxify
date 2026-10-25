@@ -1,0 +1,5 @@
+{
+  "name": "truxify-telemetry-shutdown-tests", "private": true, "type": "module",
+  "scripts": {"test": "bash run.sh"},
+  "devDependencies": {"vitest": "4.1.11", "eslint": "9.39.5", "@eslint/js": "9.39.5", "globals": "17.12.0"}
+}

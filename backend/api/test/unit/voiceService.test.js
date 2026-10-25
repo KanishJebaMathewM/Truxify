@@ -17,7 +17,120 @@
  * Run with:  npm run test:unit -- test/unit/voiceService.test.js
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// backend/api/test/unit/voiceService.test.js
 
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { getBookingContext } from '../../src/services/voiceService.js';
+import { supabase } from '../../src/config/supabase.js';
+
+// Mock Supabase client
+vi.mock('../../src/config/supabase.js', () => ({
+  supabase: {
+    from: vi.fn(),
+  },
+}));
+
+// Mock Axios for external voice/AI model calls
+vi.mock('axios', () => ({
+  default: {
+    post: vi.fn(),
+    get: vi.fn(),
+  },
+}));
+
+describe('Voice Service - getBookingContext (#5493)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should successfully retrieve booking context when booking is found by UUID', async () => {
+    const mockBooking = { id: '123e4567-e89b-12d3-a456-426614174000', status: 'active', route: 'Chennai to Bangalore' };
+
+    const mockSelect = vi.fn().mockReturnThis();
+    const mockEq = vi.fn().mockReturnThis();
+    const mockSingle = vi.fn().mockResolvedValue({ data: mockBooking, error: null });
+
+    supabase.from.mockReturnValue({
+      select: mockSelect,
+      eq: mockEq,
+      single: mockSingle,
+    });
+
+    const result = await getBookingContext('123e4567-e89b-12d3-a456-426614174000');
+
+    expect(result).toBeDefined();
+    expect(result.booking).toEqual(mockBooking);
+    expect(supabase.from).toHaveBeenCalledWith('bookings');
+  });
+
+  it('should fall back to orders table when booking is not found', async () => {
+    const mockOrder = { id: 'ord_999', status: 'transit', origin: 'Chennai' };
+
+    // First query (bookings) returns null/error
+    const bookingSelect = vi.fn().mockReturnThis();
+    const bookingEq = vi.fn().mockReturnThis();
+    const bookingSingle = vi.fn().mockResolvedValue({ data: null, error: { message: 'Not found' } });
+
+    // Second query (orders) returns order data
+    const orderSelect = vi.fn().mockReturnThis();
+    const orderEq = vi.fn().mockReturnThis();
+    const orderSingle = vi.fn().mockResolvedValue({ data: mockOrder, error: null });
+
+    supabase.from.mockImplementation((table) => {
+      if (table === 'bookings') {
+        return { select: bookingSelect, eq: bookingEq, single: bookingSingle };
+      }
+      if (table === 'orders') {
+        return { select: orderSelect, eq: orderEq, single: orderSingle };
+      }
+    });
+
+    const result = await getBookingContext('ord_999');
+
+    expect(result).toBeDefined();
+    expect(result.order).toEqual(mockOrder);
+    expect(supabase.from).toHaveBeenCalledWith('bookings');
+    expect(supabase.from).toHaveBeenCalledWith('orders');
+  });
+
+  it('should handle display ID vs UUID routing correctly', async () => {
+    const displayId = 'TRX-CH-2026-88';
+    
+    const mockSelect = vi.fn().mockReturnThis();
+    const mockEq = vi.fn().mockReturnThis();
+    const mockSingle = vi.fn().mockResolvedValue({ data: null, error: { message: 'Not found' } });
+
+    supabase.from.mockReturnValue({
+      select: mockSelect,
+      eq: mockEq,
+      single: mockSingle,
+    });
+
+    const result = await getBookingContext(displayId);
+
+    expect(result).toBeDefined();
+    expect(result.booking).toBeNull();
+    expect(mockEq).toHaveBeenCalledWith('display_id', displayId);
+  });
+
+  it('should return graceful null / empty context when nothing is found in both tables', async () => {
+    const mockSelect = vi.fn().mockReturnThis();
+    const mockEq = vi.fn().mockReturnThis();
+    const mockSingle = vi.fn().mockResolvedValue({ data: null, error: { message: 'Not found' } });
+
+    supabase.from.mockReturnValue({
+      select: mockSelect,
+      eq: mockEq,
+      single: mockSingle,
+    });
+
+    const result = await getBookingContext('unknown_id');
+
+    expect(result).toBeDefined();
+    expect(result.booking).toBeNull();
+    expect(result.order).toBeNull();
+  });
+});
 const mockLogger = vi.hoisted(() => ({
   info: vi.fn(),
   warn: vi.fn(),

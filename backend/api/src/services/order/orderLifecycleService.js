@@ -31,7 +31,6 @@ const osrmCircuitBreaker = new CircuitBreaker('osrmRouting', {
   resetTimeoutMs: 15000,
   requestTimeoutMs: 5000,
 });
-
 const mlPriceCircuitBreaker = new CircuitBreaker('mlPricePrediction', {
   failureThreshold: 3,
   resetTimeoutMs: 15000,

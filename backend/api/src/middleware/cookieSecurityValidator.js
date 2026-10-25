@@ -130,21 +130,38 @@ export const CookieSecurityManager = {
  * @param {string} cookieStr - Raw cookie string
  * @returns {string} Hardened secure cookie string
  */
+const COOKIE_NAME_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
 export function sanitizeCookieHeader(cookieStr) {
   if (typeof cookieStr !== 'string' || cookieStr.trim() === '') {
     return '';
   }
 
   const parsed = parseCookieSecurityHeader(cookieStr);
-  if (!parsed.name || !parsed.value) {
-    return cookieStr;
+  if (!parsed.name || !COOKIE_NAME_TOKEN.test(parsed.name)) {
+    return '';
   }
 
+  // Reject header injection instead of reflecting the original string. A CRLF
+  // or semicolon in the value would let a caller append arbitrary attributes or
+  // forge another Set-Cookie header.
+  if (parsed.value !== null && /[\r\n;]/.test(parsed.value)) {
+    return '';
+  }
+
+  // Keep Max-Age, Expires, Domain, Path and any vendor attribute. Dropping
+  // them silently changed session lifetime and cookie scope.
+  const preserved = parsed.attributes.filter((attr) => {
+    const name = attr.split('=')[0].trim().toLowerCase();
+    return name !== 'httponly' && name !== 'secure' && name !== 'samesite';
+  });
+
   const attributes = [];
-  attributes.push(`${parsed.name}=${parsed.value}`);
+  attributes.push(`${parsed.name}=${parsed.value || ''}`);
   attributes.push('HttpOnly');
   attributes.push('Secure');
   attributes.push(`SameSite=${parsed.sameSite || 'Strict'}`);
+  attributes.push(...preserved);
 
   return attributes.join('; ');
 }
@@ -214,12 +231,21 @@ export function generateSecureCookieHeader(name, value, options = {}) {
     return '';
   }
 
-  const parts = [`${name.trim()}=${String(value).trim()}`];
+  const cookieName = name.trim();
+  const cookieValue = String(value).trim();
+  if (!COOKIE_NAME_TOKEN.test(cookieName) || /[\r\n;]/.test(cookieValue)) {
+    return '';
+  }
+
+  const parts = [`${cookieName}=${cookieValue}`];
 
   // Enforce security defaults while allowing custom overrides
   const isHttpOnly = options.httpOnly !== false; // default true
   const isSecure = options.secure !== false;     // default true
   const sameSite = options.sameSite || 'Strict';
+  if (!['Strict', 'Lax', 'None'].includes(sameSite)) {
+    return '';
+  }
 
   if (isHttpOnly) parts.push('HttpOnly');
   if (isSecure) parts.push('Secure');

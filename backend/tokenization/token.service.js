@@ -72,16 +72,25 @@ class TokenizationService {
             'event TradeOrderCreated(uint256 indexed orderId, uint256 tokenId, address indexed seller)'
         ];
 
+        if (!process.env.POLYGON_RPC_URL || !process.env.PRIVATE_KEY || !process.env.ASSET_TOKEN_ADDRESS) {
+            logger.warn('TokenizationService disabled: POLYGON_RPC_URL, PRIVATE_KEY, or ASSET_TOKEN_ADDRESS not set.');
+            this.provider = null;
+            this.wallet = null;
+            this.tokenAddress = null;
+            this.token = null;
+            return;
+        }
+
         this.tokenAddress = process.env.ASSET_TOKEN_ADDRESS;
-        this.provider = process.env.POLYGON_RPC_URL ? new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL) : null;
+        this.provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
         this._wallet = null;
         this._token = null;
 
         logger.info('✅ Tokenization Service initialized');
     }
-
-    _requireConfigured() {
-        if (!this.provider || !this.tokenAddress || !process.env.PRIVATE_KEY) {
+    
+        _requireConfigured() {
+        if (!this.provider || !this.tokenAddress) {
             throw new Error('TokenizationService is disabled: missing required environment variables');
         }
     }
@@ -89,12 +98,14 @@ class TokenizationService {
     // ============ Chain clients (created on first use) ============
 
     get wallet() {
-        if (!this._wallet) {
-            if (!process.env.PRIVATE_KEY) {
-                throw new Error('Tokenization chain access is not configured: set PRIVATE_KEY');
-            }
-            this._wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
+        if (this._wallet) {
+            return this._wallet;
         }
+        if (!process.env.PRIVATE_KEY) {
+            throw new Error('Tokenization chain access is not configured: set PRIVATE_KEY');
+        }
+        this._requireConfigured();
+        this._wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
         return this._wallet;
     }
 
@@ -103,13 +114,14 @@ class TokenizationService {
     }
 
     get token() {
-        if (!this._token) {
-            const address = this.tokenAddress || process.env.ASSET_TOKEN_ADDRESS;
-            if (!address) {
-                throw new Error('Tokenization chain access is not configured: set ASSET_TOKEN_ADDRESS');
-            }
-            this._token = new ethers.Contract(address, this.tokenABI, this.wallet);
+        if (this._token) {
+            return this._token;
         }
+        if (!process.env.ASSET_TOKEN_ADDRESS) {
+            throw new Error('Tokenization chain access is not configured: set ASSET_TOKEN_ADDRESS');
+        }
+        this._requireConfigured();
+        this._token = new ethers.Contract(this.tokenAddress, this.tokenABI, this.wallet);
         return this._token;
     }
 
@@ -230,7 +242,10 @@ class TokenizationService {
     async sellFraction(assetId, amount, userAddress, signer) {
         try {
             this._requireConfigured();
-            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer || this.wallet);
+            if (!signer) {
+                throw new Error('A verified user signer is required to sell fractions.');
+            }
+            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer);
             const tx = await userContract.sellFraction(
                 assetId,
                 ethers.parseEther(amount.toString()),

@@ -13,13 +13,16 @@ import logger from '../middleware/logger.js';
 import { DomainError } from './order/domainError.js';
 import { NHAI_TOLL_PLAZAS } from './tollService.js';
 
-const FASTAG_WEBHOOK_SECRET = process.env.FASTAG_WEBHOOK_SECRET || 'truxify-fastag-webhook-secret-2026';
 const MAX_PROCESSED_TRANSACTIONS = 5000;
+export const MAX_ORDER_TOLL_LEDGERS = 1000;
 
 // In-memory processed transaction ledger & active order toll accounts
 const processedTransactions = new Map();
 const orderTollLedgers = new Map();
 
+// Tolerance used when checking that a rupee amount carries at most 2 decimal
+// places (paisa). Absorbs the IEEE-754 representation error of `amount * 100`.
+const PAISA_EPSILON = 1e-6;
 
 /**
  * Rounds a monetary value to 2 decimal places (paisa precision).
@@ -42,9 +45,7 @@ function roundInr(value) {
  * @param {unknown} value
  * @returns {{ok: true, amount: number} | {ok: false}}
  */
-const PAISA_EPSILON = 1e-6;
-
-function parseAmountInr(value, isRoundAllowed = false) {
+function parseAmountInr(value) {
   if (typeof value !== 'number' && typeof value !== 'string') {
     return { ok: false };
   }
@@ -58,7 +59,7 @@ function parseAmountInr(value, isRoundAllowed = false) {
   }
 
   const paisa = amount * 100;
-  if (Math.abs(paisa - Math.round(paisa)) > PAISA_EPSILON && !isRoundAllowed) {
+  if (Math.abs(paisa - Math.round(paisa)) > PAISA_EPSILON) {
     return { ok: false };
   }
 
@@ -120,7 +121,10 @@ export function verifyFastagWebhookSignature(payloadRaw, signatureHeader) {
     return false;
   }
 
-  const secret = process.env.FASTAG_WEBHOOK_SECRET || FASTAG_WEBHOOK_SECRET;
+  const secret = process.env.FASTAG_WEBHOOK_SECRET;
+  if (!secret) {
+    return false;
+  }
   const expectedSignature = crypto
     .createHmac('sha256', secret)
     .update(typeof payloadRaw === 'string' ? payloadRaw : JSON.stringify(payloadRaw))
@@ -150,13 +154,11 @@ export async function processFastagTransaction(txData, gpsContext = null) {
 
   const { transactionId, tagId, vrn, tollPlazaId, amountInr, readerTimestamp, laneId } = txData;
 
-  const parsedAmount = parseAmountInr(amountInr, transactionId === 'TX_ROUND');
-  if (!transactionId || typeof transactionId !== 'string' || !transactionId.trim() || !parsedAmount.ok) {
+  const parsedAmount = parseAmountInr(amountInr);
+  const safeTransactionId = typeof transactionId === 'string' ? transactionId.trim() : '';
+  if (!safeTransactionId || !parsedAmount.ok) {
     throw new DomainError(400, { error: 'Invalid FASTag transaction payload' });
   }
-
-  const safeTransactionId = transactionId.trim();
-  const normalizedAmountInr = parsedAmount.amount;
 
   // Idempotency check: prevent duplicate billing
   if (processedTransactions.has(safeTransactionId)) {
@@ -168,30 +170,25 @@ export async function processFastagTransaction(txData, gpsContext = null) {
     };
   }
 
-  // 1. Locate Toll Plaza in NHAI Registry
-  const plaza = NHAI_TOLL_PLAZAS.find((p) => p.id === tollPlazaId) || {
-    id: tollPlazaId || 'UNKNOWN_PLAZA',
-    name: 'Unregistered / State Toll Plaza',
-    lat: gpsContext?.currentLat || 0,
-    lng: gpsContext?.currentLng || 0,
-    radiusMeters: 3000,
-  };
+  // 1. Locate Toll Plaza in NHAI Registry. An unregistered plaza has no
+  // authoritative coordinates, so it must not be geofenced against the
+  // caller-provided position.
+  const plaza = NHAI_TOLL_PLAZAS.find((p) => p.id === tollPlazaId) || null;
 
-  // 2. Geofence & GPS Verification (if GPS context provided)
+  // 2. Geofence and GPS verification. Missing or invalid telemetry is not
+  // evidence of presence: keep the transaction pending for manual review.
   let isGpsVerified = false;
   let distanceFromPlazaMeters = null;
 
-  if (gpsContext?.currentLat && gpsContext?.currentLng && plaza.lat && plaza.lng) {
+  if (plaza && gpsContext && gpsContext.currentLat != null && gpsContext.currentLng != null) {
     const dist = getDistanceMeters(gpsContext.currentLat, gpsContext.currentLng, plaza.lat, plaza.lng);
     if (!Number.isNaN(dist)) {
       distanceFromPlazaMeters = Math.round(dist);
-      // Verified if truck is within 3 km of the plaza
       isGpsVerified = distanceFromPlazaMeters <= (plaza.radiusMeters || 3000);
     }
-  } else {
-    // If telemetry lag, default to verified if VRN matches active order
-    isGpsVerified = true;
   }
+
+  const settlementStatus = isGpsVerified ? 'SETTLED' : 'PENDING_VERIFICATION';
 
   // 3. Match with Active Trip Order
   const matchedOrderId = gpsContext?.orderId || txData.orderId || null;
@@ -201,8 +198,8 @@ export async function processFastagTransaction(txData, gpsContext = null) {
     transactionId: safeTransactionId,
     tagId: tagId || null,
     vrn: vrn || null,
-    tollPlazaId: plaza.id,
-    plazaName: plaza.name,
+    tollPlazaId: plaza?.id || tollPlazaId || 'UNKNOWN_PLAZA',
+    plazaName: plaza?.name || 'Unregistered / State Toll Plaza',
     amountInr: parsedAmount.amount,
     readerTimestamp: readerTimestamp || new Date().toISOString(),
     laneId: laneId || 'LANE_01',
@@ -210,13 +207,24 @@ export async function processFastagTransaction(txData, gpsContext = null) {
     distanceFromPlazaMeters,
     orderId: matchedOrderId,
     driverId: matchedDriverId,
-    settlementStatus: 'SETTLED',
-    settledAt: new Date().toISOString(),
+    settlementStatus,
+    settledAt: isGpsVerified ? new Date().toISOString() : null,
   };
 
-  // 4. Update Order Toll Ledger
-  if (matchedOrderId) {
+  // 4. Update the order toll ledger only after GPS verification. Pending
+  // transactions remain in the idempotency ledger but never inflate totals.
+  if (matchedOrderId && isGpsVerified) {
     if (!orderTollLedgers.has(matchedOrderId)) {
+      if (orderTollLedgers.size >= MAX_ORDER_TOLL_LEDGERS) {
+        const oldestOrderId = orderTollLedgers.keys().next().value;
+        if (oldestOrderId !== undefined) {
+          orderTollLedgers.delete(oldestOrderId);
+          logger.warn(
+            { evictedOrderId: oldestOrderId, maxLedgers: MAX_ORDER_TOLL_LEDGERS },
+            '[fastagReconciliationService] Evicted oldest order toll ledger'
+          );
+        }
+      }
       orderTollLedgers.set(matchedOrderId, {
         orderId: matchedOrderId,
         totalTollsPaidInr: 0,
@@ -243,17 +251,20 @@ export async function processFastagTransaction(txData, gpsContext = null) {
   logger.info(
     {
       transactionId,
-      plazaName: plaza.name,
+      plazaName: reconciliationRecord.plazaName,
       amountInr: parsedAmount.amount,
       orderId: matchedOrderId,
       isGpsVerified,
+      settlementStatus,
     },
-    '[fastagReconciliationService] FASTag transaction settled successfully'
+    '[fastagReconciliationService] FASTag transaction processed'
   );
 
   return {
-    status: 'SETTLED',
-    message: `FASTag toll of ₹${parsedAmount.amount} at ${plaza.name} reconciled and settled`,
+    status: settlementStatus,
+    message: isGpsVerified
+      ? `FASTag toll of INR ${parsedAmount.amount} at ${reconciliationRecord.plazaName} reconciled and settled`
+      : `FASTag toll of INR ${parsedAmount.amount} at ${reconciliationRecord.plazaName} is pending GPS verification`,
     reconciliation: reconciliationRecord,
   };
 }
@@ -277,10 +288,11 @@ export async function reconcileOrderTolls(orderId, estimatedTollInr = 0) {
     transactions: [],
   };
 
-  const estimatedInr = safeEstimated;
   const actualTollsInr = roundInr(ledger.totalTollsPaidInr);
-  const varianceInr = roundInr(actualTollsInr - estimatedInr);
-  const isWithinBudget = actualTollsInr <= estimatedInr;
+  const varianceInr = roundInr(actualTollsInr - safeEstimated);
+  const isWithinBudget = actualTollsInr <= safeEstimated;
+
+  const estimatedInr = safeEstimated;
 
   return {
     success: true,
@@ -310,10 +322,22 @@ export function _resetState() {
   orderTollLedgers.clear();
 }
 
+/**
+ * Internal state snapshot for tests that exercise the bounded ledgers.
+ */
+export function _getStateSize() {
+  return {
+    processedTransactions: processedTransactions.size,
+    orderTollLedgers: orderTollLedgers.size,
+  };
+}
+
 export default {
   verifyFastagWebhookSignature,
   processFastagTransaction,
   reconcileOrderTolls,
   getOrderTollTransactions,
   _resetState,
+  _getStateSize,
+  MAX_ORDER_TOLL_LEDGERS,
 };

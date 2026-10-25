@@ -38,6 +38,7 @@ const mockLogger = vi.hoisted(() => ({
 const mockAcquireLock = vi.hoisted(() => vi.fn());
 const mockReleaseLock = vi.hoisted(() => vi.fn());
 const mockRenewLock = vi.hoisted(() => vi.fn());
+const mockWithLockRenewal = vi.hoisted(() => vi.fn(async (_key, _token, _ttl, fn) => fn()));
 
 // Mutable via getter so individual tests can simulate an unconfigured admin client.
 const mockSupabaseAdmin = vi.hoisted(() => ({ available: true }));
@@ -59,8 +60,7 @@ vi.mock('../../src/lib/redisLock.js', () => ({
   acquireLock: mockAcquireLock,
   releaseLock: mockReleaseLock,
   renewLock: mockRenewLock,
-  withLockRenewal: vi.fn((key, val, ttl, asyncFn) => (typeof asyncFn === 'function' ? asyncFn() : typeof val === 'function' ? val() : undefined)),
-  DEFAULT_LOCK_RENEWAL_INTERVAL_MS: 10_000,
+  withLockRenewal: mockWithLockRenewal,
   LockAcquisitionError: class LockAcquisitionError extends Error {},
 }));
 
@@ -195,8 +195,14 @@ describe('escrowReleaseReconciliation', () => {
       mockSupabaseAdmin,
     );
 
-    // Per-order lock acquired and released
+    // Per-order lock acquired, renewed around finalization, and released
     expect(mockAcquireLock).toHaveBeenCalledWith('escrow_lock:order-1', expect.any(Number));
+    expect(mockWithLockRenewal).toHaveBeenCalledWith(
+      'escrow_lock:order-1',
+      'lock-token',
+      expect.any(Number),
+      expect.any(Function)
+    );
     expect(mockReleaseLock).toHaveBeenCalledWith('escrow_lock:order-1', 'lock-token');
   });
 

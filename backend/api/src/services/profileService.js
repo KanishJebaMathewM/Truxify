@@ -42,7 +42,6 @@ export async function getCustomerStats(userId) {
       try {
         const cached = await getCachedCustomerStats(userId);
         if (cached) {
-          logger.debug({ userId }, 'Customer stats cache hit');
           return cached;
         }
       } catch (err) {
@@ -91,7 +90,6 @@ export async function getDriverDetails(userId) {
       try {
         const cached = await getCachedDriverDetails(userId);
         if (cached) {
-          logger.debug({ userId }, 'Driver details cache hit');
           return cached;
         }
       } catch (err) {

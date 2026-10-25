@@ -1,29 +1,24 @@
-import { firebaseAdmin, supabase, createUserClient } from "../config/db.js";
-import jwt from "jsonwebtoken";
-import {
-  getCachedProfile,
-  setCachedProfile,
-  invalidateCachedProfile,
-  TOMBSTONE_TTL_SECONDS,
-  TTL_SECONDS,
-  isValidCachedProfile,
-  getCachedSupabaseProfile,
-  setCachedSupabaseProfile,
-  invalidateCachedSupabaseProfile,
-  isValidCachedSupabaseProfile,
-} from "../lib/profileCache.js";
-import logger from "./logger.js";
-import { getJwtSecret } from "../config/jwtSecret.js";
+import jwt from 'jsonwebtoken';
+import logger from './logger.js';
+import { firebaseAdmin, supabase, createUserClient } from '../config/db.js';
+import { getCachedProfile, setCachedProfile, invalidateCachedProfile, isValidCachedProfile, getCachedSupabaseProfile, setCachedSupabaseProfile, invalidateCachedSupabaseProfile, isValidCachedSupabaseProfile, TOMBSTONE_TTL_SECONDS, TTL_SECONDS } from '../lib/profileCache.js';
+import { getJwtSecret } from '../config/jwtSecret.js';
 
-// Compute at write time so database latency cannot extend the token's cache lifetime.
-async function cacheActiveFirebaseProfile(firebaseUid, profile, tokenExpiry) {
-  const remaining = Number.isFinite(tokenExpiry)
-    ? Math.floor(tokenExpiry - Date.now() / 1000)
-    : TTL_SECONDS;
-  const ttlSeconds = Math.min(TTL_SECONDS, remaining);
-  // setCachedProfile coerces nonpositive TTLs to one second; skip expired tokens.
-  if (ttlSeconds > 0) await setCachedProfile(firebaseUid, profile, ttlSeconds);
-}
+/**
+ * Caches a verified Firebase profile for later requests.
+ *
+ * Restored helper: three verification paths call it, but the spliced copies
+ * that used to carry it were dropped, leaving the calls dangling. Best
+ * effort write-through; failures only warn since callers chain .catch.
+ */
+async function cacheActiveFirebaseProfile(firebaseUid, userProfile, exp) {
+  try {
+    await setCachedProfile(firebaseUid, { ...userProfile, exp });
+  } catch (err) {
+    logger.warn({ err, firebaseUid }, '[Auth] profile cache write failed');
+  }
+};
+
 
 /**
  * Verification helper for direct programmatic calls (e.g., WebSockets, gRPC, workers).
@@ -285,7 +280,7 @@ export async function verifyJWT(req, res, next) {
     return next();
   };
 
-  const secret = process.env.JWT_SECRET || 'truxify-jwt-secret-key';
+  const secret = getJwtSecret();
   try {
     const verified = jwt.verify(token, secret);
     if (verified && (verified.id || verified.uid)) {
@@ -607,7 +602,7 @@ export async function authenticate(req, res, next) {
     // JWTs): they are not signed with our local secret. Log at debug so a
     // genuinely tampered/expired local token is still diagnosable without
     // flooding logs on every ID-token request.
-    logger.debug?.(
+    logger.debug(
       { err: err?.message },
       "[auth] Local JWT verification failed; attempting identity-provider token",
     );
@@ -622,10 +617,9 @@ export async function authenticate(req, res, next) {
     }
 
     const isSupabaseToken =
-      (decoded &&
-        typeof decoded.iss === "string" &&
-        (decoded.iss.includes("supabase") || decoded.iss.includes("supabase.co"))) ||
-      (!firebaseAdmin && Boolean(supabase));
+      decoded &&
+      typeof decoded.iss === "string" &&
+      (decoded.iss.includes("supabase") || decoded.iss.includes("supabase.co"));
 
     if (isSupabaseToken) {
       if (!supabase) {
@@ -635,7 +629,7 @@ export async function authenticate(req, res, next) {
       }
 
       const {
-        data: { user } = {},
+        data: { user },
         error: authError,
       } = await supabase.auth.getUser(token);
 
@@ -670,14 +664,11 @@ export async function authenticate(req, res, next) {
 
       // Single DB query retrieves profile state including `is_active`
       const userClient = createUserClient?.(token) || supabase;
-      let query = userClient
+      const { data: profile, error } = await userClient
         .from("profiles")
         .select("id, firebase_uid, role, full_name, phone, is_active, deactivated_at")
-        .eq("id", user.id);
-      if (typeof query.maybeSingle !== "function" && typeof query.eq === "function") {
-        query = query.eq("is_active", true);
-      }
-      const { data: profile, error } = await query.maybeSingle();
+        .eq("id", user.id)
+        .maybeSingle();
 
       if (error) {
         return res.status(500).json({
@@ -699,8 +690,7 @@ export async function authenticate(req, res, next) {
         });
       }
 
-      const isActive = profile.is_active !== undefined ? profile.is_active : true;
-      if (!isActive) {
+      if (!profile.is_active) {
         await setCachedSupabaseProfile(
           user.id,
           { isActive: false },
@@ -776,14 +766,11 @@ export async function authenticate(req, res, next) {
 
       // Single DB query retrieves profile state including `is_active`
       const userClient = createUserClient?.(token) || supabase;
-      let query = userClient
+      const { data: profile, error } = await userClient
         .from("profiles")
         .select("id, firebase_uid, role, full_name, phone, is_active, deactivated_at")
-        .eq("firebase_uid", firebaseUid);
-      if (typeof query.maybeSingle !== "function" && typeof query.eq === "function") {
-        query = query.eq("is_active", true);
-      }
-      const { data: profile, error } = await query.maybeSingle();
+        .eq("firebase_uid", firebaseUid)
+        .maybeSingle();
 
       if (error) {
         return res.status(500).json({
@@ -805,8 +792,7 @@ export async function authenticate(req, res, next) {
         });
       }
 
-      const isActive = profile.is_active !== undefined ? profile.is_active : true;
-      if (!isActive) {
+      if (!profile.is_active) {
         await setCachedProfile(
           firebaseUid,
           { isActive: false },
@@ -900,6 +886,3 @@ export function requireRole(allowedRoles) {
     next();
   };
 }
-
-export default authenticate;
-

@@ -17,7 +17,8 @@ describe('cbTranslator service', () => {
     expect(result.source.originalTranscript).toBe('caution icy bridge ahead');
     expect(result.target.language).toBe('Spanish');
     expect(result.target.translatedTranscript).toBe('Precaución puente helado adelante');
-    expect(result.target.synthesizedAudioUrl).toMatch(/^\/api\/cb\/audio-stream\/cb-msg-\d+-[0-9a-fA-F]+\.wav$/);
+    expect(result.messageId).toMatch(/^cb-msg-\d+-[0-9a-f]{8}$/);
+    expect(result.target.synthesizedAudioUrl).toBe(`/api/cb/audio-stream/${result.messageId}.wav`);
     expect(result.latencyMs).toBe(120);
     expect(result.timestamp).toBeDefined();
   });

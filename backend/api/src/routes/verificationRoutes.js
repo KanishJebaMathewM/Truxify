@@ -12,6 +12,21 @@ import { scanDocument, MalwareScanError } from '../lib/malwareScanner.js';
 import { PolicyError, policy } from '../security/policyEngine.js';
 import digilockerService from '../services/digilockerService.js';
 import { validateDocumentBuffer, DocumentValidationError } from '../lib/documentValidation.js';
+import multer from 'multer';
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // Limit file size to 5MB
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (allowedMimeTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only JPEG, PNG, and WEBP images are allowed.'), false);
+    }
+  },
 // backend/api/src/routes/verificationRoutes.js
 import zkpService from '../services/zkp/zkp.service.js';
 

@@ -7,6 +7,7 @@ const loggerWarnMock = vi.fn();
 const redisSetMock = vi.fn();
 const redisDelMock = vi.fn();
 const redisExpireMock = vi.fn();
+const redisEvalMock = vi.fn();
 const spanSetAttributesMock = vi.fn();
 
 vi.mock('node-cron', () => ({
@@ -17,6 +18,10 @@ vi.mock('node-cron', () => ({
 
 vi.mock('../../src/services/notificationService.js', () => ({
   sendPushNotification: sendPushNotificationMock,
+}));
+
+vi.mock('../../src/services/escrow.js', () => ({
+  submitEscrowRefund: vi.fn(), confirmEscrowRefund: vi.fn(),
 }));
 
 vi.mock('../../src/middleware/logger.js', () => ({
@@ -50,6 +55,7 @@ vi.mock('../../src/config/db.js', () => ({
     set: redisSetMock,
     del: redisDelMock,
     expire: redisExpireMock,
+    eval: redisEvalMock,
   },
 }));
 
@@ -78,9 +84,10 @@ describe('staleOrderWorker cross-replica concurrency', () => {
     loggerInfoMock.mockClear();
     loggerWarnMock.mockClear();
     spanSetAttributesMock.mockReset();
-    redisSetMock.mockReset().mockResolvedValue(true);
+    redisSetMock.mockReset().mockResolvedValue('OK');
     redisDelMock.mockReset().mockResolvedValue(true);
     redisExpireMock.mockReset().mockResolvedValue(true);
+    redisEvalMock.mockReset().mockResolvedValue(1);
     vi.resetModules();
     orderRepository = buildRepository();
     ({ reconcileStaleOrders } = await import('../../src/workers/staleOrderWorker.js'));
@@ -133,7 +140,8 @@ describe('staleOrderWorker cross-replica concurrency', () => {
 
     await reconcileStaleOrders(orderRepository);
 
-    expect(redisDelMock).toHaveBeenCalledWith('stale:order:cancellation:lock');
+    expect(redisEvalMock).toHaveBeenCalledWith(expect.stringContaining("redis.call('DEL'"), 1, 'stale:order:cancellation:lock', expect.any(String));
+    expect(redisDelMock).not.toHaveBeenCalled();
   });
 
   it('sweeps in bounded batches (env-configurable batch size)', async () => {
@@ -179,15 +187,20 @@ describe('staleOrderWorker cross-replica concurrency', () => {
 
     let releaseInFlight;
     const gate = new Promise((resolve) => { releaseInFlight = resolve; });
-    redisDelMock.mockImplementation(() => {
+    let finishRelease;
+    const release = new Promise((resolve) => { finishRelease = resolve; });
+    redisEvalMock.mockImplementation((script) => {
+      if (!script.includes("redis.call('DEL'")) return Promise.resolve(1);
       releaseInFlight();
-      return Promise.resolve(true);
+      return release;
     });
 
     const p1 = firstCall(orderRepository);
     await gate;
     const p2 = firstCall(orderRepository);
-    await Promise.all([p1, p2]);
+    await p2;
+    finishRelease(1);
+    await p1;
 
     expect(orderRepository.findStalePendingOrders).toHaveBeenCalledTimes(1);
   });

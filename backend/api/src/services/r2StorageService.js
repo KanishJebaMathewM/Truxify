@@ -1,4 +1,5 @@
 import fileValidator from '../utils/fileValidator.js';
+import logger from '../middleware/logger.js';
 
 const { computeSHA256Hash } = fileValidator;
 
@@ -34,19 +35,20 @@ export class DeleteObjectCommand {
 try {
     const aws = await import('@aws-sdk/client-s3');
     S3ClientClass = aws.S3Client;
-} catch {
-    // Fallback S3 client implementation using fetch/REST API if package not present
-    S3ClientClass = class MockableS3Client {
-        constructor(config) {
-            this.config = config;
-        }
-        async send(command) {
-            return { $metadata: { httpStatusCode: 200 } };
-        }
-    };
+} catch (err) {
+    // The SDK is optional for environments that never touch object storage, but
+    // it is not safe to substitute a client that acknowledges writes it never
+    // performed. Leave the class null so upload/delete paths fail closed.
+    S3ClientClass = null;
+    if (R2_ENDPOINT && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY) {
+        logger.error(
+            { event: 'R2_SDK_UNAVAILABLE', error: err?.message || String(err) },
+            '[r2StorageService] R2 is configured but @aws-sdk/client-s3 could not be loaded'
+        );
+    }
 }
 
-let r2ClientInstance = (R2_ENDPOINT && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY)
+let r2ClientInstance = (R2_ENDPOINT && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && S3ClientClass)
     ? new S3ClientClass({
         region: 'auto',
         endpoint: R2_ENDPOINT,
@@ -65,6 +67,23 @@ let r2ClientInstance = (R2_ENDPOINT && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY)
 export const isR2Configured = () => {
     return Boolean(r2ClientInstance && R2_BUCKET_NAME);
 };
+
+/**
+ * Reports whether the optional S3 SDK loaded successfully. A false value with
+ * all three R2 variables set means uploads and deletes must fail closed.
+ * @returns {boolean}
+ */
+export const isR2SdkAvailable = () => Boolean(S3ClientClass);
+
+function requireR2Client() {
+    if (r2ClientInstance) return;
+    if (R2_ENDPOINT && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && !S3ClientClass) {
+        throw new Error(
+            'Cloudflare R2 is not configured: @aws-sdk/client-s3 is not available. Install the SDK or unset the R2 variables.'
+        );
+    }
+    throw new Error('Cloudflare R2 is not configured. Please set R2 environment variables.');
+}
 
 /**
  * Returns the active R2 S3Client instance.
@@ -126,9 +145,7 @@ export const validateStorageKey = (objectKey) => {
  * @returns {Promise<Object>} - Object containing publicUrl, fileHash, and objectKey
  */
 export const uploadToR2 = async (file, objectKey) => {
-    if (!r2ClientInstance) {
-        throw new Error('Cloudflare R2 is not configured. Please set R2 environment variables.');
-    }
+    requireR2Client();
     if (!file || !file.buffer || !Buffer.isBuffer(file.buffer)) {
         throw new Error('Invalid file object provided for upload');
     }
@@ -173,10 +190,7 @@ export const uploadToR2 = async (file, objectKey) => {
  */
 export const deleteDocument = async (objectKey) => {
     validateStorageKey(objectKey);
-
-    if (!r2ClientInstance) {
-        throw new Error('Cloudflare R2 is not configured. Please set R2 environment variables.');
-    }
+    requireR2Client();
 
     try {
         const deleteParams = {
@@ -205,6 +219,7 @@ export default {
     deleteDocument,
     validateStorageKey,
     isR2Configured,
+    isR2SdkAvailable,
     getR2Client,
     setR2ClientForTesting,
     resetR2Client,

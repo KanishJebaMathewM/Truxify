@@ -1,6 +1,3 @@
-/**
- * Unit tests for backend/api/src/lib/reverseGeocode.js
- */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockLogger = vi.hoisted(() => ({

@@ -1,0 +1,12 @@
+{
+  "name": "truxify-dlq-attempt-tests",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "vitest": "4.1.11",
+    "eslint": "9.39.5",
+    "@eslint/js": "9.39.5",
+    "globals": "17.12.0"
+  }
+}

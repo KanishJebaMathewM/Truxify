@@ -5,7 +5,6 @@ import { supabase, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 
 const DIGILOCKER_TIMEOUT_MS = 10000;
-
 // Sentinel stored on profiles that have not linked a wallet yet. It is a
 // truthy string, so it must be compared explicitly before any on-chain write.
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
@@ -57,7 +56,6 @@ class DigilockerService {
       logger.warn('DocumentRegistry/KYC contract not configured: missing RPC, key, or contract address');
     }
   }
-
   /**
    * Returns true when every configured contract is deployed at its configured
    * address and answers an ABI probe, so a typo'd or cross-contract address is

@@ -730,7 +730,10 @@ describe('FuelAdvisorService._getAverageEngineLoad', () => {
 
     expect(load).toBe(50);
     expect(logger.error).toHaveBeenCalledWith(
-      expect.stringContaining('Error computing engine load: Unexpected network failure'),
+      expect.objectContaining({
+        event: 'FUEL_ENGINE_LOAD_ERROR',
+      }),
+      expect.any(String)
     );
   });
 });

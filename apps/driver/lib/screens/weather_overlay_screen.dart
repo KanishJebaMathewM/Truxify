@@ -120,7 +120,7 @@ class _WeatherOverlayScreenState extends State<WeatherOverlayScreen> {
                     color: seg.intersectsWeather ? Colors.red : Colors.blue,
                     borderRadius: BorderRadius.circular(8),
                     boxShadow: seg.intersectsWeather 
-                      ? [BoxShadow(color: Colors.red.withOpacity(0.5), blurRadius: 8, spreadRadius: 2)]
+                      ? [BoxShadow(color: Colors.red.withValues(alpha: 0.5), blurRadius: 8, spreadRadius: 2)]
                       : null,
                   ),
                 ),

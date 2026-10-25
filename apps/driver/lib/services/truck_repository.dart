@@ -22,7 +22,7 @@ class TruckRepository {
     final response = await _client
         .from('trucks')
         .select()
-        .eq('driver_id', driverId)
+        .eq('owner_id', driverId)
         .maybeSingle();
 
     if (response == null) {
@@ -40,17 +40,8 @@ class TruckRepository {
         .eq('truck_id', truckId)
         .order('created_at', ascending: false);
 
-    if (response is! List) {
-      throw StateError('Unexpected ticket response type');
-    }
-
     return response
-        .map((item) {
-          if (item is Map<String, dynamic>) return item;
-          if (item is Map) return Map<String, dynamic>.from(item);
-          throw StateError('Unexpected ticket item type');
-        })
-        .map(TruckMaintenanceTicket.fromJson)
+        .map((item) => TruckMaintenanceTicket.fromJson(Map<String, dynamic>.from(item as Map)))
         .toList(growable: false);
   }
 
@@ -120,14 +111,9 @@ class TruckRepository {
         .select()
         .eq('truck_id', truckId)
         .order('expires_at', ascending: true);
-    if (response is! List) {
-      throw StateError('Unexpected truck document response type');
-    }
-    return response.map((item) {
-      if (item is Map<String, dynamic>) return item;
-      if (item is Map) return Map<String, dynamic>.from(item);
-      throw StateError('Unexpected truck document item type');
-    }).toList(growable: false);
+    return response
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList(growable: false);
   }
 
   Future<List<String>> uploadMaintenancePhotos({

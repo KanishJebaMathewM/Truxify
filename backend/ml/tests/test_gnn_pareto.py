@@ -46,7 +46,7 @@ class TestParetoFrontier:
 
     def test_returns_all_nondominated_routes(self):
         graph_data = _build_frontier_graph()
-        optimizer = RouteOptimizer()
+        optimizer = RouteOptimizer(allow_untrained=True)
 
         result = optimizer.multi_objective_optimization('S', 'E', graph_data)
 
@@ -71,7 +71,7 @@ class TestParetoFrontier:
 
     def test_representative_route_comes_from_frontier(self):
         graph_data = _build_frontier_graph()
-        optimizer = RouteOptimizer()
+        optimizer = RouteOptimizer(allow_untrained=True)
 
         result = optimizer.multi_objective_optimization('S', 'E', graph_data)
 
@@ -85,7 +85,7 @@ class TestParetoFrontier:
 
     def test_zero_hop_route_has_single_frontier_member(self):
         graph_data = _build_frontier_graph()
-        optimizer = RouteOptimizer()
+        optimizer = RouteOptimizer(allow_untrained=True)
 
         result = optimizer.multi_objective_optimization('S', 'S', graph_data)
 
@@ -97,7 +97,7 @@ class TestParetoFrontier:
 
     def test_frontier_respects_hard_time_constraint(self):
         graph_data = _build_frontier_graph()
-        optimizer = RouteOptimizer()
+        optimizer = RouteOptimizer(allow_untrained=True)
 
         result = optimizer.multi_objective_optimization(
             'S',

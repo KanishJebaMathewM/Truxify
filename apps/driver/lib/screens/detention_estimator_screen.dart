@@ -122,7 +122,7 @@ class _DetentionEstimatorScreenState extends State<DetentionEstimatorScreen> {
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(color: badgeColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                  decoration: BoxDecoration(color: badgeColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
                   child: Column(
                     children: [
                       Icon(badgeIcon, color: badgeColor, size: 24),

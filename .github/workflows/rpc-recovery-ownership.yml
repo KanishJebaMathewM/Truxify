@@ -1,0 +1,27 @@
+name: RPC recovery ownership
+on:
+  pull_request:
+    paths:
+      - 'backend/api/src/services/blockchain/rpcProviderManager.js'
+      - 'backend/api/test/unit/rpcRecoveryOwnership.test.js'
+      - 'backend/api/test/unit/rpcProviderManager.test.js'
+      - 'tools/rpc-recovery-tests/**'
+      - '.github/workflows/rpc-recovery-ownership.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  rpc-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          sparse-checkout: |
+            backend/api
+            tools/rpc-recovery-tests
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+      - run: npm ci --prefix tools/rpc-recovery-tests --ignore-scripts
+      - run: bash tools/rpc-recovery-tests/run.sh

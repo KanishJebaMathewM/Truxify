@@ -178,7 +178,7 @@ class _BrokerScorecardScreenState extends State<BrokerScorecardScreen> {
                   Expanded(child: Text(review, style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey[800]))),
                 ],
               ),
-            )).toList(),
+            )),
           ],
         ),
       ),

@@ -109,9 +109,9 @@ class _RiskHeatmapScreenState extends State<RiskHeatmapScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: riskColor.withOpacity(0.1),
+              color: riskColor.withValues(alpha: 0.1),
               borderRadius: const BorderRadius.only(topLeft: Radius.circular(12), topRight: Radius.circular(12)),
-              border: Border(bottom: BorderSide(color: riskColor.withOpacity(0.3))),
+              border: Border(bottom: BorderSide(color: riskColor.withValues(alpha: 0.3))),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -149,7 +149,7 @@ class _RiskHeatmapScreenState extends State<RiskHeatmapScreen> {
                       Expanded(child: Text(incident, style: TextStyle(color: Colors.grey[800], fontSize: 13))),
                     ],
                   ),
-                )).toList()
+                ))
               ],
             ),
           )

@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import '../lib/models/route_stop_model.dart';
-import '../lib/services/route_optimization_service.dart';
+import 'package:truxify_driver/models/route_stop_model.dart';
+import 'package:truxify_driver/services/route_optimization_service.dart';
 
 void main() {
   test('rejects a route that misses a delivery window end', () async {

@@ -19,3 +19,27 @@ class ReeferZone {
     required this.estimatedMinutesToFailure,
   });
 }
+
+/// Live reefer temperature reading from the cold-chain IoT service (the
+/// cold chain dashboard's model; distinct from the zone-level ReeferZone).
+class ReeferTemperature {
+  final String trailerId;
+  final double currentTempCelsius;
+  final double humidityPercentage;
+  final double safeTempMin;
+  final double safeTempMax;
+  final DateTime timestamp;
+
+  const ReeferTemperature({
+    required this.trailerId,
+    required this.currentTempCelsius,
+    required this.humidityPercentage,
+    required this.safeTempMin,
+    required this.safeTempMax,
+    required this.timestamp,
+  });
+
+  /// Whether the current temperature is outside the safe range.
+  bool get isCritical =>
+      currentTempCelsius < safeTempMin || currentTempCelsius > safeTempMax;
+}

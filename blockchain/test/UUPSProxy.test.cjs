@@ -71,16 +71,13 @@ describe("TruxifyUpgradeable", function () {
     );
 
     // ── Governance token: voting power comes from token balance, not raw
-    //    address count (this is the Sybil-resistance fix). Mint the entire
-    //    supply (400) split evenly across the four voting participants used
-    //    below, so each has equal weight — mirroring the old "1 address = 1
-    //    vote" test ratios but now backed by real, non-free-to-mint weight.
-    const DAOToken = await ethers.getContractFactory("DAOToken");
-    daoToken = await DAOToken.deploy(
-      "Truxify DAO",
-      "TDAO",
-      ethers.parseEther("400")
-    );
+    //    address count (this is the Sybil-resistance fix). The token must
+    //    implement IVotes (setGovernanceToken rejects plain ERC20), so use the
+    //    snapshot-less MockVotesToken: mint 400 to the deployer and split it
+    //    evenly across the four voting participants used below, mirroring the
+    //    old "1 address = 1 vote" test ratios.
+    const MockVotesToken = await ethers.getContractFactory("MockVotesToken");
+    daoToken = await MockVotesToken.deploy(ethers.parseEther("400"));
     await daoToken.waitForDeployment();
     for (const voter of [daoMember, voter1, voter2, other]) {
       await daoToken.transfer(voter.address, ethers.parseEther("100"));

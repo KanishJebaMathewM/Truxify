@@ -1,6 +1,61 @@
 import { supabaseAdmin } from '../../api/src/config/db.js';
 import logger from '../../api/src/middleware/logger.js';
 import eventRepository from '../repositories/event.repository.js';
+// backend/kafka/cqrs/order.read.model.js
+
+import { ORDER_STATUSES } from '../../api/src/config/constants.js'; // Ensure correct import path
+import { supabaseAdmin } from '../../api/src/config/db.js';
+
+/**
+ * Computes per-status order counts using the canonical ORDER_STATUSES.
+ */
+export async function getOrderStats() {
+  const statuses = ORDER_STATUSES;
+  const stats = {};
+
+  for (const status of statuses) {
+    const { count, error } = await supabaseAdmin
+      .from('order_read_model')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', status);
+
+    if (error) {
+      throw new Error(`Failed to fetch order count for status ${status}: ${error.message}`);
+    }
+
+    stats[status] = count || 0;
+  }
+
+  return stats;
+}
+
+/**
+ * Retrieves orders from the read model with clean, uncorrupted filters.
+ */
+export async function getAllOrdersReadModel(filters = {}) {
+  let query = supabaseAdmin.from('order_read_model').select('*');
+
+  if (filters.customerId) {
+    query = query.eq('payload->>customer_id', filters.customerId);
+  }
+
+  if (filters.driverId) {
+    // Corrected to use text extraction operator ->> matching driverId
+    query = query.eq('payload->>driver_id', filters.driverId);
+  }
+
+  if (filters.status) {
+    query = query.eq('status', filters.status);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw new Error(`Failed to query order read model: ${error.message}`);
+  }
+
+  return data;
+}
 import {
   ORDER_READ_MODEL_TABLE,
   ORDER_STATUSES,
@@ -8,7 +63,40 @@ import {
   deriveOrderStatus,
   deriveEventTypeFromTimeline,
 } from '../../api/src/core/orders/read-model-schema.js';
+// backend/kafka/cqrs/order.read.model.js (Excerpt)
 
+import { supabase } from '../config/supabase.js';
+import logger from '../middleware/logger.js';
+
+export async function getOrderStats() {
+  try {
+    // ✅ Fixed: Replaced unsupported .groupBy('status') with safe query and JS reduction
+    const { data, error } = await supabase
+      .from('order_read_model')
+      .select('status');
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (!data || data.length === 0) {
+      return {};
+    }
+
+    // Aggregate counts by status in JavaScript
+    const stats = data.reduce((acc, row) => {
+      const status = row.status || 'unknown';
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
+
+    logger.info({ statsCount: Object.keys(stats).length }, 'Successfully aggregated order read model stats');
+    return stats;
+  } catch (err) {
+    logger.error({ err }, 'Failed to fetch order stats from read model');
+    return {};
+  }
+}
 class OrderReadModel {
   constructor(client = supabaseAdmin) {
     this.client = client;
@@ -298,10 +386,6 @@ class OrderReadModel {
       }
       if (filters.driverId) {
         query = query.eq('payload->>driver_id', filters.driverId);
-        query = query.eq('payload->customer_id', filters.customerId);
-      }
-      if (filters.driverId) {
-        query = query.eq('payload->driver_id', filters.driverId);
       }
       if (filters.fromDate) {
         query = query.gte('updated_at', filters.fromDate);
@@ -340,25 +424,16 @@ class OrderReadModel {
   }
 
   /**
-   * Per-status order counts, derived from the snapshot payload stored in the
-   * single authoritative read model.
+   * Per-status order counts from the canonical status column of the single
+   * authoritative read model.
    */
   async getOrderStats() {
-  const statuses = ['pending', 'truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving', 'delivered', 'payment_released', 'cancelled'];
+    const statuses = ORDER_STATUSES;
+
     const stats = {};
-    for (const s of statuses) { stats[s] = 0; }
 
     for (const status of statuses) {
       const { count, error } = await this.client
-        .from(ORDER_READ_MODEL_TABLE)
-        .select('*', { count: 'exact', head: true })
-        .eq('payload->>status', status);
-
-      if (error) throw error;
-      stats[status] = count ?? 0;
-    }
-
-    return stats;
         .from(ORDER_READ_MODEL_TABLE)
         .select('*', { count: 'exact', head: true })
         .eq('status', status);
@@ -369,7 +444,6 @@ class OrderReadModel {
 
     return stats;
   }
-
   async clearCache() {
     this.cache.clear();
     logger.info('Read model cache cleared');
@@ -377,10 +451,8 @@ class OrderReadModel {
 }
 
 export default new OrderReadModel();
-export default new OrderReadModel();
 export { OrderReadModel };
 
-// ============================================================================
 // Enterprise CQRS Telemetry, Projection Metrics & Health Diagnostics (Issue #14785)
 // ============================================================================
 class OrderReadModelTelemetry {

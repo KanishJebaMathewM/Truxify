@@ -36,9 +36,11 @@ def derive_key(material: bytes, info: bytes, length: int) -> bytes:
     okm = b""
     t = b""
     counter = 1
-    
+
     while len(okm) < length:
-        t = hash_data(t + info + bytes([counter]))
+        # Mix the extracted key into every round: without prk the output
+        # depends only on info/counter and ignores the input material.
+        t = hash_data(prk + t + info + bytes([counter]))
         okm += t
         counter += 1
         

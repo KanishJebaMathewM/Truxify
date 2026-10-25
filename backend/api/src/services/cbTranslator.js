@@ -56,7 +56,7 @@ export function translateVoiceTransmission(transmissionParams) {
         translatedText = `[Translated to ${SUPPORTED_LANGUAGES[tgtLangKey] || tgtLangKey}]: ${transcriptText}`;
     }
 
-    const messageId = `cb-msg-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const messageId = `cb-msg-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
 
     return {
         messageId,

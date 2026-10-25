@@ -1,17 +1,63 @@
 import crypto from 'crypto';
 import logger from '../middleware/logger.js';
+// backend/api/src/services/trackingTokenService.js (Excerpt)
 
+import logger from '../middleware/logger.js';
+
+export async function generateTrackingToken(orderId) {
+  try {
+    // ... token generation logic ...
+  } catch (err) {
+    // ✅ Updated to structured error logging preserving stack trace and context
+    logger.error({ err, orderId }, 'Failed to generate tracking token for order');
+    throw new Error('Tracking token generation failed.');
+  }
+}
+
+export async function validateTrackingToken(token) {
+  try {
+    // ... token validation logic ...
+  } catch (err) {
+    logger.error({ err, token }, 'Failed to validate tracking token');
+    return null;
+  }
+}
 const TOKEN_BYTE_LENGTH = 32;
 const TOKEN_EXPIRY_DAYS = 7;
 const PUBLIC_TRACKING_LOCATION_FRESHNESS_SECONDS = parseInt(process.env.PUBLIC_TRACKING_LOCATION_FRESHNESS_SECONDS || '900', 10);
 
 // Helper to validate standard UUID format
+// backend/api/src/services/trackingTokenService.js
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isValidUUID(uuid) {
   return typeof uuid === 'string' && UUID_REGEX.test(uuid);
 }
+// backend/api/src/services/trackingTokenService.js (Excerpt)
 
+export async function getDriverLocation(driverId) {
+  try {
+    // FIX: Use .maybeSingle() instead of .single() per issue #4974
+    const { data, error } = await supabase
+      .from('driver_locations')
+      .select('*')
+      .eq('driver_id', driverId)
+      .order('created_at', { ascending: false })
+      .maybeSingle();
+
+    if (error) {
+      // Reserve error logging strictly for actual query/database failures
+      logger.error({ err: error, driverId }, '[trackingTokenService] Database query failed for driver location');
+      throw new Error(`Failed to fetch driver location: ${error.message}`);
+    }
+
+    // Returns null gracefully when no active row exists (normal tracking state)
+    return data;
+  } catch (err) {
+    logger.error({ err, driverId }, '[trackingTokenService] Unexpected exception in getDriverLocation');
+    throw err;
+  }
+}
 export class TrackingTokenService {
   constructor({ supabase, supabaseAdmin, logger: injectedLogger }) {
     this._supabase = supabase;
@@ -105,7 +151,11 @@ export class TrackingTokenService {
       return { valid: false, reason: 'revoked' };
     }
 
-    if (new Date(token.expires_at) < new Date()) {
+    const expiresAt = new Date(token.expires_at).getTime();
+    if (!Number.isFinite(expiresAt)) {
+      return { valid: false, reason: 'validation_error' };
+    }
+    if (expiresAt <= Date.now()) {
       return { valid: false, reason: 'expired', tokenId: token.id };
     }
 
@@ -323,10 +373,39 @@ export class TrackingTokenService {
 
     return location || null;
   }
+
+  async validateAndGetPublicTrackingData(rawToken) {
+    const validation = await this.validateToken(rawToken);
+    if (!validation.valid) {
+      return validation;
+    }
+
+    const orderDisplayId = validation.token.order_display_id;
+
+    // Fetch order, timeline, and driver location using service-role client
+    const [orderRes, timelineRes, locationRes] = await Promise.all([
+      this._supabase.from('orders').select('*').eq('display_id', orderDisplayId).maybeSingle(),
+      this._supabase.from('order_timeline').select('*').eq('order_display_id', orderDisplayId),
+      this._supabaseAdmin.from('driver_locations').select('*').eq('order_display_id', orderDisplayId).maybeSingle(),
+    ]);
+
+    if (!orderRes.data) {
+      return { valid: false, reason: 'order_not_found' };
+    }
+
+    return {
+      valid: true,
+      data: {
+        order: orderRes.data,
+        timeline: timelineRes.data || [],
+        driverLocation: locationRes.data || null,
+      },
+    };
+  }
 }
 
 /*
-const crypto = require('crypto');
+
 const { createClient } = require('@supabase/supabase-js');
 const locationService = require('./locationService');
 

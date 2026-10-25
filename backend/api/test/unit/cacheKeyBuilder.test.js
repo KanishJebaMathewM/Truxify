@@ -14,6 +14,11 @@ vi.mock('../../src/cache/CacheNamespace.js', () => ({
       };
       return builtins[name] || null;
     }),
+    // CacheKeyBuilder.parse matches the longest registered prefix.
+    all: vi.fn(() => [
+      { name: 'profile', prefix: 'user:profile', defaultTtl: 900 },
+      { name: 'order', prefix: 'order', defaultTtl: 300 },
+    ]),
   },
   default: {
     get: vi.fn(),

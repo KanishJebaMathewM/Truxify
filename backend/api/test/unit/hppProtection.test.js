@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import hppProtection from '../../src/middleware/hppProtection.js'
 import logger from '../../src/middleware/logger.js'
 

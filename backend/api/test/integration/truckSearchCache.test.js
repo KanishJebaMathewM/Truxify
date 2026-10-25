@@ -16,10 +16,16 @@ vi.mock('../../src/config/db.js', () => ({
   supabaseAdmin: m.supabase,
   firebaseAdmin: null,
   redisClient,
+  upstashRedisClient: {
+    get: vi.fn().mockResolvedValue(null),
+    set: vi.fn().mockResolvedValue('OK'),
+  },
   mongoDb: {
     collection: () => ({
       find: () => ({
-        toArray: () => Promise.resolve(mockTelemetryResults),
+        limit: () => ({
+          toArray: () => Promise.resolve(mockTelemetryResults),
+        }),
       }),
     }),
   },

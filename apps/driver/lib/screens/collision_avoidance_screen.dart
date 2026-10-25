@@ -82,8 +82,8 @@ class _CollisionAvoidanceScreenState extends State<CollisionAvoidanceScreen> {
           border: Border.all(color: Colors.white30, width: 2),
           gradient: RadialGradient(
             colors: _isCritical 
-                ? [Colors.red.withOpacity(0.8), Colors.transparent]
-                : [Colors.green.withOpacity(0.3), Colors.transparent]
+                ? [Colors.red.withValues(alpha: 0.8), Colors.transparent]
+                : [Colors.green.withValues(alpha: 0.3), Colors.transparent]
           )
         ),
         child: Stack(

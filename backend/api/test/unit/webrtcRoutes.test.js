@@ -8,6 +8,7 @@ vi.mock('../../src/middleware/auth.js', () => ({
 
 vi.mock('../../src/middleware/rateLimiter.js', () => ({
   userLimiter: (_req, _res, next) => next(),
+  nearbyLimiter: (_req, _res, next) => next(),
 }));
 
 vi.mock('../../src/middleware/requirePolicy.js', () => ({

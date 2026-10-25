@@ -25,6 +25,7 @@ vi.mock('../../src/middleware/requirePolicy.js', () => ({
 
 vi.mock('../../src/middleware/rateLimiter.js', () => ({
   userLimiter: (req, res, next) => next(),
+  nearbyLimiter: (req, res, next) => next(),
 }));
 
 const { default: webrtcRoutes } = await import('../../src/routes/webrtcRoutes.js');

@@ -1,7 +1,9 @@
 ﻿/**
  * Comprehensive Unit Tests for backend/api/src/routes/voice.routes.js
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { Readable } from 'stream';
+import { unlink } from 'fs/promises';
 import request from 'supertest';
 import express from 'express';
 
@@ -16,7 +18,7 @@ vi.mock('../../src/middleware/auth.js', () => ({
 
 // Mock voiceAiService
 const mockProcessVoiceQuery = vi.fn();
-vi.mock('../../src/services/voiceAiService.js', () => ({
+vi.mock('../../src/services/voice/VoiceAiService.js', () => ({
   default: {
     processVoiceQuery: (...args) => mockProcessVoiceQuery(...args),
   },
@@ -46,6 +48,14 @@ describe('POST /voice/assistant', () => {
     vi.clearAllMocks();
   });
 
+  // The real service deletes the upload once processed; the mock does not, so
+  // remove the files multer wrote to uploads/voice/ during successful requests.
+  afterEach(async () => {
+    await Promise.all(
+      mockProcessVoiceQuery.mock.calls.map(([filePath]) => unlink(filePath).catch(() => {}))
+    );
+  });
+
   it('returns 400 when no audio file is attached in the request', async () => {
     const res = await request(makeApp())
       .post('/voice/assistant')
@@ -57,14 +67,9 @@ describe('POST /voice/assistant', () => {
   });
 
   it('successfully processes valid audio file, defaults language to "en", and streams audio/mpeg response', async () => {
-    async function* mockStreamGenerator() {
-      yield Buffer.from('chunk1');
-      yield Buffer.from('chunk2');
-    }
-    mockProcessVoiceQuery.mockResolvedValue({
-      stream: mockStreamGenerator(),
-      contentType: 'audio/mpeg',
-    });
+    mockProcessVoiceQuery.mockResolvedValue(
+      Readable.from([Buffer.from('chunk1'), Buffer.from('chunk2')])
+    );
 
     const res = await request(makeApp())
       .post('/voice/assistant')
@@ -84,13 +89,7 @@ describe('POST /voice/assistant', () => {
   });
 
   it('respects explicitly provided language parameter', async () => {
-    async function* mockStreamGenerator() {
-      yield Buffer.from('audio-data');
-    }
-    mockProcessVoiceQuery.mockResolvedValue({
-      stream: mockStreamGenerator(),
-      contentType: 'audio/mpeg',
-    });
+    mockProcessVoiceQuery.mockResolvedValue(Readable.from([Buffer.from('audio-data')]));
 
     const res = await request(makeApp())
       .post('/voice/assistant')

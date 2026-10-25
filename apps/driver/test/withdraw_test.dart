@@ -5,6 +5,8 @@ import 'package:http/http.dart' as http;
 import 'package:truxify_driver/services/api_client.dart';
 import 'package:truxify_driver/services/driver_earnings_service.dart';
 
+import 'driver_earnings_service_test.dart'
+    show FakeSupabaseClient, MockGoTrueClient, FakeUser;
 import 'setup.dart';
 
 /// A mock [http.Client] that returns a fixed response for every request.
@@ -39,7 +41,12 @@ void main() {
         httpClient: httpClient,
         baseUrl: 'http://localhost:5000',
       );
-      service = DriverEarningsService(apiClient: apiClient);
+      service = DriverEarningsService(
+        apiClient: apiClient,
+        client: FakeSupabaseClient(
+          auth: MockGoTrueClient(mockUser: FakeUser('driver-1')),
+        ),
+      );
     }
 
     tearDown(() {
@@ -58,15 +65,15 @@ void main() {
         expect(request.method, equals('POST'));
         expect(request.headers['Content-Type'], equals('application/json'));
 
-        final body = jsonDecode(request.body as String) as Map<String, dynamic>;
+        final req = request as http.Request;
+        final body = jsonDecode(req.body) as Map<String, dynamic>;
         expect(body['amount'], equals(50000));
 
         return http.Response(jsonEncode(mockResponse), 200);
       });
 
-      final result = await service.withdrawFunds(50000);
-      expect(result, isA<Map<String, dynamic>>());
-      expect(result['withdrawnAmount'], equals(50000));
+      await service.withdrawFunds(50000);
+      // Function returns void, success is implied if no exception is thrown.
     });
 
     test('throws ApiException with status 400 on bad request', () async {

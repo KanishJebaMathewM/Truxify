@@ -7,6 +7,9 @@ on:
       - '.github/scripts/check-istio-canary-service.js'
       - '.github/workflows/k8s-istio-canary-service.yml'
 
+permissions:
+  contents: read
+
 jobs:
   check:
     name: Validate canary destinations resolve to Services

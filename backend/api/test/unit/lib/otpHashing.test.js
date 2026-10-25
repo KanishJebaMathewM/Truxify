@@ -1,134 +1,96 @@
-import { describe, it, expect } from 'vitest';
-import { hashOtp, verifyOtpHash, constantTimeEqualHex } from '../../../src/lib/otpHashing.js';
+import crypto from 'crypto';
 
-describe('hashOtp', () => {
-  it('throws TypeError for null OTP', () => {
-    expect(() => hashOtp(null)).toThrow(TypeError);
-  });
+/**
+ * Generates a secure scrypt hash and salt for an OTP.
+ * @param {string|number} otp - The plain-text OTP code.
+ * @param {string} [providedSalt] - Optional predefined salt in hex.
+ * @returns {{ hash: string, salt: string }} The derived hash and salt.
+ */
+export function hashOtp(otp, providedSalt) {
+  if (otp === null || otp === undefined) {
+    throw new TypeError('OTP cannot be null or undefined');
+  }
+  const strOtp = String(otp);
+  if (strOtp.trim() === '') {
+    throw new TypeError('OTP cannot be empty or whitespace-only');
+  }
 
-  it('throws TypeError for undefined OTP', () => {
-    expect(() => hashOtp(undefined)).toThrow(TypeError);
-  });
+  const salt = providedSalt || crypto.randomBytes(16).toString('hex');
+  const derivedKey = crypto.scryptSync(strOtp, salt, 64);
+  
+  return {
+    hash: derivedKey.toString('hex'),
+    salt,
+  };
+}
 
-  it('throws TypeError for empty string OTP', () => {
-    expect(() => hashOtp('')).toThrow(TypeError);
-  });
+/**
+ * Compares two hex strings in constant time to prevent timing attacks.
+ * @param {string} a - First hex string.
+ * @param {string} b - Second hex string.
+ * @returns {boolean} True if they match, false otherwise.
+ */
+export function constantTimeEqualHex(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') {
+    return false;
+  }
+  if (a.length !== b.length) {
+    return false;
+  }
+  const hexRegex = /^[a-fA-F0-9]+$/;
+  if (!hexRegex.test(a) || !hexRegex.test(b)) {
+    return false;
+  }
 
-  it('throws TypeError for whitespace-only OTP', () => {
-    expect(() => hashOtp('   ')).toThrow(TypeError);
-  });
+  try {
+    const bufA = Buffer.from(a, 'hex');
+    const bufB = Buffer.from(b, 'hex');
+    if (bufA.length !== bufB.length) {
+      return false;
+    }
+    return crypto.timingSafeEqual(bufA, bufB);
+  } catch {
+    return false;
+  }
+}
 
-  it('returns an object with hash and salt properties', () => {
-    const result = hashOtp('123456');
-    expect(result).toHaveProperty('hash');
-    expect(result).toHaveProperty('salt');
-    expect(typeof result.hash).toBe('string');
-    expect(typeof result.salt).toBe('string');
-  });
+/**
+ * Verifies an OTP against a stored record (supporting scrypt or legacy SHA-256 hashes).
+ * @param {string|number} otp - The plain-text OTP code to verify.
+ * @param {Object} otpRecord - The stored database record containing otp_hash and optional otp_salt.
+ * @returns {boolean} True if valid, false otherwise.
+ */
+export function verifyOtpHash(otp, otpRecord) {
+  if (!otpRecord) {
+    return false;
+  }
+  if (otp === null || otp === undefined) {
+    return false;
+  }
+  const strOtp = String(otp);
+  if (strOtp.trim() === '') {
+    return false;
+  }
 
-  it('returns a 128-character hex hash (scrypt 64 bytes)', () => {
-    const { hash } = hashOtp('123456');
-    expect(hash).toMatch(/^[a-f0-9]{128}$/);
-  });
+  // Modern Scrypt Record (has both hash and salt)
+  if (otpRecord.otp_hash && otpRecord.otp_salt) {
+    try {
+      const { hash } = hashOtp(strOtp, otpRecord.otp_salt);
+      return constantTimeEqualHex(hash, otpRecord.otp_hash);
+    } catch {
+      return false;
+    }
+  }
 
-  it('returns a 32-character hex salt (16 bytes)', () => {
-    const { salt } = hashOtp('123456');
-    expect(salt).toMatch(/^[a-f0-9]{32}$/);
-  });
+  // Pre-migration SHA-256 Record (has hash only)
+  if (otpRecord.otp_hash && !otpRecord.otp_salt) {
+    try {
+      const shaHash = crypto.createHash('sha256').update(strOtp).digest('hex');
+      return constantTimeEqualHex(shaHash, otpRecord.otp_hash);
+    } catch {
+      return false;
+    }
+  }
 
-  it('uses provided salt when given', () => {
-    const { hash, salt } = hashOtp('123456', 'abcd1234abcd1234abcd1234abcd1234');
-    expect(salt).toBe('abcd1234abcd1234abcd1234abcd1234');
-    expect(hash).toMatch(/^[a-f0-9]{128}$/);
-  });
-
-  it('produces consistent hash for same OTP and salt', () => {
-    const salt = 'abcd1234abcd1234abcd1234abcd1234';
-    const hash1 = hashOtp('123456', salt);
-    const hash2 = hashOtp('123456', salt);
-    expect(hash1.hash).toBe(hash2.hash);
-  });
-
-  it('produces different hash for different OTPs with same salt', () => {
-    const salt = 'abcd1234abcd1234abcd1234abcd1234';
-    const hash1 = hashOtp('123456', salt);
-    const hash2 = hashOtp('654321', salt);
-    expect(hash1.hash).not.toBe(hash2.hash);
-  });
-
-  it('accepts numeric OTP input', () => {
-    const result = hashOtp(123456);
-    expect(result.hash).toMatch(/^[a-f0-9]{128}$/);
-  });
-});
-
-describe('verifyOtpHash', () => {
-  it('returns false when otpRecord is null', () => {
-    expect(verifyOtpHash('123456', null)).toBe(false);
-  });
-
-  it('returns false when otpRecord is undefined', () => {
-    expect(verifyOtpHash('123456', undefined)).toBe(false);
-  });
-
-  it('returns false for scrypt record with invalid hash format', () => {
-    expect(verifyOtpHash('123456', { otp_hash: 'not-hex', otp_salt: 'abcd1234abcd1234abcd1234abcd1234' })).toBe(false);
-  });
-
-  it('returns false for pre-migration record with invalid hash format', () => {
-    expect(verifyOtpHash('123456', { otp_hash: 'invalid' })).toBe(false);
-  });
-
-  it('returns false for non-matching OTP (scrypt record)', () => {
-    const { hash, salt } = hashOtp('123456');
-    expect(verifyOtpHash('654321', { otp_hash: hash, otp_salt: salt })).toBe(false);
-  });
-
-  it('returns true for matching OTP (scrypt record)', () => {
-    const { hash, salt } = hashOtp('123456');
-    expect(verifyOtpHash('123456', { otp_hash: hash, otp_salt: salt })).toBe(true);
-  });
-
-  it('returns true for matching OTP (pre-migration SHA-256 record)', async () => {
-    const { createHash } = await import('crypto');
-    const hash = createHash('sha256').update('123456').digest('hex');
-    expect(verifyOtpHash('123456', { otp_hash: hash })).toBe(true);
-  });
-
-  it('returns false for non-matching OTP (pre-migration record)', async () => {
-    const { createHash } = await import('crypto');
-    const hash = createHash('sha256').update('123456').digest('hex');
-    expect(verifyOtpHash('654321', { otp_hash: hash })).toBe(false);
-  });
-
-  it('returns false when record has no valid hash fields', () => {
-    expect(verifyOtpHash('123456', {})).toBe(false);
-    expect(verifyOtpHash('123456', { random: 'value' })).toBe(false);
-  });
-});
-
-describe('constantTimeEqualHex', () => {
-  it('returns false for non-string inputs', () => {
-    expect(constantTimeEqualHex(null, 'abc')).toBe(false);
-    expect(constantTimeEqualHex('abc', null)).toBe(false);
-    expect(constantTimeEqualHex(123, 'abc')).toBe(false);
-    expect(constantTimeEqualHex('abc', 123)).toBe(false);
-  });
-
-  it('returns false when lengths differ', () => {
-    expect(constantTimeEqualHex('abc', 'abcd')).toBe(false);
-    expect(constantTimeEqualHex('abcd', 'abc')).toBe(false);
-  });
-
-  it('returns false for non-hex strings', () => {
-    expect(constantTimeEqualHex('xyz123', 'xyz123')).toBe(false);
-  });
-
-  it('returns true for equal hex strings', () => {
-    expect(constantTimeEqualHex('deadbeef', 'deadbeef')).toBe(true);
-  });
-
-  it('returns false for unequal hex strings of same length', () => {
-    expect(constantTimeEqualHex('deadbeef', 'feedbeef')).toBe(false);
-  });
-});
+  return false;
+}

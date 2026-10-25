@@ -1,0 +1,33 @@
+name: Training RNG ownership
+on:
+  pull_request:
+    paths:
+      - 'backend/ml/app/models/**'
+      - 'backend/ml/tests/test_training_rng_ownership.py'
+      - 'tools/training-rng-tests/**'
+      - '.github/workflows/training-rng-ownership.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-random-streams:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PYTHONPATH: backend/ml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install focused native dependencies
+        run: python -m pip install -r tools/training-rng-tests/requirements.txt
+      - name: Verify exact legacy compatibility and native training interleavings
+        run: python -m pytest backend/ml/tests/test_training_rng_ownership.py -q
+      - name: Analyze regressions and production syntax
+        run: |
+          ruff check backend/ml/tests/test_training_rng_ownership.py
+          ruff check --select E9,F63,F7,F82 backend/ml/app/models/{eta_prediction,demand_forecast,driver_profit,collaborative_filter,trust_scorer}.py tools/training-rng-tests/legacy_generators.py
+          python -m py_compile backend/ml/app/models/{eta_prediction,demand_forecast,driver_profit,collaborative_filter,trust_scorer}.py

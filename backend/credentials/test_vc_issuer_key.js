@@ -22,7 +22,7 @@ try {
     name: 'Persistent Issuer Test'
   });
 
-  const issuerAfterRestart = new W3cCredentialIssuer(privateKeyPem);
+  const issuerAfterRestart = new W3cCredentialIssuer(privateKeyPem, undefined);
   assert.strictEqual(issuerAfterRestart.verifyCredentialProof(vc), true);
   assert.strictEqual(
     issuerAfterRestart.publicKey.export({ type: 'spki', format: 'der' }).equals(

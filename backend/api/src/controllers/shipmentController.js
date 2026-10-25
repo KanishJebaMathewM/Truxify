@@ -1,6 +1,16 @@
 import { createUserClient, supabase } from '../config/db.js';
 import logger from '../middleware/logger.js';
 
+const SENSITIVE_FIELD_PATTERNS = [/otp/i, /pin/i, /pass/i, /secret/i, /token/i, /hash/i];
+
+function sanitizeShipment(shipment) {
+  return Object.fromEntries(
+    Object.entries(shipment).filter(
+      ([key]) => !SENSITIVE_FIELD_PATTERNS.some((pattern) => pattern.test(key)),
+    ),
+  );
+}
+
 export const getShipmentDetails = async (req, res) => {
   try {
     const shipmentId = req.query.shipmentId || req.params.shipmentId;
@@ -31,7 +41,7 @@ export const getShipmentDetails = async (req, res) => {
       return res.status(403).json({ error: 'Forbidden: You do not have access to this shipment.' });
     }
 
-    return res.json({ success: true, data: shipment });
+    return res.json({ success: true, data: sanitizeShipment(shipment) });
   } catch (error) {
     logger.error('Error fetching shipment details:', error);
     return res.status(500).json({ error: 'Internal Server Error' });

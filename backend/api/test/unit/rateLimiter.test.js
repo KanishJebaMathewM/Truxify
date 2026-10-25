@@ -1,99 +1,200 @@
-import { describe, it, expect } from 'vitest';
-import { normalizeIp, safeIpKeyGenerator, userKeyGenerator, isSuspiciousForwardedHeader } from '../../src/middleware/rateLimiter.js';
+import { describe, it, expect, vi } from 'vitest';
+import {
+  normalizeIp,
+  safeIpKeyGenerator,
+  userKeyGenerator,
+  isSuspiciousForwardedHeader,
+  globalLimiter,
+  createStore,
+  __testing,
+} from '../../src/middleware/rateLimiter.js';
 
-describe('rateLimiter - normalizeIp & IPv6 Subnet Masking', () => {
-  it('returns unknown for invalid or missing IP', () => {
-    expect(normalizeIp(null)).toBe('unknown');
-    expect(normalizeIp(undefined)).toBe('unknown');
-    expect(normalizeIp('')).toBe('unknown');
+describe('rateLimiter helpers', () => {
+  describe('normalizeIp', () => {
+    it('returns unknown for invalid/missing IP', () => {
+  expect(normalizeIp()).toBe('unknown');
+  expect(normalizeIp(null)).toBe('unknown');
+  expect(normalizeIp('')).toBe('unknown');
+});
+
+    it('normalizes IPv4 and mapped IPv4 addresses', () => {
+      expect(normalizeIp('192.168.1.1')).toBe('192.168.1.1');
+      expect(normalizeIp('::ffff:192.168.1.1')).toBe('192.168.1.1');
+    });
+
+    it('normalizes loopback addresses', () => {
+  expect(normalizeIp('127.0.0.1')).toBe('127.0.0.1');
+  expect(normalizeIp('::1')).toBe('127.0.0.1');
+});
+
+    it('normalizes IPv6 addresses to a /64 prefix', () => {
+      expect(normalizeIp('2001:db8:abcd:1234:5678:90ab:cdef:1234')).toBe(
+        '2001:db8:abcd:1234::/64',
+      );
+    });
   });
 
-  it('normalizes IPv4 addresses correctly', () => {
-    expect(normalizeIp('192.168.1.100')).toBe('192.168.1.100');
-    expect(normalizeIp('::ffff:192.168.1.100')).toBe('192.168.1.100');
-    expect(normalizeIp('::1')).toBe('127.0.0.1');
+  describe('safeIpKeyGenerator', () => {
+    it('generates a stable key for IPv4 and IPv6 addresses', () => {
+      expect(
+        safeIpKeyGenerator({
+          ip: '192.168.1.10',
+          socket: { remoteAddress: '192.168.1.10' },
+          headers: {},
+          ips: [],
+        }),
+      ).toBe('192.168.1.10');
+
+      expect(
+        safeIpKeyGenerator({
+          ip: '2001:db8:abcd:1234:5678:90ab:cdef:1234',
+          socket: {
+            remoteAddress: '2001:db8:abcd:1234:5678:90ab:cdef:1234',
+          },
+          headers: {},
+          ips: [],
+        }),
+      ).toBe('2001:db8:abcd:1234::/64');
+    });
+
+    it('uses the forwarded client IP when it is valid', () => {
+      expect(
+        safeIpKeyGenerator({
+          ip: '10.0.0.1',
+          socket: { remoteAddress: '10.0.0.1' },
+          headers: {
+            'x-forwarded-for': '203.0.113.10',
+          },
+          ips: ['203.0.113.10'],
+        }),
+      ).toBe('203.0.113.10');
+    });
+
+    it('uses the trusted first proxy IP from req.ips', () => {
+      expect(
+        safeIpKeyGenerator({
+          ip: '10.0.0.1',
+          socket: { remoteAddress: '10.0.0.1' },
+          headers: {},
+          ips: ['203.0.113.20', '10.0.0.1'],
+        }),
+      ).toBe('203.0.113.20');
+    });
+
+    it('falls back to socket address for suspicious X-Forwarded-For headers', () => {
+      expect(
+        safeIpKeyGenerator({
+          ip: '10.0.0.1',
+          socket: { remoteAddress: '10.0.0.1' },
+          headers: {
+            'x-forwarded-for':
+              '203.0.113.10, 198.51.100.20, 192.0.2.1, 10.0.0.1',
+          },
+          ips: [],
+        }),
+      ).toBe('10.0.0.1');
+    });
   });
 
-  it('groups IPv6 addresses into /64 subnets to prevent rate limit bypass', () => {
-    const ip1 = '2001:0db8:85a3:0000:0000:8a2e:0370:7334';
-    const ip2 = '2001:0db8:85a3:0000:ffff:ffff:ffff:ffff';
+  describe('userKeyGenerator', () => {
+    it('uses the user id when available', () => {
+      const req = {
+        user: { id: 'user_123' },
+        ip: '1.2.3.4',
+      };
 
-    const subnet1 = normalizeIp(ip1);
-    const subnet2 = normalizeIp(ip2);
+      expect(userKeyGenerator(req)).toBe('user:user_123');
+    });
 
-    expect(subnet1).toBe('2001:0db8:85a3:0000::/64');
-    expect(subnet2).toBe('2001:0db8:85a3:0000::/64');
-    expect(subnet1).toBe(subnet2);
+    it('uses uid when user id is unavailable', () => {
+      const req = {
+        user: { uid: 'firebase_uid_123' },
+        ip: '1.2.3.4',
+      };
+
+      expect(userKeyGenerator(req)).toBe('uid:firebase_uid_123');
+    });
+
+    it('falls back to the IP address when no user identity is available', () => {
+      const req = {
+        ip: '1.2.3.4',
+      };
+
+      expect(userKeyGenerator(req)).toBe('1.2.3.4');
+    });
   });
 
-  it('safeIpKeyGenerator extracts and normalizes IP from req object', () => {
-    const reqV4 = { ip: '1.2.3.4' };
-    expect(safeIpKeyGenerator(reqV4)).toBe('1.2.3.4');
+  describe('isSuspiciousForwardedHeader', () => {
+    it('detects malformed forwarded headers', () => {
+  expect(
+    isSuspiciousForwardedHeader('203.0.113.10,,10.0.0.1'),
+  ).toBe(true);
 
-    const reqV6 = { ip: '2001:db8:1234:5678:90ab:cdef:1234:5678' };
-    expect(safeIpKeyGenerator(reqV6)).toBe('2001:db8:1234:5678::/64');
+  expect(
+    isSuspiciousForwardedHeader('203.0.113.10\n10.0.0.1'),
+  ).toBe(true);
+
+  expect(
+    isSuspiciousForwardedHeader('203.0.113.10\r10.0.0.1'),
+  ).toBe(true);
+});
+
+    it('accepts a normal forwarded header', () => {
+      expect(
+        isSuspiciousForwardedHeader('203.0.113.10, 10.0.0.1'),
+      ).toBe(false);
+    });
   });
 
-  it('userKeyGenerator uses user identity when present, falling back to IP', () => {
-    const reqWithUser = { user: { id: 'usr_123' }, ip: '1.2.3.4' };
-    expect(userKeyGenerator(reqWithUser)).toBe('user:usr_123');
+  it('creates a deferred Redis store', () => {
+    const store = createStore('rl:test:');
 
-    const reqAnon = { ip: '1.2.3.4' };
-    expect(userKeyGenerator(reqAnon)).toBe('1.2.3.4');
+    expect(store).toBeInstanceOf(__testing.DeferredRedisStore);
+    expect(typeof store.increment).toBe('function');
+    expect(typeof store.decrement).toBe('function');
+    expect(typeof store.resetKey).toBe('function');
+    expect(typeof store.resetAll).toBe('function');
+    expect(typeof store.get).toBe('function');
   });
 
-  it('distinct forwarded client IPs produce distinct rate-limit keys when trust proxy resolves req.ip', () => {
-    // With app.set('trust proxy', 1) Express populates req.ip from the
-    // X-Forwarded-For header, so two different clients behind the same
-    // reverse proxy must be keyed separately rather than collapsed into a
-    // single shared bucket.
-    const reqClientA = {
-      ip: '203.0.113.5',
-      headers: { 'x-forwarded-for': '203.0.113.5' },
-      socket: { remoteAddress: '10.0.0.1' },
-    };
-    const reqClientB = {
-      ip: '203.0.113.9',
-      headers: { 'x-forwarded-for': '203.0.113.9' },
-      socket: { remoteAddress: '10.0.0.1' },
-    };
+  it('uses the memory store when Redis is unavailable', async () => {
+    const store = createStore('rl:test:');
 
-    const keyA = safeIpKeyGenerator(reqClientA);
-    const keyB = safeIpKeyGenerator(reqClientB);
+    store.init({
+      windowMs: 60_000,
+      limit: 5,
+    });
 
-    expect(keyA).toBe('203.0.113.5');
-    expect(keyB).toBe('203.0.113.9');
-    expect(keyA).not.toBe(keyB);
-    // Both clients shared the same immediate peer, but must not share a bucket.
-    expect(keyA).not.toBe(safeIpKeyGenerator({ ip: '10.0.0.1' }));
+    const result = await store.increment('client-1');
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        totalHits: expect.any(Number),
+      }),
+    );
   });
 
-  it('prefers the trusted client hop (req.ips[0]) over req.ip when trust proxy is enabled', () => {
-    // With `trust proxy` on, req.ip is derived from X-Forwarded-For and can be
-    // attacker-controlled. The key generator must bind to the client hop that
-    // the trusted proxy chain resolves (req.ips[0]), not an arbitrary header value.
+  it('globalLimiter skips /health requests', async () => {
     const req = {
-      ips: ['203.0.113.5', '10.0.0.1'],
-      ip: '10.0.0.1',
-      headers: { 'x-forwarded-for': '203.0.113.5, 10.0.0.1' },
-      socket: { remoteAddress: '172.16.0.1' },
+      path: '/health',
+      ip: '127.0.0.1',
+      headers: {},
+      method: 'GET',
     };
 
-    expect(safeIpKeyGenerator(req)).toBe('203.0.113.5');
-  });
+    const next = vi.fn();
 
-  it('falls back to the socket peer when X-Forwarded-For is a spoofed/suspicious header', () => {
-    // An obviously spoofed multi-value header (e.g. containing a newline) must
-    // NOT be used as the rate-limit key; the key must collapse to the real peer.
-    const req = {
-      ips: ['203.0.113.5\ninjected', '10.0.0.1'],
-      ip: '10.0.0.1',
-      headers: { 'x-forwarded-for': '203.0.113.5\ninjected' },
-      socket: { remoteAddress: '172.16.0.1' },
-      connection: { remoteAddress: '172.16.0.1' },
+    const res = {
+      setHeader: vi.fn(),
+      getHeader: vi.fn(),
+      removeHeader: vi.fn(),
+      status: vi.fn(),
+      send: vi.fn(),
+      end: vi.fn(),
     };
 
-    expect(isSuspiciousForwardedHeader(req.headers['x-forwarded-for'])).toBe(true);
-    expect(safeIpKeyGenerator(req)).toBe('172.16.0.1');
+    await globalLimiter(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { OTP_TTL_MINUTES, OTP_MAX_FAILED_ATTEMPTS, OTP_LOCKOUT_MINUTES, checkOtpLockout, recordOtpFailure, clearOtpState } from '../../src/services/order/orderNotificationService.js';
+import { OrderNotificationService, OTP_TTL_MINUTES, OTP_MAX_FAILED_ATTEMPTS, OTP_LOCKOUT_MINUTES, checkOtpLockout, recordOtpFailure, clearOtpState } from '../../src/services/order/orderNotificationService.js';
 
 const mockSendPushNotification = vi.fn();
 vi.mock('../../src/services/notificationService.js', () => ({
@@ -36,6 +36,10 @@ describe('orderNotificationService', () => {
 
     it('exports clearOtpState as a function', () => {
       expect(typeof clearOtpState).toBe('function');
+    });
+
+    it('exports OrderNotificationService as a class', () => {
+      expect(typeof OrderNotificationService).toBe('function');
     });
   });
 

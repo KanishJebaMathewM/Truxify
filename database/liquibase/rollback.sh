@@ -4,6 +4,8 @@
 # never run against the application database. They target the dedicated
 # "truxify_liquibase" database — see run-migrations.sh.
 LIQUIBASE_DB="${LIQUIBASE_DATABASE:-truxify_liquibase}"
+LIQUIBASE_USER="${LIQUIBASE_USERNAME:-postgres}"
+LIQUIBASE_PASS="${LIQUIBASE_PASSWORD:-password}"
 
 if [ "$LIQUIBASE_DB" = "truxify" ] || [ "$LIQUIBASE_DB" = "postgres" ]; then
     echo "Refusing to run Liquibase against the application database '${LIQUIBASE_DB}'." >&2
@@ -16,8 +18,8 @@ echo "🔄 Rolling back Liquibase Migrations against database '${LIQUIBASE_DB}'.
 # Rollback last change
 liquibase --changeLogFile=changelog-master.xml \
     --url="jdbc:postgresql://localhost:5432/${LIQUIBASE_DB}" \
-    --username=postgres \
-    --password=password \
+    --username="${LIQUIBASE_USER}" \
+    --password="${LIQUIBASE_PASS}" \
     rollbackCount 1
 
 echo "✅ Rollback completed!"

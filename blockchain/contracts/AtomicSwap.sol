@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
@@ -31,6 +31,11 @@ contract AtomicSwap is ReentrancyGuard {
 
     mapping(bytes32 => bool) public usedHashLocks;
 
+    /// @dev Bounds on the timelock so the recipient always has a real window to claim
+    ///      and the sender's funds cannot be locked indefinitely.
+    uint256 public constant MIN_LOCK_DURATION = 1 hours;
+    uint256 public constant MAX_LOCK_DURATION = 30 days;
+
     event SwapOpened(bytes32 indexed swapId, address indexed sender, address indexed recipient, uint256 amount, bytes32 hashLock, uint256 lockTime);
     event SwapClaimed(bytes32 indexed swapId, bytes preimage);
     event SwapRefunded(bytes32 indexed swapId);
@@ -42,6 +47,11 @@ contract AtomicSwap is ReentrancyGuard {
         uint256 lockDuration
     ) external payable returns (bytes32) {
         require(msg.value > 0, "Amount must be > 0");
+        require(recipient != address(0), "Invalid recipient");
+        require(swapId != bytes32(0), "Invalid swap id");
+        require(hashLock != bytes32(0), "Invalid hash lock");
+        require(lockDuration >= MIN_LOCK_DURATION, "Lock duration too short");
+        require(lockDuration <= MAX_LOCK_DURATION, "Lock duration too long");
         require(swaps[swapId].sender == address(0), "Swap ID exists");
         require(!usedHashLocks[hashLock], "Hash lock already used");
 
@@ -70,6 +80,7 @@ contract AtomicSwap is ReentrancyGuard {
     function claimSwap(bytes32 swapId, bytes calldata preimage) external nonReentrant {
         Swap storage swap = swaps[swapId];
         require(!swap.claimed && !swap.refunded, "Swap inactive");
+        require(block.timestamp < swap.lockTime, "Lock expired, use refund");
         require(keccak256(preimage) == swap.hashLock, "Invalid preimage");
 
         swap.claimed = true;

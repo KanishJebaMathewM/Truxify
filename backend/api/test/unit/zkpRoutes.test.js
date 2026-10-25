@@ -1,46 +1,51 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import express from 'express';
 import request from 'supertest';
+import express from 'express';
+import zkpRouter from '../../src/services/security/zkp.routes.js';
 
-vi.mock('../../../../src/services/zkp/zkp.service.js', () => ({
+vi.mock('../../src/services/zkp/zkp.service.js', () => ({
   default: {
-    verifyDriver: vi.fn().mockResolvedValue({ verified: true }),
+    verifyDriver: vi.fn(),
+    isVerified: vi.fn(),
+    getVerificationStats: vi.fn(),
   },
 }));
 
-vi.mock('../../../../src/middleware/logger.js', () => ({
-  default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock('../../../../src/middleware/auth.js', () => ({
-  authenticate: (req, _res, next) => { req.user = { id: 'u1' }; next(); },
+vi.mock('../../src/middleware/redisRateLimiter.js', () => ({
+  redisRateLimiter: () => (req, res, next) => next(),
 }));
 
-vi.mock('../../../../src/lib/redisLock.js', () => ({
+vi.mock('../../src/lib/redisLock.js', () => ({
   LockAcquisitionError: class LockAcquisitionError extends Error {},
 }));
 
-vi.mock('../../../../src/middleware/redisRateLimiter.js', () => ({
-  redisRateLimiter: () => (_req, _res, next) => next(),
+vi.mock('../../src/lib/profileCache.js', () => ({
+  default: { get: vi.fn(), set: vi.fn(), del: vi.fn() },
 }));
 
-import zkpRouter from '../../../../src/routes/zkp.routes.js';
+vi.mock('mongoose', () => ({
+  default: {},
+  ConnectionStates: {},
+}));
 
 function makeApp() {
   const app = express();
   app.use(express.json());
-  app.use(zkpRouter);
+  app.use('/zkp', zkpRouter);
   return app;
 }
 
 describe('zkp routes', () => {
-  let app;
-
   beforeEach(() => {
-    app = makeApp();
+    vi.clearAllMocks();
   });
 
-  it('POST /verify returns 400 when zkp proof is missing', async () => {
+  it('POST /verify returns 400 when zkp verification payload is missing', async () => {
+    const app = makeApp();
     const res = await request(app)
       .post('/zkp/verify')
       .set('Authorization', 'Bearer token')

@@ -16,8 +16,13 @@ export 'src/services/notification_router.dart';
 export 'src/services/foreground_notification_handler.dart';
 export 'src/services/resilient_websocket.dart';
 
+// ── Theme & Providers ───────────────────────────────────────────────
+export 'src/theme/app_theme.dart';
+export 'src/providers/theme_provider.dart';
+
 // ── Widgets ─────────────────────────────────────────────────────────
 export 'src/widgets/truxify_error_widget.dart';
+export 'src/widgets/theme_toggle.dart';
 
 // ── Models ──────────────────────────────────────────────────────────
 export 'src/models/faq.dart';

@@ -38,14 +38,15 @@ class TruxifyColors {
   static const hintText = Color(0xFF999999);
   static const navInactive = Color(0xFFCCBBBB);
 
-  // Dark mode equivalents (kept simple, mapped to light variants)
+  // Dark mode equivalents per spec (#121212, #1E1E1E, #FF6B35, #FFFFFF, #B0B0B0)
   static const darkBackground = Color(0xFF121212);
   static const darkSecondaryBackground = Color(0xFF1E1E1E);
-  static const darkCardBackground = Color(0xFF242426);
-  static const darkPrimaryText = Color(0xFFF2F2F2);
-  static const darkSecondaryText = Color(0xFFB8B8C0);
-  static const darkBorder = Color(0xFF3A3A3E);
-  static const darkAccentLight = Color(0xFF6B0F0F);
+  static const darkCardBackground = Color(0xFF1E1E1E);
+  static const darkPrimaryText = Color(0xFFFFFFFF);
+  static const darkSecondaryText = Color(0xFFB0B0B0);
+  static const darkBorder = Color(0xFF2C2C2C);
+  static const darkAccentLight = Color(0xFF3A1C0E);
+  static const primaryAccent = Color(0xFFFF6B35); // Truxify Orange
 
   /// Returns the correct secondary text color for the current theme brightness.
   static Color adaptiveSecondaryText(BuildContext context) {

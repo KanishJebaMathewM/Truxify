@@ -19,6 +19,7 @@ import 'models/app_models.dart';
 import 'controllers/app_controller.dart';
 import 'theme/app_theme.dart';
 import 'widgets/app_page_route.dart';
+import 'package:truxify_shared/truxify_shared.dart';
 
 class TruxifyApp extends StatefulWidget {
   const TruxifyApp({super.key, this.languageProvider});
@@ -78,9 +79,9 @@ class _TruxifyAppState extends State<TruxifyApp> {
               );
             },
             onGenerateTitle: (context) => AppLocalizations.of(context)!.appTitle,
-            theme: TruxifyTheme.light(),
-            darkTheme: TruxifyTheme.dark(),
-            themeMode: _controller.themeMode,
+            theme: AppTheme.lightTheme,
+            darkTheme: AppTheme.darkTheme,
+            themeMode: context.watch<ThemeProvider>().themeMode,
             locale: _languageProvider.currentLocale,
             localizationsDelegates: const [
               AppLocalizations.delegate,

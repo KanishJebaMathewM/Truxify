@@ -1430,8 +1430,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         children: [
           TileLayer(
-            urlTemplate:
-                'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            urlTemplate: AppTheme.getMapTileUrl(context),
             userAgentPackageName: 'com.truxify.driver',
           ),
           if (_buildHeatmapLayer() != null) _buildHeatmapLayer()!,
@@ -1469,8 +1468,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           children: [
             TileLayer(
-              urlTemplate:
-                  'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              urlTemplate: AppTheme.getMapTileUrl(context),
               userAgentPackageName: 'com.truxify.driver',
             ),
             if (_buildHeatmapLayer() != null) _buildHeatmapLayer()!,

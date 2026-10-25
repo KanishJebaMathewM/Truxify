@@ -162,7 +162,40 @@ import multer from 'multer';
 import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
+// backend/api/src/routes/orderRoutes.js (Excerpt)
 
+import logger from '../middleware/logger.js';
+// ... other imports ...
+
+router.post('/orders/:id/rate', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { rating, polygonAddress } = req.body;
+
+    // 1. Save rating to Supabase (Source of Truth)
+    const ratingResult = await orderService.saveOrderRating(id, rating);
+
+    // 2. Fire-and-forget blockchain reputation award (Non-blocking)
+    if (polygonAddress) {
+      void awardReputationPoints(polygonAddress, rating).catch(err => {
+        logger.error('[Reputation] Failed to award background reputation points on Polygon', {
+          error: err.message,
+          polygonAddress,
+          rating
+        });
+      });
+    }
+
+    // 3. Return immediate success response to client
+    return res.status(200).json({
+      success: true,
+      message: 'Rating submitted successfully.',
+      data: ratingResult
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 import {
   bidLimiter,
   userLimiter,

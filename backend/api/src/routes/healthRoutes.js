@@ -64,7 +64,46 @@ import { checkEscrowHealth } from '../services/escrow.js';
 import logger from '../middleware/logger.js';
 import { createDefaultAggregator } from '../core/health/index.js';
 import { captureDebugException } from '../middleware/sentry.js';
+// backend/api/src/routes/healthRoutes.js (Excerpt)
 
+import express from 'express';
+import { healthLimiter } from '../middleware/rateLimiter.js';
+import logger from '../middleware/logger.js';
+import { supabase, mongoDb, redisClient } from '../config/db.js';
+
+const router = express.Router();
+
+// Liveness probe
+router.get('/health', healthLimiter, (req, res) => {
+  return res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Readiness probe (Single unified definition)
+router.get('/ready', healthLimiter, async (req, res) => {
+  try {
+    // Check database / Redis connectivity
+    const dbReady = supabase && mongoDb;
+    const redisReady = redisClient && redisClient.isOpen;
+
+    if (!dbReady) {
+      return res.status(503).json({ status: 'not ready', reason: 'Database connection offline' });
+    }
+
+    return res.status(200).json({
+      status: 'ready',
+      database: 'connected',
+      redis: redisReady ? 'connected' : 'disconnected (optional)',
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    logger.error({ err }, 'Readiness check failed');
+    return res.status(503).json({ status: 'error', error: err.message });
+  }
+});
+
+// ❌ Removed duplicate /ready route handler that was present further down the file.
+
+export default router;
 const router = express.Router();
 
 const DEFAULT_TIMEOUT_MS = 400;

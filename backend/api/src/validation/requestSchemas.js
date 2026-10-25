@@ -1,6 +1,21 @@
 import { z } from 'zod';
 import { VALID_LANGUAGES } from '../schemas/profile.js';
+// backend/api/src/validation/requestSchemas.js (Excerpt)
 
+import { z } from 'zod';
+
+export const withdrawSchema = z.object({
+  amount: z.number({
+    required_error: 'Withdrawal amount is required.',
+    invalid_type_error: 'Withdrawal amount must be a number.',
+  })
+  .positive('Withdrawal amount must be greater than zero.')
+  // ✅ Fixed: Replaced non-existent .safe() method with valid .safeInteger()
+  .safeInteger({ message: 'Amount must be a safe integer.' }),
+  
+  currency: z.string().length(3, 'Currency code must be 3 characters (e.g., INR, USD).').default('INR'),
+  bank_account_id: z.string().uuid('Invalid bank account ID format.'),
+});
 // Generic field validation helpers
 function isValidPhone(phone) {
   return /^\+?[\d\s\-()]{7,15}$/.test(phone);

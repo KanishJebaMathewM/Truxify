@@ -64,7 +64,21 @@ import { checkEscrowHealth } from '../services/escrow.js';
 import logger from '../middleware/logger.js';
 import { createDefaultAggregator } from '../core/health/index.js';
 import { captureDebugException } from '../middleware/sentry.js';
+// backend/api/src/routes/healthRoutes.js (Excerpt)
 
+import { healthLimiter } from '../middleware/rateLimiter.js';
+import logger from '../middleware/logger.js';
+// ❌ Removed duplicate: import { healthLimiter } from '../middleware/rateLimiter.js';
+
+import express from 'express';
+
+const router = express.Router();
+
+router.get('/health', healthLimiter, (req, res) => {
+  return res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+export default router;
 const router = express.Router();
 
 const DEFAULT_TIMEOUT_MS = 400;

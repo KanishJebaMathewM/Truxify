@@ -1,0 +1,48 @@
+name: Native vision execution ownership
+on:
+  pull_request:
+    paths:
+      - backend/ml/multimodal/vision_execution.py
+      - backend/ml/multimodal/vision_monitor.py
+      - backend/ml/routes/safety_routes.py
+      - backend/ml/tests/test_vision_execution.py
+      - backend/ml/tests/test_head_pose_observations.py
+      - .github/workflows/vision-execution.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-vision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: backend/ml
+      MPLCONFIGDIR: /tmp/vision-mpl-ci
+      TF_CPP_MIN_LOG_LEVEL: '2'
+      TF_NUM_INTRAOP_THREADS: '1'
+      TF_NUM_INTEROP_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      LIBGL_ALWAYS_SOFTWARE: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Native software graphics and Redis
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1 libegl1 libgl1-mesa-dri libglib2.0-0 redis-server xvfb xauth
+      - name: Install pinned focused runtime
+        run: python -m pip install tensorflow-cpu==2.16.2 keras==3.15.1 numpy==1.26.4 scipy==1.14.1 opencv-contrib-python==4.9.0.80 mediapipe==0.10.18 jax==0.4.34 jaxlib==0.4.34 redis==5.0.8 fastapi==0.116.1 httpx==0.28.1 pytest==9.0.3 pytest-asyncio==1.3.0 ruff==0.16.9 python-multipart==0.0.20
+      - name: Actual graph, cache, ownership and existing consumers
+        run: >-
+          xvfb-run -a python -m pytest backend/ml/tests/test_vision_execution.py
+          backend/ml/tests/test_head_pose_observations.py
+          backend/ml/tests/test_safety_observations.py
+          backend/ml/tests/test_inference_admission_lifecycle.py -q
+      - name: Scoped source analysis
+        run: |
+          python -m ruff check backend/ml/multimodal/vision_execution.py backend/ml/tests/test_vision_execution.py backend/ml/tests/test_head_pose_observations.py
+          python -m ruff check backend/ml/multimodal/vision_monitor.py backend/ml/routes/safety_routes.py --ignore I001,F401,UP035,UP006,UP045,DTZ005,BLE001,S110,B008

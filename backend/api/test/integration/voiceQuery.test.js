@@ -56,12 +56,21 @@ vi.mock('../../src/config/db.js', () => {
   };
 
   return {
+    // voiceService prefers supabaseAdmin (falls back to supabase) — expose both.
+    supabaseAdmin: {
+      auth: {
+        getUser: () => Promise.resolve({ data: { user: { id: 'user-voice-1' } }, error: null })
+      },
+      from: mockFrom
+    },
     supabase: {
       auth: {
         getUser: () => Promise.resolve({ data: { user: { id: 'user-voice-1' } }, error: null })
       },
       from: mockFrom
     },
+    // The service-role migration (#9202) — routes read via supabaseAdmin.
+    supabaseAdmin: { from: mockFrom },
     createUserClient: () => ({
       from: mockFrom
     }),
@@ -92,7 +101,9 @@ describe('Voice AI Query API Endpoints', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('transcript');
-    expect(res.body.intent).toBe('location');
+    // The deliberate intent enum is UPPERCASE (LOGISTICS_VOICE_INTENTS); there is
+    // no location intent — 'Where is my package?' classifies as GENERAL_INQUIRY.
+    expect(res.body.intent).toBe('GENERAL_INQUIRY');
     expect(res.body.response_text).toContain('in transit');
     expect(res.body).toHaveProperty('audio_url');
   });
@@ -104,7 +115,7 @@ describe('Voice AI Query API Endpoints', () => {
       .send({ query: 'When will it arrive?', bookingId: 'ORD-12345' });
 
     expect(res.status).toBe(200);
-    expect(res.body.intent).toBe('eta');
+    expect(res.body.intent).toBe('ETA');
     expect(res.body.response_text).toContain('estimated');
   });
 
@@ -115,7 +126,7 @@ describe('Voice AI Query API Endpoints', () => {
       .send({ query: 'Is my payment released?', bookingId: 'ORD-12345' });
 
     expect(res.status).toBe(200);
-    expect(res.body.intent).toBe('escrow');
+    expect(res.body.intent).toBe('PAYMENT_STATUS');
     expect(res.body.response_text).toContain('escrow');
   });
 

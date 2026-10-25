@@ -190,7 +190,7 @@ class _ReceiptCategorizationScreenState extends State<ReceiptCategorizationScree
       margin: const EdgeInsets.only(bottom: 12),
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: catColor.withOpacity(0.2),
+          backgroundColor: catColor.withValues(alpha: 0.2),
           child: Icon(catIcon, color: catColor),
         ),
         title: Text(e.vendorName, style: const TextStyle(fontWeight: FontWeight.bold)),

@@ -608,8 +608,13 @@ describe('FuelAdvisorService - Unit Tests', () => {
       const load = await service._getAverageEngineLoad('truck-1');
 
       expect(load).toBe(50);
+      // Structured logging contract (2a841d104): object first, message second.
       expect(logger.error).toHaveBeenCalledWith(
-        expect.stringContaining('Error computing engine load: Supabase client crash'),
+        expect.objectContaining({
+          event: 'FUEL_ENGINE_LOAD_ERROR',
+          error: expect.stringContaining('Supabase client crash'),
+        }),
+        'Error computing engine load',
       );
     });
   });

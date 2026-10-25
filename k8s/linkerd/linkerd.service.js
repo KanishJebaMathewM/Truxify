@@ -17,7 +17,8 @@ class LinkerdService {
     async getMetrics(query) {
         try {
             const response = await axios.get(`${this.prometheusUrl}/api/v1/query`, {
-                params: { query }
+                params: { query },
+                timeout: 30000
             });
             return response.data.data.result;
         } catch (error) {

@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import logger from '../api/src/middleware/logger.js';
 import { supabase, supabaseAdmin } from '../api/src/config/db.js';
 import { getMevRelayer } from './flashbots_relayer.js';
+import crypto from 'crypto';
 
 /**
  * Derives the exact 32-byte preimage that is revealed on-chain.
@@ -408,9 +409,6 @@ class MEVService {
 
 export default new MEVService();
 
-// === Spec 41: ===
-// === Spec 41: commit-reveal ===
-import crypto from 'crypto';
+// Spec 41 commit-reveal helpers (kept as named exports — mev.service.test.js imports them).
 export function commitHash(s, p) { return crypto.createHash('sha256').update(s + ':' + JSON.stringify(p)).digest('hex'); }
 export function verifyReveal(c, s, p) { return commitHash(s, p) === c; }
-

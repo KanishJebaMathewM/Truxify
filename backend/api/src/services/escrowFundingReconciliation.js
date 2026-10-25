@@ -1,6 +1,6 @@
 import { redisClient, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
-import { submitEscrowRefund, getEscrowBooking, weiWithinTolerance } from './escrow.js';
+import { submitEscrowRefund, getOnChainEscrowBooking, weiWithinTolerance } from './escrow.js';
 import { acquireLock, renewLock, releaseLock, withLockRenewal } from '../lib/redisLock.js';
 import { sendPushNotification } from './notificationService.js';
 
@@ -40,7 +40,7 @@ async function finalizeOrRevert(order, orderRepository) {
   }
 
   try {
-    const booking = await getEscrowBooking(order.escrow_booking_id);
+    const booking = await getOnChainEscrowBooking(order.escrow_booking_id);
     const bookingAmount = booking?.amount;
     const bookingFunded = booking && bookingAmount != null && bookingAmount > 0n;
 

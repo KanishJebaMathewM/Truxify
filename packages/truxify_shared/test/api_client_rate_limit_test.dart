@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:truxify_shared/src/services/api_client.dart';
@@ -71,21 +72,26 @@ void main() {
       client.close();
     });
 
-    test('retry-after: 100 is clamped to a maximum of 30s', () async {
-      final client = ApiClient(
-        httpClient: _FakeRateLimitClient('100', '{"error":"rate limited"}'),
-        baseUrl: 'https://example.test',
-      );
+    test('retry-after: 100 is clamped to a maximum of 30s', () {
+      // The clamped wait is 30 REAL seconds — run inside fakeAsync and elapse
+      // virtually instead of actually sleeping past the test timeout.
+      fakeAsync((async) {
+        final client = ApiClient(
+          httpClient: _FakeRateLimitClient('100', '{"error":"rate limited"}'),
+          baseUrl: 'https://example.test',
+        );
 
-      late RateLimitException error;
-      try {
-        await client.get('/x');
-      } on RateLimitException catch (e) {
-        error = e;
-      }
-
-      expect(error.retryAfter, const Duration(seconds: 30));
-      client.close();
+        RateLimitException? error;
+        final future = client.get('/x').catchError((Object e) {
+          error = e as RateLimitException;
+        });
+        async.elapse(const Duration(seconds: 31));
+        return future.then((_) {
+          expect(error, isNotNull);
+          expect(error!.retryAfter, const Duration(seconds: 30));
+          client.close();
+        });
+      });
     });
   });
 }

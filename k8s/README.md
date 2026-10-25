@@ -70,3 +70,16 @@ kubectl describe pod -n truxify <pod-name>
 
 # Check events
 kubectl get events -n truxify
+## Network isolation
+
+Apply `k8s/network-policies/truxify-ingress.yaml` with the workloads after confirming that the cluster CNI enforces Kubernetes NetworkPolicy:
+
+```bash
+kubectl apply -f k8s/network-policies/truxify-ingress.yaml
+kubectl get networkpolicy -n truxify
+kubectl describe networkpolicy -n truxify
+```
+
+The policy denies ingress to every pod in the `truxify` namespace by default. It then permits traffic to API pods on TCP 5000 from all sources (the public entry point), and permits traffic to Redis on 6379, Postgres shards on 5432, and ML on 8000 only from API pods in this namespace. It covers the Deployment labels and the optional Argo Rollout labels. Other workloads added to this namespace need an explicit ingress rule before deployment.
+
+Egress remains unrestricted because the API uses external payment, notification, and telemetry endpoints; restricting it requires an inventory of those destinations. If a service mesh redirects inbound connections to a proxy port, add that port to the appropriate allow policy before applying it. A CNI without NetworkPolicy enforcement will accept these resources without enforcing isolation.

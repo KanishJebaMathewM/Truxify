@@ -1,4 +1,51 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// 1. Update your pending withdrawal test fixtures to include settlement_ref
+const mockWithdrawals = [
+  {
+    id: 'w1',
+    driver_id: 'driver-1',
+    amount: 1000,
+    status: 'pending',
+    payout_attempted_at: null,
+    settlement_ref: 'SETTLE_REF_123', // Added to satisfy no-ref refusal check
+  },
+  {
+    id: 'w2',
+    driver_id: 'driver-2',
+    amount: 1500,
+    status: 'pending',
+    payout_attempted_at: null,
+    settlement_ref: 'SETTLE_REF_456', // Added to satisfy no-ref refusal check
+  }
+];
+
+// 2. Adjust the Supabase mock client chain for `update()` / `select()`
+// Ensure that when `update(...).eq(...).is(...).select()` is invoked, it resolves to { data: [{ id: withdrawal.id }], error: null }
+const createMockQueryBuilder = (withdrawals = mockWithdrawals) => {
+  const query = {
+    select: vi.fn().mockImplementation(() => {
+      // If this is part of the atomic claim chain (.update().eq().is().select())
+      if (query._isUpdating) {
+        return Promise.resolve({ data: [{ id: query._claimedId || 'w1' }], error: null });
+      }
+      return Promise.resolve({ data: withdrawals, error: null });
+    }),
+    eq: vi.fn().mockImplementation((col, val) => {
+      if (col === 'id') query._claimedId = val;
+      return query;
+    }),
+    is: vi.fn().mockReturnThis(),
+    order: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockReturnThis(),
+    update: vi.fn().mockImplementation((updateData) => {
+      query._isUpdating = true;
+      query._updatePayload = updateData;
+      return query;
+    }),
+    // Reset state helpers if needed between calls
+  };
+  return query;
+};
 
 const admin = {
   from: vi.fn(),
@@ -6,6 +53,9 @@ const admin = {
 };
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabaseAdmin: admin,
 }));
 
@@ -15,6 +65,10 @@ const isPayoutProviderConfiguredMock = vi.fn();
 vi.mock('../../src/services/wallet/payoutProvider.js', () => ({
   dispatchPayout: dispatchPayoutMock,
   isPayoutProviderConfigured: isPayoutProviderConfiguredMock,
+}));
+
+vi.mock('../../src/services/notificationService.js', () => ({
+  sendPushNotification: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../src/core/telemetry/WorkerTracer.js', () => ({
@@ -187,6 +241,33 @@ describe('Withdrawal Settlement Worker', () => {
       p_settlement_ref: 'ref-1',
     });
     expect(admin.rpc).not.toHaveBeenCalledWith('fail_withdrawal_tx', expect.anything());
+  });
+
+  it('does not start an overlapping cycle while settlement is still running', async () => {
+    let releaseQuery;
+    const pendingQuery = new Promise((resolve) => {
+      releaseQuery = resolve;
+    });
+    const selectQuery = {
+      eq: vi.fn().mockReturnThis(),
+      is: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnValue(pendingQuery),
+    };
+    admin.from.mockReturnValue({
+      select: vi.fn().mockReturnValue(selectQuery),
+      update: vi.fn(),
+    });
+
+    const firstCycle = settlePendingWithdrawals();
+    await Promise.resolve();
+
+    await settlePendingWithdrawals();
+
+    expect(admin.from).toHaveBeenCalledTimes(1);
+
+    releaseQuery({ data: [], error: null });
+    await firstCycle;
   });
 
   it('does not settle anything when the pending query errors', async () => {

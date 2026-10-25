@@ -60,7 +60,10 @@ describe('apiResponse helpers', () => {
       expect(result.pagination.hasPrevPage).toBe(false);
     });
 
-    it('clamps negative page values to 1', () => {
+    // The production paginated() deliberately normalizes page to a MINIMUM of 1
+    // (preventing 0-indexed off-by-one errors) — this suite previously expected
+    // the pre-fix clamp-to-0 behavior.
+    it('clamps negative page values to 1 (1-indexed pages)', () => {
       const result = paginated([], -5, 10, 0);
       expect(result.pagination.page).toBe(1);
       expect(result.pagination.hasNextPage).toBe(false);
@@ -82,7 +85,6 @@ describe('apiResponse helpers', () => {
     });
 
     it('hasNextPage is true on penultimate page when total divides evenly by limit', () => {
-      // total=30, limit=10: totalPages=3, page=2 is not last, hasNextPage should be true
       const result = paginated(['a'], 2, 10, 30);
       expect(result.pagination.totalPages).toBe(3);
       expect(result.pagination.hasNextPage).toBe(true);
@@ -142,7 +144,3 @@ describe('apiResponse helpers', () => {
       expect(resultNegativeStr.pagination.limit).toBe(10);
       expect(resultNegativeStr.pagination.pageSize).toBe(10);
       expect(resultNegativeStr.pagination.totalPages).toBe(5);
-    });
-  });
-});
-

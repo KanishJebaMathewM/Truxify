@@ -1,0 +1,27 @@
+name: DLQ attempt protocol
+on:
+  pull_request:
+    paths:
+      - backend/api/src/services/webhook/dlqService.js
+      - backend/api/src/workers/dlqWorker.js
+      - backend/api/test/unit/dlq*.test.js
+      - supabase/migrations/20261002164243_webhook_dlq_attempt_fencing.sql
+      - tools/dlq-attempt-tests/**
+      - .github/workflows/dlq-attempt-protocol.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  protocol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tools/dlq-attempt-tests/package-lock.json
+      - run: npm ci --no-fund
+        working-directory: tools/dlq-attempt-tests
+      - run: bash tools/dlq-attempt-tests/run.sh

@@ -175,10 +175,11 @@ describe('KEDAService.getScaledObjectStatus', () => {
       error: 'timeout of 5000ms exceeded',
     })
     expectTimestamp(result)
-    expect(mockLogger.error).toHaveBeenCalledWith(
+    expect(mockLogger.warn).toHaveBeenCalledWith(
       {
         event: 'KEDA_SCALED_OBJECT_STATUS_ERROR',
         error: 'timeout of 5000ms exceeded',
+        stack: undefined,
       },
       'KEDA scaled object status request failed',
     )

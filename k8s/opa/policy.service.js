@@ -1,4 +1,4 @@
-﻿import { fileURLToPath } from 'url';
+import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
@@ -6,7 +6,39 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 import logger from '../../backend/api/src/middleware/logger.js';
+// k8s/opa/policy.service.js
 
+import logger from '../../backend/api/src/middleware/logger.js'; // Adjust per module structure
+
+/**
+ * Evaluates an authorization policy against the OPA CLI service.
+ * @param {Object} input - Policy evaluation input payload.
+ * @returns {Promise<Object>} Policy decision object { allow: boolean, reason?: string }
+ */
+export async function evaluatePolicy(input) {
+  try {
+    const stdout = await executeOpaCli(input);
+
+    let decision;
+    try {
+      // Attempt to parse OPA JSON output
+      decision = JSON.parse(stdout);
+    } catch (parseErr) {
+      // Log parsing failure along with raw stdout for debugging, fail closed
+      logger.error('Failed to parse OPA evaluation output as JSON', { 
+        error: parseErr.message, 
+        rawOutput: stdout 
+      });
+      return { allow: false, reason: 'POLICY_EVALUATION_ERROR' };
+    }
+
+    return decision;
+  } catch (err) {
+    // Fail closed on OPA execution failures as well
+    logger.error('OPA CLI execution failed', { error: err.message });
+    return { allow: false, reason: 'POLICY_EXECUTION_FAILURE' };
+  }
+}
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -50,15 +82,18 @@ class OPAService {
 
     // OPA CLI output can carry non-JSON noise (runtime warnings, notices)
     // before the payload. Never let a bare JSON.parse abort an authorization
-    // decision — on failure, log the raw output and return null so the caller
-    // can produce a deny result instead of an unhandled exception.
+    // decision — on failure, log the raw output and return a safe explicit deny
+    // payload instead of an unhandled exception.
     _parseOpaOutput(stdout, policyName) {
+        if (!stdout || typeof stdout !== 'string') {
+            return { result: [{ expressions: [{ value: { allow: false } }] }] };
+        }
         try {
             return JSON.parse(stdout);
         } catch (err) {
             logger.error(`OPA evaluation produced non-JSON output for policy ${policyName}: ${err.message}`);
             logger.error(`Raw OPA output: ${stdout}`);
-            return null;
+            return { result: [{ expressions: [{ value: { allow: false } }] }] };
         }
     }
 
@@ -93,7 +128,13 @@ class OPAService {
                         timestamp: new Date().toISOString()
                     };
                 }
-                const allowed = result.result && result.result[0]?.value === true;
+                // A single CLI query returns its value inside expressions, not
+                // directly on the result row. Accept only an unambiguous boolean.
+                const rows = result.result;
+                const expressions = Array.isArray(rows) && rows.length === 1
+                    ? rows[0]?.expressions : null;
+                const allowed = Array.isArray(expressions) && expressions.length === 1
+                    && expressions[0]?.value === true;
 
                 // Get violations
                 const violations = [];
@@ -102,9 +143,17 @@ class OPAService {
                         `opa eval --data ${path.join(this.policiesDir, policyName + '.rego')} --input ${inputPath} "data.${policyName}.deny"`
                     );
                     const denyResult = this._parseOpaOutput(denyStdout, policyName);
-                    if (denyResult && denyResult.result) {
-                        for (const r of denyResult.result) {
-                            violations.push(r.value);
+                    if (Array.isArray(denyResult?.result)) {
+                        for (const row of denyResult.result) {
+                            if (!Array.isArray(row?.expressions)) continue;
+                            for (const expression of row.expressions) {
+                                // Rego deny[msg] is a set encoded as a JSON array.
+                                if (Array.isArray(expression?.value)) {
+                                    violations.push(...expression.value.filter(
+                                        (message) => typeof message === 'string'
+                                    ));
+                                }
+                            }
                         }
                     }
                 }

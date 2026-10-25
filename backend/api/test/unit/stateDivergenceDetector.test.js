@@ -1,5 +1,9 @@
-﻿import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import StateDivergenceDetector from '../../src/services/blockchain/stateDivergenceDetector.js';
+
+vi.mock('@sentry/node', () => ({
+  captureException: vi.fn(),
+}));
 
 vi.mock('../../src/middleware/logger.js', () => ({
   default: {
@@ -15,6 +19,9 @@ vi.mock('../../src/core/performanceMetrics.js', () => ({
 }));
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: { from: vi.fn() },
   supabaseAdmin: null,
 }));
@@ -110,6 +117,54 @@ describe('StateDivergenceDetector', () => {
       const result = await detector.resolveDivergence('unknown-id', {});
       expect(result.success).toBe(false);
       expect(result.reason).toBe('divergence_not_found');
+    });
+  });
+
+  describe('startMonitoring', () => {
+    it('skips an interval tick while the previous divergence check is still running', async () => {
+      vi.useFakeTimers();
+      try {
+        let resolveCheck;
+        detector.checkForDivergence = vi.fn(() => new Promise((resolve) => {
+          resolveCheck = resolve;
+        }));
+
+        detector.startMonitoring();
+        await vi.advanceTimersByTimeAsync(30000);
+        expect(detector.checkForDivergence).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(30000);
+        expect(detector.checkForDivergence).toHaveBeenCalledTimes(1);
+
+        detector.stopMonitoring();
+        resolveCheck({ divergenceDetected: false });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('unrefs the monitoring timer and resets state when stopped', () => {
+      const unref = vi.fn();
+      const timer = { unref };
+      const setIntervalSpy = vi.spyOn(globalThis, 'setInterval').mockReturnValue(timer);
+      const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => {});
+
+      try {
+        detector.startMonitoring();
+
+        expect(setIntervalSpy).toHaveBeenCalled();
+        expect(unref).toHaveBeenCalledTimes(1);
+
+        detector.checkRunning = true;
+        detector.stopMonitoring();
+
+        expect(clearIntervalSpy).toHaveBeenCalledWith(timer);
+        expect(detector.monitoringTimer).toBeNull();
+        expect(detector.checkRunning).toBe(false);
+      } finally {
+        setIntervalSpy.mockRestore();
+        clearIntervalSpy.mockRestore();
+      }
     });
   });
 

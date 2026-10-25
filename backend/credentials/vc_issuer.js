@@ -181,13 +181,27 @@ export class W3cCredentialIssuer {
   }
 
   isRevoked(statusListBitstringHex, index) {
+    if (
+      typeof statusListBitstringHex !== 'string' ||
+      statusListBitstringHex.length === 0 ||
+      statusListBitstringHex.length % 2 !== 0 ||
+      !/^[0-9a-fA-F]+$/.test(statusListBitstringHex)
+    ) {
+      throw new TypeError('Status-list bitstring must be a non-empty even-length hexadecimal string.');
+    }
+
+    if (!Number.isSafeInteger(index) || index < 0) {
+      throw new RangeError('Status-list index must be a non-negative safe integer.');
+    }
+
     const byteIndex = Math.floor(index / 8);
     const bitOffset = index % 8;
-
     const buffer = Buffer.from(statusListBitstringHex, 'hex');
-    if (byteIndex >= buffer.length) return false;
 
-    // Check if bit at index is set to 1 (indicating revoked status)
+    if (byteIndex >= buffer.length) {
+      throw new RangeError('Status-list index is outside the supplied bitstring.');
+    }
+
     return (buffer[byteIndex] & (1 << bitOffset)) !== 0;
   }
 }

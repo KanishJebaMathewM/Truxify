@@ -7,6 +7,7 @@ import logger from '../../api/src/middleware/logger.js';
 import { resolveUserFromTrustedHeaders } from '../shared/trustedIdentity.js';
 import { generateOrderDisplayId } from '../../api/src/lib/orderDisplayId.js';
 import { createLoaders } from '../gateway/authContext.js';
+import { mapOrder } from '../shared/orderMapping.js';
 
 const ADMIN_ROLES = new Set(['ADMIN', 'admin']);
 
@@ -21,30 +22,6 @@ function isAdmin(user) {
     return ADMIN_ROLES.has(user?.role);
 }
 
-function mapOrder(row) {
-    if (!row) return row;
-
-    return {
-        ...row,
-        customerId: row.customerId ?? row.customer_id,
-        driverId: row.driverId ?? row.driver_id,
-        cargoType: row.cargoType ?? row.goods_type,
-        weight: row.weight ?? row.weight_tonnes,
-        amount: row.amount ?? row.total_amount,
-        pickup: {
-            lat: row.pickup_lat,
-            lng: row.pickup_lng,
-            address: row.pickup_address,
-        },
-        dropoff: {
-            lat: row.drop_lat,
-            lng: row.drop_lng,
-            address: row.drop_address,
-        },
-        createdAt: row.createdAt ?? row.created_at,
-        updatedAt: row.updatedAt ?? row.updated_at,
-    };
-}
 
 const ORDER_STATUS_TO_DB = {
     PENDING: 'pending',
@@ -60,8 +37,40 @@ function toDbStatus(status) {
     if (!status) return status;
     return ORDER_STATUS_TO_DB[status] || status.toLowerCase();
 }
+// backend/graphql/services/order.service.js
 
-const typeDefs = gql`
+/**
+ * Inserts a new order using canonical table columns.
+ */
+export async function createOrder(input) {
+  const payload = {
+    customer_id: input.customerId,
+    cargo_type: input.cargoType,
+    pickup_address: input.pickup.address,
+    pickup_lat: input.pickup.latitude,
+    pickup_lng: input.pickup.longitude,
+    dropoff_address: input.dropoff.address,
+    dropoff_lat: input.dropoff.latitude,
+    dropoff_lng: input.dropoff.longitude,
+    total_amount: input.amount,
+    distance_km: input.distance,
+    weight_tonnes: input.weight,
+    status: 'PENDING'
+  };
+
+  const { data, error } = await supabaseAdmin
+    .from('orders')
+    .insert([payload])
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to create order: ${error.message}`);
+  }
+
+  return mapOrder(data);
+}
+export const typeDefs = gql`
     extend type Query {
         order(id: ID!): Order
         orders(status: OrderStatus, limit: Int, offset: Int): [Order]
@@ -89,8 +98,6 @@ const typeDefs = gql`
         createdAt: String!
         updatedAt: String!
         driver: Driver @external
-        payment: Payment @external
-        trip: Trip @external
     }
 
     type Location {
@@ -137,18 +144,9 @@ const typeDefs = gql`
         orders: [Order]
     }
 
-    extend type Payment @key(fields: "id") {
-        id: ID! @external
-        order: Order
-    }
-
-    extend type Trip @key(fields: "id") {
-        id: ID! @external
-        order: Order
-    }
 `;
 
-const resolvers = {
+export const resolvers = {
     Query: {
         order: async (_, { id }, { user }) => {
             const currentUser = requireUser(user);
@@ -233,6 +231,11 @@ const resolvers = {
         },
         updateOrder: async (_, { id, input }, { user }) => {
             const currentUser = requireUser(user);
+            // Customer lifecycle transitions must run the REST OTP/escrow
+            // checks, rather than patching the order status directly.
+            if (!isAdmin(currentUser) && input.status != null) {
+                throw new Error('Order status changes require the REST lifecycle endpoints.');
+            }
             const updates = {
                 status: toDbStatus(input.status),
                 pickup_address: input.pickup?.address ?? undefined,
@@ -288,32 +291,6 @@ const resolvers = {
             if (!order.driverId) return null;
             // Fetch driver from driver service
             return { id: order.driverId };
-        },
-        payment: async (order, _, context) => {
-            if (!context.loaders) {
-                const { data, error } = await supabase
-                    .from('payments')
-                    .select('*')
-                    .eq('order_id', order.id)
-                    .single();
-                
-                if (error) return null;
-                return data;
-            }
-            return context.loaders.paymentLoader.load(order.id);
-        },
-        trip: async (order, _, context) => {
-            if (!context.loaders) {
-                const { data, error } = await supabase
-                    .from('trips')
-                    .select('*')
-                    .eq('order_id', order.id)
-                    .single();
-                
-                if (error) return null;
-                return data;
-            }
-            return context.loaders.tripLoader.load(order.id);
         }
     }
 };

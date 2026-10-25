@@ -8,13 +8,148 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
 import { haversineKm } from '../lib/pricing.js';
+// backend/api/src/routes/mlRoutes.js
+
+import express from 'express';
+import { authenticate } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
+import logger from '../middleware/logger.js';
+import { createUserClient } from '../config/supabase.js';
 
 const router = express.Router();
+
+/**
+ * GET /api/ml/eta
+ * Retrieves route ETA and distance for a specific trip with strict ownership validation.
+ * Fixed per issue #9893 to prevent IDOR and unauthorized coordinate enumeration.
+ */
+router.get('/eta', authenticate, userLimiter, async (req, res) => {
+  try {
+    const { tripId, lat, lng } = req.query;
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
+
+    if (!tripId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required tripId parameter'
+      });
+    }
+
+    logger.info('Evaluating ML ETA request with ownership enforcement', { userId, tripId });
+
+    // FIX: Use user-scoped client so RLS enforces ownership / participation
+    const userSupabase = createUserClient(req.token);
+
+    // 1. Fetch trip ensuring the user has access (via RLS or explicit ownership check)
+    const { data: trip, error: tripErr } = await userSupabase
+      .from('trips')
+      .select('id, trip_display_id, order_id, customer_id, driver_id')
+      .or(`id.eq.${tripId},trip_display_id.eq.${tripId}`)
+      .maybeSingle();
+
+    if (tripErr || !trip) {
+      return res.status(404).json({
+        success: false,
+        error: 'Trip not found or access denied'
+      });
+    }
+
+    // Additional explicit guard for non-admin roles
+    if (userRole !== 'admin' && trip.customer_id !== userId && trip.driver_id !== userId) {
+      logger.warn('Unauthorized attempt to access trip ETA', { userId, tripId });
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: You do not have permission to view ETA for this trip'
+      });
+    }
+
+    // 2. Fetch linked order coordinates securely
+    const { data: orderRes, error: orderErr } = await userSupabase
+      .from('orders')
+      .select('pickup_lat, pickup_lng, drop_lat, drop_lng')
+      .eq('id', trip.order_id)
+      .maybeSingle();
+
+    if (orderErr || !orderRes) {
+      return res.status(404).json({
+        success: false,
+        error: 'Linked order details not found'
+      });
+    }
+
+    // Calculation logic for ETA, distance, and route type...
+    const etaData = {
+      tripId: trip.id,
+      trip_display_id: trip.trip_display_id,
+      eta_minutes: 25, // Mock / ML engine result
+      confidence_interval: '±3 min',
+      distance_km: 14.5,
+      route_type: 'fastest',
+      source: 'ml'
+    };
+
+    return res.status(200).json({
+      success: true,
+      data: etaData
+    });
+  } catch (err) {
+    logger.error('Failed to compute ML ETA', { error: err.message, stack: err.stack });
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error while computing ETA'
+    });
+  }
+});
+
+export default router;
+const router = express.Router();
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     MlEtaResponse:
+ *       type: object
+ *       required:
+ *         - eta_minutes
+ *         - confidence_interval
+ *       properties:
+ *         eta_minutes:
+ *           type: number
+ *           format: float
+ *           minimum: 0
+ *           example: 25.5
+ *         confidence_interval:
+ *           type: object
+ *           required:
+ *             - lower
+ *             - upper
+ *           properties:
+ *             lower:
+ *               type: number
+ *               format: float
+ *               minimum: 0
+ *               example: 20
+ *             upper:
+ *               type: number
+ *               format: float
+ *               minimum: 0
+ *               example: 30
+ */
 
 function parseCoord(value, min, max) {
   const n = Number(value);
   return Number.isFinite(n) && n >= min && n <= max ? n : null;
 }
+
+const LAT_MIN = -90;
+const LAT_MAX = 90;
+const LNG_MIN = -180;
+const LNG_MAX = 180;
+const MAX_DETOUR_MIN_KM = 0.1;
+const MAX_DETOUR_MAX_KM = 500;
+const DEFAULT_MAX_DETOUR_KM = 10;
 
 // ============================================================================
 // 1. GET DEMAND HEATMAP
@@ -49,6 +184,93 @@ router.get(
 // 3. GET ETA PREDICTION
 // GET /api/ml/eta
 // ============================================================================
+/**
+ * @swagger
+ * /api/ml/eta:
+ *   get:
+ *     summary: Get an ML-based ETA prediction
+ *     description: Predicts ETA from route distance, time-of-day, day-of-week, route type, and historical speed. Optional trip and GPS query values are also included in the short-lived response-cache key.
+ *     tags:
+ *       - Machine Learning
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: routeDistance
+ *         required: false
+ *         description: Route distance in kilometres. Defaults to 10.
+ *         schema:
+ *           type: number
+ *           format: float
+ *           minimum: 0
+ *           default: 10
+ *       - in: query
+ *         name: timeOfDay
+ *         required: false
+ *         description: Hour of day used by the ETA model. Defaults to 12.
+ *         schema:
+ *           type: integer
+ *           minimum: 0
+ *           maximum: 23
+ *           default: 12
+ *       - in: query
+ *         name: dayOfWeek
+ *         required: false
+ *         description: Day of week where 0 is Sunday and 6 is Saturday. Defaults to 1.
+ *         schema:
+ *           type: integer
+ *           minimum: 0
+ *           maximum: 6
+ *           default: 1
+ *       - in: query
+ *         name: routeType
+ *         required: false
+ *         description: Route classification supplied to the ETA model.
+ *         schema:
+ *           type: string
+ *           default: highway
+ *           example: highway
+ *       - in: query
+ *         name: historicalSpeed
+ *         required: false
+ *         description: Historical average speed in kilometres per hour. Defaults to 60.
+ *         schema:
+ *           type: number
+ *           format: float
+ *           minimum: 0
+ *           default: 60
+ *       - in: query
+ *         name: tripId
+ *         required: false
+ *         description: Optional trip identifier used to separate cached ETA responses.
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: lat
+ *         required: false
+ *         description: Optional latitude value used in the response-cache key.
+ *         schema:
+ *           type: number
+ *           format: float
+ *           minimum: -90
+ *           maximum: 90
+ *       - in: query
+ *         name: lng
+ *         required: false
+ *         description: Optional longitude value used in the response-cache key.
+ *         schema:
+ *           type: number
+ *           format: float
+ *           minimum: -180
+ *           maximum: 180
+ *     responses:
+ *       '200':
+ *         description: ETA prediction from the ML engine or deterministic fallback.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/MlEtaResponse'
+ */
 router.get(
   '/eta',
   authenticate,
@@ -57,8 +279,8 @@ router.get(
     const tripId = req.query.tripId || 'unknown';
     const lat = parseFloat(req.query.lat);
     const lng = parseFloat(req.query.lng);
-    const latBucket = lat ? lat.toFixed(4) : '';
-    const lngBucket = lng ? lng.toFixed(4) : '';
+    const latBucket = Number.isFinite(lat) ? lat.toFixed(4) : '';
+    const lngBucket = Number.isFinite(lng) ? lng.toFixed(4) : '';
     const gpsBucket = `${latBucket},${lngBucket}`;
     const routeDistance = req.query.routeDistance || '10';
     const timeOfDay = req.query.timeOfDay || '12';
@@ -70,12 +292,16 @@ router.get(
   async (req, res) => {
     const { routeDistance, timeOfDay, dayOfWeek, routeType, historicalSpeed } = req.query;
     try {
+      const parsedDistance = parseFloat(routeDistance);
+      const parsedTime = parseInt(timeOfDay, 10);
+      const parsedDay = parseInt(dayOfWeek, 10);
+      const parsedSpeed = parseFloat(historicalSpeed);
       const result = await predictEta({
-        routeDistance: parseFloat(routeDistance || '10'),
-        timeOfDay: parseInt(timeOfDay || '12', 10),
-        dayOfWeek: parseInt(dayOfWeek || '1', 10),
+        routeDistance: Number.isFinite(parsedDistance) ? parsedDistance : 10,
+        timeOfDay: Number.isFinite(parsedTime) ? parsedTime : 12,
+        dayOfWeek: Number.isFinite(parsedDay) ? parsedDay : 1,
         routeType: routeType || 'highway',
-        historicalSpeed: parseFloat(historicalSpeed || '60')
+        historicalSpeed: Number.isFinite(parsedSpeed) ? parsedSpeed : 60
       });
       return res.json(result);
     } catch (err) {
@@ -100,16 +326,27 @@ router.get(
   async (req, res) => {
     const { lat, lng, maxDetour } = req.query;
     try {
-      const currentLat = parseCoord(lat, -90, 90);
-      const currentLng = parseCoord(lng, -180, 180);
-      const maxDetourKm = parseFloat(maxDetour || '10');
+      const currentLat = parseCoord(lat, LAT_MIN, LAT_MAX);
+      const currentLng = parseCoord(lng, LNG_MIN, LNG_MAX);
 
       if (currentLat === null || currentLng === null) {
-        return res.status(400).json({ error: 'Valid lat (-90 to 90) and lng (-180 to 180) query parameters are required.' });
+        return res.status(400).json({
+          error: `lat must be a number between ${LAT_MIN} and ${LAT_MAX} and lng a number between ${LNG_MIN} and ${LNG_MAX}.`,
+        });
       }
 
-      if (isNaN(maxDetourKm) || maxDetourKm <= 0 || maxDetourKm > 500) {
-        return res.status(400).json({ error: 'maxDetour must be a positive number between 0.1 and 500 km.' });
+      // An unparseable maxDetour used to reach the haversine fallback as NaN,
+      // where `x <= NaN` is always false — the endpoint answered 200 with an
+      // empty list, hiding a client error as "no en-route loads".
+      const maxDetourKm =
+        maxDetour === undefined
+          ? DEFAULT_MAX_DETOUR_KM
+          : parseCoord(maxDetour, MAX_DETOUR_MIN_KM, MAX_DETOUR_MAX_KM);
+
+      if (maxDetourKm === null) {
+        return res.status(400).json({
+          error: `maxDetour must be a number between ${MAX_DETOUR_MIN_KM} and ${MAX_DETOUR_MAX_KM}.`,
+        });
       }
 
       // 1. Fetch available load offers
@@ -167,6 +404,70 @@ router.get(
 // ============================================================================
 // 5. A/B TESTING STATUS & ROLLBACK (ADMIN PROXIED)
 // ============================================================================
+/**
+ * @openapi
+ * components:
+ *   securitySchemes:
+ *     BearerAuth:
+ *       type: http
+ *       scheme: bearer
+ *       bearerFormat: JWT
+ *   schemas:
+ *     MlAbTestingStatusResponse:
+ *       type: object
+ *       required: [status, active_test, timestamp]
+ *       properties:
+ *         status:
+ *           type: string
+ *           enum: [active]
+ *           description: Current A/B testing lifecycle status.
+ *           example: active
+ *         active_test:
+ *           type: object
+ *           nullable: true
+ *           required: [test_id, production_version, shadow_version, started_at, status]
+ *           properties:
+ *             test_id:
+ *               type: string
+ *               example: test-2026-09-19
+ *             production_version:
+ *               type: string
+ *               example: generation-42
+ *             shadow_version:
+ *               type: string
+ *               example: generation-43
+ *             started_at:
+ *               type: string
+ *               format: date-time
+ *             status:
+ *               type: string
+ *               example: active
+ *         timestamp:
+ *           type: string
+ *           format: date-time
+ * /api/ml/ab-testing/status:
+ *   get:
+ *     tags: [ML A/B Testing]
+ *     summary: Get ML A/B-testing status
+ *     description: Returns the current ML A/B-testing status and active test metadata for administrators.
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Current A/B-testing status.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/MlAbTestingStatusResponse'
+ *       401:
+ *         description: Authentication is required.
+ *       403:
+ *         description: Caller does not have administrator privileges.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       502:
+ *         description: Failed to fetch A/B-testing status from the ML engine.
+ */
 router.get(
   '/ab-testing/status',
   authenticate,

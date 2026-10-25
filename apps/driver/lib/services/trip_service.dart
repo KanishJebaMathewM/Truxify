@@ -1,7 +1,50 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'api_client.dart';
+// apps/driver/lib/services/trip_service.dart (Excerpt)
 
+Future<List<TripItem>> fetchTripItems(String tripDisplayId) async {
+  try {
+    // FIX: Correct endpoint path to target the mounted driver route per issue #1897
+    final response = await dio.get('/api/driver/trips/$tripDisplayId/items');
+
+    if (response.statusCode == 200 && response.data['success'] == true) {
+      final List<dynamic> data = response.data['items'];
+      return data.map((json) => TripItem.fromJson(json)).toList();
+    } else {
+      throw Exception('Failed to load trip items: ${response.statusMessage}');
+    }
+  } catch (err) {
+    logger.error('Error fetching trip items for $tripDisplayId: $err');
+    rethrow;
+  }
+}
+class TripService {
+  final ApiClient _apiClient;
+
+  TripService(this._apiClient);
+
+  Future<List<TripStop>> fetchTripStops(String tripDisplayId) async {
+    // FIX: Update endpoint prefix from /api/trips/ to /api/driver/trips/ per issue #1898
+    final response = await _apiClient.get('/api/driver/trips/$tripDisplayId/stops');
+    
+    if (response.statusCode == 200) {
+      final List data = response.data['stops'] ?? [];
+      return data.map((json) => TripStop.fromJson(json)).toList();
+    }
+    throw Exception('Failed to fetch trip stops: ${response.statusMessage}');
+  }
+
+  Future<RouteMapData> fetchRouteMapPoints(String tripDisplayId) async {
+    // FIX: Update endpoint prefix from /api/trips/ to /api/driver/trips/ per issue #1898
+    final response = await _apiClient.get('/api/driver/trips/$tripDisplayId/route-points');
+    
+    if (response.statusCode == 200) {
+      return RouteMapData.fromJson(response.data);
+    }
+    throw Exception('Failed to fetch route map points: ${response.statusMessage}');
+  }
+}
 class TripService {
   TripService({
     SupabaseClient? client,
@@ -23,16 +66,6 @@ class TripService {
 
   String? _lastErrorMessage;
   bool _isDisposed = false;
-
-  String _requireNonEmpty(String value, String name) {
-    if (value.isEmpty) throw ArgumentError('$name must not be empty');
-    return value;
-  }
-
-  Map<String, dynamic> _sanitizePayload(Map<String, dynamic> payload) {
-    payload.removeWhere((k, v) => v == null);
-    return payload;
-  }
 
   String get _driverId {
     final user = _client.auth.currentUser;
@@ -151,7 +184,7 @@ class TripService {
   Future<List<Map<String, dynamic>>> fetchTripStops(
     String tripDisplayId,
   ) async {
-    final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/stops';
+    final path = '/api/driver/trips/${_encodePathSegment(tripDisplayId)}/stops';
     try {
       final body = await _apiClient.get(path);
       if (body is! List) {
@@ -167,7 +200,7 @@ class TripService {
   Future<List<Map<String, dynamic>>> fetchRouteMapPoints(
     String tripDisplayId,
   ) async {
-    final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/route-points';
+    final path = '/api/driver/trips/${_encodePathSegment(tripDisplayId)}/route-points';
     try {
       final body = await _apiClient.get(path);
       if (body is! List) {
@@ -185,7 +218,7 @@ class TripService {
     String tripDisplayId,
   ) async {
     await verifyTripOwnership(tripDisplayId);
-    final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/stops/${_encodePathSegment(stopId)}/complete';
+    final path = '/api/v1/trips/${_encodePathSegment(tripDisplayId)}/stops/${_encodePathSegment(stopId)}/complete';
     try {
       await _apiClient.put(path);
     } catch (e) {
@@ -209,7 +242,7 @@ class TripService {
 
   Future<void> startTrip(String tripDisplayId) async {
     await verifyTripOwnership(tripDisplayId);
-    final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/start';
+    final path = '/api/v1/trips/${_encodePathSegment(tripDisplayId)}/start';
     try {
       await _apiClient.put(path);
     } catch (e) {

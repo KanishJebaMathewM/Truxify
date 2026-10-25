@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import '../../lib/screens/earnings_dashboard.dart';
-import '../../lib/services/api_client.dart';
+import 'package:truxify_driver/screens/earnings_dashboard.dart';
+import 'package:truxify_driver/services/api_client.dart';
 
 class _FakeApiClient extends ApiClient {
   _FakeApiClient(this.responses) : super(baseUrl: 'https://example.com');

@@ -75,22 +75,28 @@ function makeQueryChain(data) {
   return chain;
 }
 
-const { supabase, supabaseAdmin, createUserClient } = vi.hoisted(() => {
+const { supabase, supabaseAdmin, createUserClient, getAdminClient } = vi.hoisted(() => {
   const fromFn = vi.fn();
   // Each call to from() returns a fresh chain that resolves to null by default;
   // tests can override supabaseAdmin.from via mockImplementation to inject data.
   fromFn.mockImplementation(() => makeQueryChain(null));
+  const admin = { from: fromFn };
   return {
     supabase: { from: fromFn },
-    supabaseAdmin: { from: fromFn },
+    supabaseAdmin: admin,
     createUserClient: vi.fn(() => ({ from: fromFn })),
+    getAdminClient: vi.fn(() => admin),
   };
 });
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase,
   supabaseAdmin,
   createUserClient,
+  getAdminClient,
 }));
 
 import supportRoutes from '../../src/routes/supportRoutes.js';
@@ -290,6 +296,56 @@ describe('supportRoutes', () => {
       expect(res.status).toBe(201);
     });
 
+    it('sr19: bounds assignment queries and picks the lowest-load agent in the snapshot', async () => {
+      const agentQuery = {
+        select: vi.fn().mockReturnThis(),
+        in: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockResolvedValue({
+          data: [{ id: 'agent-1' }, { id: 'agent-2' }],
+          error: null,
+        }),
+      };
+      const ticketQuery = {
+        select: vi.fn().mockReturnThis(),
+        in: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockResolvedValue({
+          data: [
+            { assigned_to: 'agent-1' },
+            { assigned_to: 'agent-1' },
+            { assigned_to: 'agent-2' },
+          ],
+          error: null,
+        }),
+      };
+      supabaseAdmin.from
+        .mockImplementationOnce(() => agentQuery)
+        .mockImplementationOnce(() => ticketQuery);
+
+      const insert = vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          single: vi.fn().mockResolvedValue({
+            data: { id: VALID_UUID, assigned_to: 'agent-2' },
+            error: null,
+          }),
+        }),
+      });
+      createUserClient.mockReturnValue({
+        from: vi.fn().mockReturnValue({ insert }),
+      });
+
+      const res = await request(makeApp())
+        .post('/support/tickets')
+        .send({ subject: 'Assignment test', category: 'general' });
+
+      expect(res.status).toBe(201);
+      expect(agentQuery.limit).toHaveBeenCalledWith(100);
+      expect(ticketQuery.limit).toHaveBeenCalledWith(5000);
+      expect(insert).toHaveBeenCalledWith(
+        expect.objectContaining({ assigned_to: 'agent-2' }),
+      );
+    });
+
     it('sr13: uses subject as description when description is empty', async () => {
       const mockFrom = vi.fn().mockReturnValue({
         insert: vi.fn().mockReturnValue({
@@ -325,12 +381,17 @@ describe('supportRoutes', () => {
           select: vi.fn().mockReturnValue({
             eq: vi.fn().mockReturnValue({
               order: vi.fn().mockReturnValue({
-                range: vi.fn().mockResolvedValue({ data: mockTickets, error: null, count: 2 }),
+                range: vi.fn().mockResolvedValue({
+                  data: mockTickets,
+                  error: null,
+                  count: 2,
+                }),
               }),
             }),
           }),
         }),
       });
+      
 
       const res = await request(makeApp()).get('/support/tickets');
 

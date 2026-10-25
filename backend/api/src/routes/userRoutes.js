@@ -98,10 +98,14 @@ router.post(
   deviceLimiter,
   validateBody(fcmTokenSchema),
   async (req, res) => {
-    const userId = req.user?.id;
-    const { fcmToken } = req.body;
+  const userId = req.user?.id;
+  const { fcmToken } = req.body;
 
-    try {
+  if (!userId) {
+    return res.status(400).json({ error: 'userId is required.' });
+  }
+
+  try {
       // Update through the caller's authenticated client. The anon client has
       // no UPDATE on profiles, so a session-less UPDATE silently matches 0
       // rows (null error) and the token is never persisted.

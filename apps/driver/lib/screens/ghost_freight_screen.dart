@@ -154,7 +154,7 @@ class _GhostFreightScreenState extends State<GhostFreightScreen> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: badgeColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+              decoration: BoxDecoration(color: badgeColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
               child: Row(
                 children: [
                   Icon(icon, color: badgeColor),

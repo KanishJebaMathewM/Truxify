@@ -1,0 +1,29 @@
+name: Autoencoder shared topology
+on:
+  pull_request:
+    paths:
+      - 'backend/ml/anomaly/models.py'
+      - 'backend/ml/tests/test_autoencoder_shared_topology.py'
+      - '.github/workflows/autoencoder-shared-topology.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-tensorflow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TF_CPP_MIN_LOG_LEVEL: '2'
+      TF_NUM_INTRAOP_THREADS: '1'
+      TF_NUM_INTEROP_THREADS: '1'
+      PYTHONPATH: backend/ml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: python -m pip install tensorflow==2.16.1 keras==3.15.1 numpy==1.26.4 pytest==9.0.3 ruff==0.16.9
+      - run: python -m ruff check backend/ml/anomaly/models.py backend/ml/tests/test_autoencoder_shared_topology.py
+      - run: python -m pytest -q backend/ml/tests/test_autoencoder_shared_topology.py

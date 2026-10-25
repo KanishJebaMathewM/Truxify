@@ -9,18 +9,20 @@ contract MockZkEVM {
     mapping(address => uint256) public balances;
     address public bridge;
 
+    constructor(address _bridge) {
+        require(_bridge != address(0), "Invalid bridge");
+        bridge = _bridge;
+    }
+
     function depositToL2() external payable {
         require(msg.value > 0, "Amount must be > 0");
         balances[msg.sender] += msg.value;
     }
 
     /// @notice Test-only bridge deposit preserving the original user's identity.
-    /// @dev The first bridge caller becomes the configured bridge for this mock.
+    /// @dev The bridge is configured once in the constructor.
     /// @param user User whose L2 balance receives the deposited value.
     function depositToL2(address user) external payable {
-        if (bridge == address(0)) {
-            bridge = msg.sender;
-        }
         require(msg.sender == bridge, "MockZkEVM: caller is not bridge");
         require(user != address(0), "Invalid user");
         require(msg.value > 0, "Amount must be > 0");
@@ -31,7 +33,8 @@ contract MockZkEVM {
         require(amount > 0, "Amount must be > 0");
         require(balances[msg.sender] >= amount, "Insufficient balance");
         balances[msg.sender] -= amount;
-        payable(msg.sender).transfer(amount);
+        (bool sent, ) = payable(msg.sender).call{value: amount}("");
+        require(sent, "Withdrawal transfer failed");
     }
 
     /// @notice Test-only bridge withdrawal preserving the original user's identity.
@@ -46,7 +49,8 @@ contract MockZkEVM {
         require(amount > 0, "Amount must be > 0");
         require(balances[user] >= amount, "Insufficient balance");
         balances[user] -= amount;
-        payable(msg.sender).transfer(amount);
+        (bool sent, ) = payable(msg.sender).call{value: amount}("");
+        require(sent, "Withdrawal transfer failed");
     }
 
     function getBalance(address user) external view returns (uint256) {

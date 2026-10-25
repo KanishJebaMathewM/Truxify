@@ -121,13 +121,13 @@ class _EngineTwinScreenState extends State<EngineTwinScreen> {
     return Card(
       elevation: 8,
       color: Colors.black,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: glowColor.withOpacity(0.5), width: 2)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: glowColor.withValues(alpha: 0.5), width: 2)),
       child: Container(
         height: 250,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
           gradient: RadialGradient(
-            colors: [glowColor.withOpacity(0.2), Colors.black],
+            colors: [glowColor.withValues(alpha: 0.2), Colors.black],
             radius: 0.8,
           ),
         ),
@@ -135,7 +135,7 @@ class _EngineTwinScreenState extends State<EngineTwinScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.precision_manufacturing, size: 100, color: glowColor.withOpacity(0.8)),
+              Icon(Icons.precision_manufacturing, size: 100, color: glowColor.withValues(alpha: 0.8)),
               const SizedBox(height: 16),
               Text(
                 s.activeFaultCode == null ? 'VIRTUAL ENGINE RENDER: NOMINAL' : 'ISOLATING FAULT LOCATION...',

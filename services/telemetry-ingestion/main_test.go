@@ -839,19 +839,6 @@ func TestGeofenceHTTPRejectsOutOfRangeTarget(t *testing.T) {
 	}
 }
 
-package main
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"sync"
-	"sync/atomic"
-	"testing"
-	"time"
-)
 
 // TestConcurrentRateLimitEviction verifies that an in-flight request's rate 
 // window is not reset if its entry is evicted by a concurrent overflow sweep.

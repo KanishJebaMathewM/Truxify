@@ -54,7 +54,7 @@ describe('AtomicSwapService tokenAddress resolution and tx value calculation', (
   it('createSwap funds native swap with parsed amount when tokenAddress is omitted/null', async () => {
     const counterparty = '0x0000000000000000000000000000000000000001';
     const amount = '1.5';
-    const secret = 'test-secret-1';
+    const secret = 'test-secret-1-xx';
     const initiator = '0x0000000000000000000000000000000000000002';
 
     const result = await swapService.createSwap(counterparty, null, amount, secret, initiator);
@@ -71,7 +71,7 @@ describe('AtomicSwapService tokenAddress resolution and tx value calculation', (
   it('createSwap funds native swap with parsed amount when tokenAddress is ethers.ZeroAddress', async () => {
     const counterparty = '0x0000000000000000000000000000000000000001';
     const amount = '2.0';
-    const secret = 'test-secret-2';
+    const secret = 'test-secret-2-xx';
     const initiator = '0x0000000000000000000000000000000000000002';
 
     const result = await swapService.createSwap(counterparty, ethers.ZeroAddress, amount, secret, initiator);
@@ -89,7 +89,7 @@ describe('AtomicSwapService tokenAddress resolution and tx value calculation', (
     const counterparty = '0x0000000000000000000000000000000000000001';
     const erc20Token = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
     const amount = '100';
-    const secret = 'test-secret-3';
+    const secret = 'test-secret-3-xx';
     const initiator = '0x0000000000000000000000000000000000000002';
 
     const result = await swapService.createSwap(counterparty, erc20Token, amount, secret, initiator);
@@ -107,7 +107,7 @@ describe('AtomicSwapService tokenAddress resolution and tx value calculation', (
     const destChainId = 1;
     const counterparty = '0x0000000000000000000000000000000000000001';
     const amount = '0.5';
-    const secret = 'test-secret-4';
+    const secret = 'test-secret-4-xx';
     const initiator = '0x0000000000000000000000000000000000000002';
 
     const result = await swapService.createCrossChainSwap(destChainId, counterparty, undefined, amount, secret, initiator);
@@ -126,7 +126,7 @@ describe('AtomicSwapService tokenAddress resolution and tx value calculation', (
     const counterparty = '0x0000000000000000000000000000000000000001';
     const erc20Token = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
     const amount = '50';
-    const secret = 'test-secret-5';
+    const secret = 'test-secret-5-xx';
     const initiator = '0x0000000000000000000000000000000000000002';
 
     const result = await swapService.createCrossChainSwap(destChainId, counterparty, erc20Token, amount, secret, initiator);

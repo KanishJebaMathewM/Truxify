@@ -134,7 +134,7 @@ class _GeoNotificationDashboardState extends State<GeoNotificationDashboard> {
           children: [
             Row(
               children: [
-                CircleAvatar(backgroundColor: color.withOpacity(0.2), child: Icon(icon, color: color)),
+                CircleAvatar(backgroundColor: color.withValues(alpha: 0.2), child: Icon(icon, color: color)),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(

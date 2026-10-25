@@ -152,9 +152,9 @@ class _DemandHeatmapScreenState extends State<DemandHeatmapScreen> {
   }
 
   Color _intensityColor(double intensity) {
-    if (intensity >= 0.75) return Colors.red.withOpacity(0.7);
-    if (intensity >= 0.5) return Colors.orange.withOpacity(0.7);
-    return Colors.green.withOpacity(0.7);
+    if (intensity >= 0.75) return Colors.red.withValues(alpha: 0.7);
+    if (intensity >= 0.5) return Colors.orange.withValues(alpha: 0.7);
+    return Colors.green.withValues(alpha: 0.7);
   }
 
   @override
@@ -246,7 +246,7 @@ class _DemandHeatmapScreenState extends State<DemandHeatmapScreen> {
                   point: LatLng(zone.lat, zone.lng),
                   radius: 40 + (zone.intensity * 40),
                   color: _intensityColor(zone.intensity),
-                  borderColor: _intensityColor(zone.intensity).withOpacity(0.9),
+                  borderColor: _intensityColor(zone.intensity).withValues(alpha: 0.9),
                   borderStrokeWidth: 2,
                 ),
               )

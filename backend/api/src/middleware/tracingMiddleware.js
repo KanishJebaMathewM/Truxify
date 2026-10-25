@@ -15,9 +15,9 @@ export const tracingMiddleware = (req, res, next) => {
             'http.method': req.method,
             'http.url': req.url,
             'http.path': req.path,
-            'http.user_agent': req.headers['user-agent'],
-            'http.client_ip': req.ip,
-            'request.id': req.requestId,
+            'http.user_agent': req.headers['user-agent'] || 'unknown',
+            'http.client_ip': req.ip || req.socket?.remoteAddress || 'unknown',
+            'request.id': req.requestId || 'unknown',
         }
     });
 
@@ -40,30 +40,32 @@ export const tracingMiddleware = (req, res, next) => {
         // Continue request
         next();
 
-        // End span after response
-        res.on('finish', () => {
+        // A response can emit more than one terminal event: an aborted
+        // connection often fires 'close' after 'error' or 'finish'. Ending the
+        // span twice corrupts its duration and produces duplicate exports.
+        let spanEnded = false;
+        const endSpan = (statusCode, error) => {
+            if (spanEnded) return;
+            spanEnded = true;
+
+            if (error) {
+                span.recordException(error);
+            }
             span.setAttributes({
-                'http.status_code': res.statusCode,
+                'http.status_code': statusCode,
                 'http.response_time_ms': Date.now() - req._startTime,
             });
-            
-            if (res.statusCode >= 400) {
-                span.setStatus({
-                    code: 2,
-                    message: `HTTP ${res.statusCode}`
-                });
-            }
-            
-            span.end();
-        });
-
-        res.on('error', (error) => {
-            span.recordException(error);
             span.setStatus({
-                code: 2,
-                message: error.message
+                code: statusCode >= 400 ? 2 : 1,
+                message: error?.message || (statusCode >= 400 ? `HTTP ${statusCode}` : undefined),
             });
             span.end();
+        };
+
+        res.once('finish', () => endSpan(res.statusCode));
+        res.once('error', (error) => endSpan(500, error));
+        res.once('close', () => {
+            if (!res.writableEnded) endSpan(499);
         });
     });
 };
@@ -74,7 +76,7 @@ export const sqlTracingMiddleware = (query, params) => {
         tracing.addAttributes(span, {
             'db.system': 'postgresql',
             'db.statement': query,
-            'db.bind_params': JSON.stringify(params),
+            'db.bind_params': JSON.stringify(params || []),
         });
         tracing.addEvent(span, 'sql.query.started');
         return span;
@@ -105,4 +107,38 @@ export const mongoTracingMiddleware = (operation, collection) => {
         return span;
     }
     return null;
+};
+
+export const webSocketTracingMiddleware = (event, socketId) => {
+    const span = tracing.createSpan(`WebSocket ${event}`);
+    if (span) {
+        tracing.addAttributes(span, {
+            'websocket.event': event,
+            'websocket.socket_id': socketId || 'unknown',
+        });
+        tracing.addEvent(span, 'websocket.message.received');
+        return span;
+    }
+    return null;
+};
+
+export const traceAsyncSpan = async (spanName, attributes = {}, asyncFn) => {
+    const tracer = tracing.getTracer();
+    const span = tracer.startSpan(spanName, { attributes });
+    const startTime = Date.now();
+
+    try {
+        const result = await asyncFn(span);
+        span.setAttributes({
+            'execution.time_ms': Date.now() - startTime,
+        });
+        span.setStatus({ code: 1 }); // OK
+        return result;
+    } catch (err) {
+        span.recordException(err);
+        span.setStatus({ code: 2, message: err.message }); // ERROR
+        throw err;
+    } finally {
+        span.end();
+    }
 };

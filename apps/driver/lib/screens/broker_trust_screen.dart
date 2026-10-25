@@ -123,7 +123,7 @@ class _BrokerTrustScreenState extends State<BrokerTrustScreen> {
                 ),
                 Container(
                   padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: scoreColor.withOpacity(0.1), shape: BoxShape.circle),
+                  decoration: BoxDecoration(color: scoreColor.withValues(alpha: 0.1), shape: BoxShape.circle),
                   child: Text('${b.trustScore}', style: TextStyle(color: scoreColor, fontSize: 28, fontWeight: FontWeight.bold)),
                 )
               ],

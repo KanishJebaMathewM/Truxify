@@ -18,7 +18,7 @@ def test_eta_prediction():
         "source_lng": 77.2090,
         "dest_lat": 28.7041,
         "dest_lng": 77.1025
-    }, headers=headers)
+    }, headers=headers, timeout=30)
     print("Prediction:", response.json())
 
     # 2. Update ETA with real tracking coordinates
@@ -27,15 +27,15 @@ def test_eta_prediction():
         "current_lng": 77.2090,
         "dest_lat": 28.7041,
         "dest_lng": 77.1025
-    }, headers=headers)
+    }, headers=headers, timeout=30)
     print("Real-time ETA:", response.json())
 
     # 3. Get traffic
-    response = requests.get(f"{BASE_URL}/eta/traffic/test_123", headers=headers)
+    response = requests.get(f"{BASE_URL}/eta/traffic/test_123", headers=headers, timeout=30)
     print("Traffic:", response.json())
 
     # 4. Get forecast
-    response = requests.get(f"{BASE_URL}/eta/forecast/test_123?hours=2", headers=headers)
+    response = requests.get(f"{BASE_URL}/eta/forecast/test_123?hours=2", headers=headers, timeout=30)
     print("Forecast:", response.json())
 
 if __name__ == "__main__":

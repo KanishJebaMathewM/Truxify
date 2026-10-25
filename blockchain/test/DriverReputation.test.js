@@ -1,52 +1,59 @@
 // blockchain/test/DriverReputation.test.js
-// Tests for on-chain driver reputation scoring
+// Tests for on-chain driver reputation scoring (Reputation contract)
 
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("DriverReputation Contract", function () {
+describe("Reputation Contract", function () {
   let reputation;
   let owner;
   let driver;
-  let customer;
+  let relayer;
 
   beforeEach(async function () {
-    [owner, driver, customer] = await ethers.getSigners();
+    [owner, driver, relayer] = await ethers.getSigners();
 
-    // ⚠️ Replace "DriverReputation" with your actual contract name
-    const ReputationFactory = await ethers.getContractFactory("DriverReputation");
-    reputation = await ReputationFactory.deploy();
+    // Reputation awards are relayer-gated: deploy with an initial relayer.
+    const ReputationFactory = await ethers.getContractFactory("Reputation");
+    reputation = await ReputationFactory.deploy(relayer.address);
     await reputation.waitForDeployment();
   });
 
   it("New driver starts with zero reputation score", async function () {
-    // ⚠️ Replace "getScore" with your actual function name
-    const score = await reputation.getScore(driver.address);
+    const score = await reputation.getReputation(driver.address);
     expect(score).to.equal(0);
   });
 
-  it("Score increases after successful delivery", async function () {
-    // ⚠️ Replace "addPositiveRating" with your actual function name
-    await reputation.connect(customer).addPositiveRating(driver.address, 5);
+  it("Score increases after a relayer award", async function () {
+    await reputation.connect(relayer).increaseReputation(driver.address, 5);
 
-    const score = await reputation.getScore(driver.address);
+    const score = await reputation.getReputation(driver.address);
     expect(score).to.be.greaterThan(0);
   });
 
-  it("Score does not exceed maximum (100)", async function () {
-    // Add many ratings
-    for (let i = 0; i < 10; i++) {
-      await reputation.connect(customer).addPositiveRating(driver.address, 5);
-    }
+  it("Score does not exceed MAX_REPUTATION", async function () {
+    const max = await reputation.MAX_REPUTATION();
 
-    const score = await reputation.getScore(driver.address);
-    expect(score).to.be.lessThanOrEqual(100);
+    await reputation.connect(relayer).increaseReputation(driver.address, max + 5000n);
+
+    const score = await reputation.getReputation(driver.address);
+    expect(score).to.equal(max);
+
+    // Once at the cap, further awards revert instead of overflowing.
+    await expect(
+      reputation.connect(relayer).increaseReputation(driver.address, 1)
+    ).to.be.revertedWith("already at max reputation");
   });
 
-  it("Rating out of range is rejected", async function () {
-    // Rating of 6 (outside 1-5 range) should fail
+  it("Zero-points award is rejected", async function () {
     await expect(
-      reputation.connect(customer).addPositiveRating(driver.address, 6)
-    ).to.be.reverted;
+      reputation.connect(relayer).increaseReputation(driver.address, 0)
+    ).to.be.revertedWith("Points must be > 0");
+  });
+
+  it("Non-relayer cannot award reputation", async function () {
+    await expect(
+      reputation.connect(driver).increaseReputation(driver.address, 5)
+    ).to.be.revertedWith("Not authorized relayer");
   });
 });

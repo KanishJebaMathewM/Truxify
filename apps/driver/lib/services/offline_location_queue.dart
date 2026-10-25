@@ -345,7 +345,7 @@ class OfflineLocationQueue {
     }
 
     await _store.insert({
-      'kind': QueueItemKind.kindTo(QueueItemKind.location),
+      'kind': QueueItem.kindTo(QueueItemKind.location),
       'driver_id': driverId,
       'order_id': orderId,
       'order_display_id': orderDisplayId,
@@ -374,7 +374,7 @@ class OfflineLocationQueue {
     }
     final now = DateTime.now();
     await _store.insert({
-      'kind': QueueItemKind.kindTo(QueueItemKind.milestone),
+      'kind': QueueItem.kindTo(QueueItemKind.milestone),
       'driver_id': driverId,
       'order_id': orderId,
       'order_display_id': null,

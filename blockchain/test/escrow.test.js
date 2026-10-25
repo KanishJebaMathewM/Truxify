@@ -3,7 +3,21 @@ import hre from "hardhat";
 const { ethers } = hre;
 
 async function assertRejectsWith(promise, message) {
-  await assert.rejects(promise, error => error.message.includes(message));
+  await assert.rejects(promise, error => {
+    if (error.message.includes(message)) return true;
+    // Hardhat cannot infer reason strings for this contract because two
+    // artifacts share the name "Escrow" (contracts/Escrow.sol and
+    // contracts/deprecated/Escrow.sol); fall back to decoding the raw
+    // Error(string) revert data carried on the error.
+    const data = error.data ?? error.info?.error?.data;
+    if (typeof data === "string" && data.startsWith("0x08c379a0")) {
+      try {
+        const reason = ethers.AbiCoder.defaultAbiCoder().decode(["string"], "0x" + data.slice(10))[0];
+        return reason.includes(message);
+      } catch { return false; }
+    }
+    return false;
+  });
 }
 
 function bookingId(label) {
@@ -13,7 +27,7 @@ function bookingId(label) {
 describe("Escrow", function () {
   async function deployEscrow() {
     const [owner, relayer, customer, driver, outsider] = await ethers.getSigners();
-    const Escrow = await ethers.getContractFactory("Escrow");
+    const Escrow = await ethers.getContractFactory("contracts/Escrow.sol:Escrow");
     const escrow = await Escrow.deploy(relayer.address);
     await escrow.waitForDeployment();
     return { escrow, owner, relayer, customer, driver, outsider };
@@ -42,13 +56,11 @@ describe("Escrow", function () {
 
     const driverBefore = await ethers.provider.getBalance(driver.address);
     await escrow.connect(relayer).releaseFunds(id);
-    const tx = await escrow.connect(driver).withdraw();
-    const receipt = await tx.wait();
-    const gasUsed = receipt.gasUsed * receipt.gasPrice;
     const driverAfter = await ethers.provider.getBalance(driver.address);
     const saved = await escrow.escrows(id);
 
-    assert.equal(driverAfter - driverBefore + gasUsed, amount);
+    // releaseFunds pays the driver directly (push) — no withdraw step exists.
+    assert.equal(driverAfter - driverBefore, amount);
     assert.equal(saved.status, 2n);
     assert.equal(saved.amount, 0n);
   });
@@ -59,17 +71,15 @@ describe("Escrow", function () {
     const amount = ethers.parseEther("0.25");
     await escrow.connect(customer).deposit(id, customer.address, driver.address, { value: amount });
 
-    await escrow.connect(relayer).refundFunds(id);
     const customerBefore = await ethers.provider.getBalance(customer.address);
-    const tx = await escrow.connect(customer).withdraw();
-    const receipt = await tx.wait();
-    const gasUsed = receipt.gasUsed * receipt.gasPrice;
+    await escrow.connect(relayer).refundFunds(id);
     const customerAfter = await ethers.provider.getBalance(customer.address);
     const saved = await escrow.escrows(id);
 
+    // refundFunds pays the customer directly (push) — no withdraw step exists.
     assert.equal(saved.status, 3n);
     assert.equal(saved.amount, 0n);
-    assert.equal(customerAfter - customerBefore + gasUsed, amount);
+    assert.equal(customerAfter - customerBefore, amount);
     assert.equal(await ethers.provider.getBalance(await escrow.getAddress()), 0n);
   });
 
@@ -96,21 +106,22 @@ describe("Escrow", function () {
     await assertRejectsWith(escrow.connect(outsider).refundFunds(id), "Not authorized relayer");
   });
 
-  it("rejects deposit from non-customer wallets (relayer / outsider)", async function () {
+  it("allows relayer deposits, rejects deposit from outsider wallets", async function () {
     const { escrow, relayer, customer, driver, outsider } = await deployEscrow();
-    const id = bookingId("only-customer-deposit");
     const amount = ethers.parseEther("0.1");
 
+    // deposit() authorises the customer, authorized relayers and the owner.
+    const relayerId = bookingId("relayer-deposit");
+    const tx = await escrow.connect(relayer).deposit(relayerId, customer.address, driver.address, { value: amount });
+    await tx.wait(); // relayer deposits are explicitly allowed
+
+    const outsiderId = bookingId("outsider-deposit");
     await assertRejectsWith(
-      escrow.connect(relayer).deposit(id, customer.address, driver.address, { value: amount }),
-      "Only customer can deposit"
+      escrow.connect(outsider).deposit(outsiderId, customer.address, driver.address, { value: amount }),
+      "Not authorized to deposit"
     );
-    await assertRejectsWith(
-      escrow.connect(outsider).deposit(id, customer.address, driver.address, { value: amount }),
-      "Only customer can deposit"
-    );
-    const tx = await escrow.connect(customer).deposit(id, customer.address, driver.address, { value: amount });
-    await tx.wait();  // should succeed
+    const tx2 = await escrow.connect(customer).deposit(outsiderId, customer.address, driver.address, { value: amount });
+    await tx2.wait();  // should succeed
   });
 
   it("blocks invalid state transitions and duplicate deposits", async function () {
@@ -135,90 +146,14 @@ describe("Escrow", function () {
     await escrow.connect(owner).setRelayer(owner.address, true);
     await escrow.connect(customer).deposit(id, customer.address, await attacker.getAddress(), { value: 1000n });
 
-    await escrow.connect(owner).releaseFunds(id);
-    await assertRejectsWith(attacker.attackWithdraw(), "Withdrawal failed");
-  });
-});
+    // Arm the attacker: its receive() re-enters releaseFunds mid-payout; the
+    // nonReentrant guard fails the re-entrant call, failing the payout.
+    await attacker.arm(id);
+    await assertRejectsWith(escrow.connect(owner).releaseFunds(id), "Driver payout failed");
 
-// blockchain/test/Escrow.test.js
-// Tests for Issue #<number>: Verify escrow payment lifecycle
-
-const { expect } = require("chai");
-const { ethers } = require("hardhat");
-
-describe("Escrow Contract", function () {
-  let escrow;
-  let owner;
-  let driver;
-  let customer;
-  const LOAD_AMOUNT = ethers.parseEther("1.0"); // 1 MATIC
-
-  beforeEach(async function () {
-    // Get test wallets (Hardhat provides 20 funded test accounts automatically)
-    [owner, customer, driver] = await ethers.getSigners();
-
-    // Deploy a fresh contract before each test
-    // ⚠️ Replace "Escrow" with your actual contract name from Escrow.sol
-    const EscrowFactory = await ethers.getContractFactory("Escrow");
-    escrow = await EscrowFactory.deploy();
-    await escrow.waitForDeployment();
-  });
-
-  it("Should deploy successfully and have correct owner", async function () {
-    expect(await escrow.getAddress()).to.be.properAddress;
-  });
-
-  it("Customer can fund escrow for a load booking", async function () {
-    // ⚠️ Replace "fundEscrow" with your actual function name
-    const tx = await escrow.connect(customer).fundEscrow(driver.address, {
-      value: LOAD_AMOUNT,
-    });
-    await tx.wait();
-
-    // Verify escrow holds the funds
-    const balance = await ethers.provider.getBalance(await escrow.getAddress());
-    expect(balance).to.equal(LOAD_AMOUNT);
-  });
-
-  it("Driver receives payment after delivery confirmation", async function () {
-    // Fund escrow
-    await escrow.connect(customer).fundEscrow(driver.address, {
-      value: LOAD_AMOUNT,
-    });
-
-    const driverBalanceBefore = await ethers.provider.getBalance(driver.address);
-
-    // ⚠️ Replace "confirmDelivery" with your actual function name
-    await escrow.connect(customer).confirmDelivery();
-
-    const driverBalanceAfter = await ethers.provider.getBalance(driver.address);
-
-    // Driver should have received the LOAD_AMOUNT (minus gas)
-    expect(driverBalanceAfter).to.be.greaterThan(driverBalanceBefore);
-  });
-
-  it("Customer can cancel and get refund before delivery", async function () {
-    await escrow.connect(customer).fundEscrow(driver.address, {
-      value: LOAD_AMOUNT,
-    });
-
-    const customerBalanceBefore = await ethers.provider.getBalance(customer.address);
-
-    // ⚠️ Replace "cancelAndRefund" with your actual function name
-    await escrow.connect(customer).cancelAndRefund();
-
-    const customerBalanceAfter = await ethers.provider.getBalance(customer.address);
-    expect(customerBalanceAfter).to.be.greaterThan(customerBalanceBefore);
-  });
-
-  it("Unauthorized caller cannot release payment", async function () {
-    await escrow.connect(customer).fundEscrow(driver.address, {
-      value: LOAD_AMOUNT,
-    });
-
-    // A random third party should NOT be able to release funds
-    await expect(
-      escrow.connect(owner).confirmDelivery()
-    ).to.be.revertedWith("Not authorized"); // adjust to your actual revert message
+    // The escrow remains funded — the re-entrant payout never settled.
+    const saved = await escrow.escrows(id);
+    assert.equal(saved.status, 1n);
+    assert.equal(saved.amount, 1000n);
   });
 });

@@ -80,7 +80,7 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> with Single
               height: 150,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.blue.withOpacity(0.3),
+                color: Colors.blue.withValues(alpha: 0.3),
               ),
               child: const Icon(Icons.mic, size: 80, color: Colors.blueAccent),
             ),
@@ -132,7 +132,7 @@ class _VoiceAssistantScreenState extends State<VoiceAssistantScreen> with Single
                 const SizedBox(height: 16),
                 Container(
                   padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(color: Colors.blue[900]!.withOpacity(0.3), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.blue[900]!)),
+                  decoration: BoxDecoration(color: Colors.blue[900]!.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.blue[900]!)),
                   child: Row(
                     children: [
                       const Icon(Icons.android, color: Colors.blueAccent),

@@ -20,16 +20,31 @@
  */
 
 import express from 'express';
+import { z } from 'zod';
 import { authenticate } from '../middleware/auth.js';
 import { getShipmentDetails } from '../controllers/shipmentController.js';
 import { globalLimiter } from '../middleware/rateLimiter.js';
+import { validateQuery } from '../middleware/validate.js';
 
 const router = express.Router();
+
+const shipmentDetailsQuerySchema = z.object({
+  // orders.id is a UUID. Forwarding an arbitrary string to PostgREST turns a
+  // malformed client request into a database error and a 500; validate the
+  // shape here and make the parameter required to match the controller.
+  shipmentId: z.string().uuid(),
+}).strict();
 
 // ──────────────────────────────────────────────────────────────────────────
 // GET /api/v1/shipment/details
 // Authenticated — fetches shipment details, ensuring user is authorized.
 // ──────────────────────────────────────────────────────────────────────────
-router.get('/details', authenticate, globalLimiter, getShipmentDetails);
+router.get(
+  '/details',
+  authenticate,
+  globalLimiter,
+  validateQuery(shipmentDetailsQuerySchema),
+  getShipmentDetails,
+);
 
 export default router;

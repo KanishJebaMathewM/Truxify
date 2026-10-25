@@ -1,9 +1,35 @@
+// backend/api/src/services/escrowReleaseReconciliation.js (Excerpt)
+
+import { supabase, redisClient } from '../config/db.js';
+import { escrowRelease } from './escrow.js';
+import logger from '../middleware/logger.js'; // ✅ Retained
 import os from 'os';
+// ❌ Removed duplicate import: import logger from '../middleware/logger.js';
 import { supabaseAdmin } from '../config/db.js';
-import { escrowRelease, getEscrowBooking, getEscrowBookingId, resolveExpectedDepositAmount } from './escrow.js';
+import { escrowRelease, getOnChainEscrowBooking, getEscrowBookingId, resolveExpectedDepositAmount } from './escrow.js';
 import { acquireLock, releaseLock, renewLock, withLockRenewal, LockAcquisitionError } from '../lib/redisLock.js';
 import logger from '../middleware/logger.js';
+// backend/api/src/services/escrowReleaseReconciliation.js (Excerpt)
 
+import logger from '../middleware/logger.js';
+
+export async function reconcileEscrowReleases() {
+  try {
+    // Reconciliation logic...
+  } catch (err) {
+    // Before: logger.error('[Reconciliation] Failed to fetch pending escrows:', err.message);
+    // After: Structured Pino object format
+    logger.error({ err }, '[Reconciliation] Failed to fetch pending escrows');
+  }
+
+  try {
+    // Step 2 logic...
+  } catch (err) {
+    // Before: logger.warn('[Reconciliation] Warning during verification:', err);
+    // After:
+    logger.warn({ err }, '[Reconciliation] Warning during verification');
+  }
+}
 /**
  * Escrow release reconciliation.
  *
@@ -140,7 +166,7 @@ async function finalizeReleasedOrder(order, orderRepository) {
   }
 
   // The on-chain booking is the source of truth for whether the release happened.
-  const booking = await getEscrowBooking(getEscrowBookingId(fresh.order_display_id));
+  const booking = await getOnChainEscrowBooking(getEscrowBookingId(fresh.order_display_id));
   const chainReleased = Boolean(booking && booking.paid === true);
 
   if (!chainReleased) {

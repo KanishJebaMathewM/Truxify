@@ -172,7 +172,7 @@ class _AntiHijackScreenState extends State<AntiHijackScreen> {
             ),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+              decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
               child: Text(value, style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 12)),
             )
           ],

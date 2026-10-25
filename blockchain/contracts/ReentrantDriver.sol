@@ -3,9 +3,11 @@ pragma solidity ^0.8.24;
 
 interface IEscrow {
     function releaseFunds(bytes32 bookingId) external;
-    function withdraw() external;
 }
 
+/// @dev Test-only attack mock. The driver re-enters releaseFunds mid-payout;
+///      Escrow's nonReentrant guard must make the re-entrant call fail, which
+///      fails the payout transfer and reverts the outer release.
 contract ReentrantDriver {
     IEscrow public escrow;
     bytes32 public bookingId;
@@ -20,15 +22,16 @@ contract ReentrantDriver {
         attackEnabled = true;
     }
 
-    function attackWithdraw() external {
+    function attackRelease(bytes32 targetBookingId) external {
+        bookingId = targetBookingId;
         attackEnabled = true;
-        escrow.withdraw();
+        escrow.releaseFunds(targetBookingId);
     }
 
     receive() external payable {
         if (attackEnabled) {
             attackEnabled = false;
-            escrow.withdraw();
+            escrow.releaseFunds(bookingId);
         }
     }
 }

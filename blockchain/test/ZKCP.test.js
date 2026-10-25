@@ -32,22 +32,22 @@ describe("ZKCP Route Data Swaps", function () {
 
     const agreementId = ethers.keccak256(ethers.toUtf8Bytes("AGREEMENT_101"));
     const key = ethers.keccak256(ethers.toUtf8Bytes("DECRYPTION_SECRET_KEY_456"));
-    
-    // Hash commitment corresponding to SHA256 of the secret key
-    const rawBytes = ethers.toBeHex(key);
-    const dataHash = ethers.sha256(rawBytes);
+    const dataHash = ethers.keccak256(ethers.toUtf8Bytes("DATASET_PAYLOAD_101"));
+
+    // Commitment binds key + dataset: sha256(decryptionKey || actualDataHash)
+    const commitment = ethers.sha256(ethers.concat([key, dataHash]));
 
     // Lock 1 ETH payment
     await zkcp.connect(buyer).lockPayment(
       agreementId,
       seller.address,
-      dataHash,
+      commitment,
       3600, // 1 hour timelock
       { value: ethers.parseEther("1.0") }
     );
 
-    // Claim payment using secret decryption key
-    await zkcp.connect(seller).claimPayment(agreementId, key);
+    // Claim payment by revealing the key and the delivered dataset hash
+    await zkcp.connect(seller).claimPayment(agreementId, key, dataHash);
 
     const agreement = await zkcp.agreements(agreementId);
     expect(agreement.completed).to.equal(true);
@@ -61,12 +61,13 @@ describe("ZKCP Route Data Swaps", function () {
 
     const agreementId = ethers.keccak256(ethers.toUtf8Bytes("AGREEMENT_REFUND"));
     const key = ethers.keccak256(ethers.toUtf8Bytes("SECRET_REFUND"));
-    const dataHash = ethers.sha256(ethers.toBeHex(key));
+    const dataHash = ethers.keccak256(ethers.toUtf8Bytes("DATASET_REFUND"));
+    const commitment = ethers.sha256(ethers.concat([key, dataHash]));
 
     await zkcp.connect(buyer).lockPayment(
       agreementId,
       seller.address,
-      dataHash,
+      commitment,
       3600,
       { value: ethers.parseEther("1.0") }
     );
@@ -90,12 +91,13 @@ describe("ZKCP Route Data Swaps", function () {
 
     const agreementId = ethers.keccak256(ethers.toUtf8Bytes("AGREEMENT_ATTACK"));
     const key = ethers.keccak256(ethers.toUtf8Bytes("SECRET_ATTACK"));
-    const dataHash = ethers.sha256(ethers.toBeHex(key));
+    const dataHash = ethers.keccak256(ethers.toUtf8Bytes("DATASET_ATTACK"));
+    const commitment = ethers.sha256(ethers.concat([key, dataHash]));
 
     await zkcp.connect(buyer).lockPayment(
       agreementId,
       seller.address,
-      dataHash,
+      commitment,
       3600,
       { value: ethers.parseEther("1.0") }
     );
@@ -104,7 +106,7 @@ describe("ZKCP Route Data Swaps", function () {
 
     await expectRevert(
       zkcp.connect(attacker).refundBuyer(agreementId),
-      "Only buyer can refund"
+      "UnauthorizedBuyer"
     );
   });
 
@@ -115,23 +117,24 @@ describe("ZKCP Route Data Swaps", function () {
 
     const agreementId = ethers.keccak256(ethers.toUtf8Bytes("AGREEMENT_DELIVERED"));
     const key = ethers.keccak256(ethers.toUtf8Bytes("SECRET_DELIVERED"));
-    const dataHash = ethers.sha256(ethers.toBeHex(key));
+    const dataHash = ethers.keccak256(ethers.toUtf8Bytes("DATASET_DELIVERED"));
+    const commitment = ethers.sha256(ethers.concat([key, dataHash]));
 
     await zkcp.connect(buyer).lockPayment(
       agreementId,
       seller.address,
-      dataHash,
+      commitment,
       3600,
       { value: ethers.parseEther("1.0") }
     );
 
-    await zkcp.connect(seller).claimPayment(agreementId, key);
+    await zkcp.connect(seller).claimPayment(agreementId, key, dataHash);
 
     await time.increase(3601);
 
     await expectRevert(
       zkcp.connect(buyer).refundBuyer(agreementId),
-      "Agreement already completed"
+      "AgreementAlreadyCompleted"
     );
   });
 });

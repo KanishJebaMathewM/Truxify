@@ -175,7 +175,7 @@ class _FreightBotScreenState extends State<FreightBotScreen> {
                 Text(offer.brokerName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(color: statColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                  decoration: BoxDecoration(color: statColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
                   child: Row(
                     children: [
                       Icon(icon, color: statColor, size: 16),

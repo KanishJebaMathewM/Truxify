@@ -150,7 +150,7 @@ class _EngineBrakeScreenState extends State<EngineBrakeScreen> {
                 Switch(
                   value: isActive,
                   onChanged: null, // Disabled because AI controls it
-                  activeColor: Colors.green,
+                  activeThumbColor: Colors.green,
                 ),
               ],
             ),
@@ -187,7 +187,7 @@ class _EngineBrakeScreenState extends State<EngineBrakeScreen> {
                 Text('Municipal Fine Blocked', style: TextStyle(color: Colors.grey, fontSize: 12)),
               ],
             ),
-            Text('+\$${savings}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 32, color: Colors.green[800])),
+            Text('+\$$savings', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 32, color: Colors.green[800])),
           ],
         ),
       ),

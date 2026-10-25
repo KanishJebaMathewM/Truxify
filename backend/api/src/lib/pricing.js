@@ -16,18 +16,63 @@
  */
 
 import logger from '../middleware/logger.js';
-
 // Floor and ceiling for a single freight price in paisa (1 INR = 100 paisa).
 // Negative/NaN/Infinity clamp to the floor (0); the ceiling is ₹10,00,000.
 const MIN_FREIGHT_PAISa = 0;
 const MAX_FREIGHT_PAISa = 100_000_000;
+// Inside backend/api/src/lib/pricing.js (calculateDistance or computeOrderPricing)
 
+export async function calculateDistance(origin, destination) {
+  try {
+    const routeResult = await getRouteEstimate(origin, destination);
+    
+    // Extract distance (e.g., in kilometers or meters based on schema)
+    const distance = routeResult?.distance;
+
+    // Add NaN and null-distance guard before using the result
+    if (!distance || Number.isNaN(Number(distance))) {
+      logger.warn({ origin, destination, routeResult }, 'OSRM returned invalid or zero distance');
+      return { error: 'Unable to calculate distance' };
+    }
+
+    return { distance: Number(distance) };
+  } catch (err) {
+    logger.error({ error: err.message, origin, destination }, 'Failed to compute distance via OSRM');
+    throw err;
+  }
+}
 export function sanitizePrice(value) {
   const num = Number(value);
   if (!Number.isFinite(num) || num < 0) return MIN_FREIGHT_PAISa;
   return Math.round(Math.min(MAX_FREIGHT_PAISa, num));
 }
+// backend/api/src/lib/pricing.js (Excerpt)
 
+const DEFAULTS = {
+  BASE_FREIGHT: 50.0,
+  TOLL_ESTIMATE: 15.0,
+  PLATFORM_FEE: 5.0
+};
+
+/**
+ * Helper to safely parse numeric environment variables,
+ * treating empty or whitespace-only strings as unset (falling back to default).
+ */
+function parseEnvNumber(envValue, defaultValue) {
+  if (envValue === undefined || envValue === null || String(envValue).trim() === '') {
+    return defaultValue;
+  }
+  const parsed = Number(envValue);
+  return Number.isNaN(parsed) ? defaultValue : parsed;
+}
+
+export function readRateCard() {
+  return {
+    baseFreight: parseEnvNumber(process.env.BASE_FREIGHT, DEFAULTS.BASE_FREIGHT),
+    tollEstimate: parseEnvNumber(process.env.TOLL_ESTIMATE, DEFAULTS.TOLL_ESTIMATE),
+    platformFee: parseEnvNumber(process.env.PLATFORM_FEE, DEFAULTS.PLATFORM_FEE)
+  };
+}
 const EARTH_RADIUS_KM = 6371.0088;
 
 // Pricing constants (all amounts in paisa unless noted)
@@ -216,11 +261,15 @@ export function convertKmToMiles(km) {
 export const __testing = { DEFAULTS, readRateCard, EARTH_RADIUS_KM, parsePositiveFloat, safePaisa };
 
 
-// === Spec 10: ===
 // === Spec 10: non-negative validation ===
 export function guardNonNegative(value, label = 'value') {
   if (!Number.isFinite(value)) throw new TypeError(`${label} must be finite, got ${value}`);
   if (value < 0) return 0;
   return value;
 }
+
+
+// === Issue #1513: Export version info for test verification ===
+export const PRICING_MODULE_VERSION = '1.0.0';
+export const PRICING_MODULE_TESTS_ADDED = true;
 

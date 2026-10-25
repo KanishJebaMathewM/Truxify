@@ -92,7 +92,7 @@ class _ArHudScreenState extends State<ArHudScreen> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.black45,
-        border: Border.all(color: Colors.cyanAccent.withOpacity(0.5), width: 1),
+        border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.5), width: 1),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -109,7 +109,7 @@ class _ArHudScreenState extends State<ArHudScreen> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.black45,
-        border: Border.all(color: Colors.cyanAccent.withOpacity(0.5), width: 1),
+        border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.5), width: 1),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -151,7 +151,7 @@ class _ArHudScreenState extends State<ArHudScreen> {
               gradient: LinearGradient(
                 begin: Alignment.bottomCenter,
                 end: Alignment.topCenter,
-                colors: [baseColor.withOpacity(0.4), Colors.transparent],
+                colors: [baseColor.withValues(alpha: 0.4), Colors.transparent],
               ),
             ),
           ),

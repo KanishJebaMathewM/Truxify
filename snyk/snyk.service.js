@@ -4,7 +4,61 @@ import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import logger from '../backend/api/src/middleware/logger.js';
+// snyk/snyk.service.js
 
+import logger from '../backend/api/src/middleware/logger.js'; // Adjust per module structure
+
+/**
+ * Safely parses a JSON string with a fallback default.
+ * @param {string} data - Raw string to parse.
+ * @param {any} fallback - Fallback value if parsing fails.
+ * @returns {any} Parsed object or fallback.
+ */
+function safeJsonParse(data, fallback = null) {
+  try {
+    return JSON.parse(data);
+  } catch (err) {
+    return fallback;
+  }
+}
+
+/**
+ * Executes a Snyk vulnerability scan and parses its JSON output.
+ * @param {string} targetPath - Path or target to scan.
+ * @returns {Promise<Object>} Scan result envelope.
+ */
+export async function runSnykScan(targetPath) {
+  try {
+    const stdout = await executeSnykCliScan(targetPath);
+    const stdoutStr = Buffer.isBuffer(stdout) ? stdout.toString('utf8') : String(stdout || '');
+
+    // Safely parse CLI stdout
+    const parsedResult = safeJsonParse(stdoutStr, null);
+
+    if (!parsedResult) {
+      logger.warn('Snyk CLI emitted malformed or non-JSON output', { 
+        targetPath, 
+        rawOutput: stdoutStr 
+      });
+      return { 
+        success: false, 
+        error: 'Malformed CLI JSON output', 
+        raw: stdoutStr 
+      };
+    }
+
+    return {
+      success: true,
+      data: parsedResult
+    };
+  } catch (err) {
+    logger.error('Snyk CLI execution process failed', { 
+      targetPath, 
+      error: err.message 
+    });
+    throw new Error(`Snyk scan failed: ${err.message}`, { cause: err });
+  }
+}
 const execAsync = promisify(exec);
 
 const REQUEST_TIMEOUT_MS = 15000;
@@ -52,31 +106,24 @@ class SnykService {
     // the last JSON document found within it, and otherwise return null so the
     // caller can report a structured failure with the raw output logged.
     _parseJsonOutput(stdout) {
+        if (!stdout || typeof stdout !== 'string') return null;
         try {
             return JSON.parse(stdout);
         } catch {
-            // fall through to scan-for-JSON below
-        }
-        for (const pair of [['{', '}'], ['[', ']']]) {
-            const [open, close] = pair;
-            const start = stdout.indexOf(open);
-            if (start === -1) continue;
-            let end = -1;
-            for (let i = stdout.length - 1; i >= start; i--) {
-                if (stdout[i] === close) {
-                    end = i;
-                    break;
+            for (const [open, close] of [['{', '}'], ['[', ']']]) {
+                const first = stdout.indexOf(open);
+                const last = stdout.lastIndexOf(close);
+                if (first !== -1 && last !== -1 && last > first) {
+                    try {
+                        return JSON.parse(stdout.slice(first, last + 1));
+                    } catch (err) {
+                        logger.error({ err, stdout }, '[SnykService] Failed extracting embedded JSON');
+                    }
                 }
             }
-            if (end === -1) continue;
-            try {
-                return JSON.parse(stdout.slice(start, end + 1));
-            } catch {
-                // keep scanning
-            }
+            logger.error({ stdout }, '[SnykService] Produced non-JSON output');
+            return null;
         }
-        logger.error('Snyk produced non-JSON output:', stdout);
-        return null;
     }
 
     async scanDependencies(projectPath = '.') {

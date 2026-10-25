@@ -10,6 +10,9 @@ let mockPgPool = null;
 
 vi.mock('../../src/config/db.js', () => ({
   get supabase() { return mockSupabase; },
+  // The supabase health check probes through the service-role client first
+  // (supabaseAdmin || supabase) since the #16065 admin-client refactor.
+  get supabaseAdmin() { return mockSupabase; },
   get mongoDb() { return mockMongoDb; },
   get redisClient() { return mockRedisClient; },
   get firebaseAdmin() { return mockFirebaseAdmin; },

@@ -2,13 +2,70 @@ import { supabaseAdmin, redisClient } from '../config/db.js';
 import { sendPushNotification } from './notificationService.js';
 import logger from '../middleware/logger.js';
 import crypto from 'crypto';
+// backend/api/src/services/documentExpiryService.js (Excerpt)
 
+import { v4 as uuidv4 } from 'uuid';
+import { redisClient } from '../config/redis.js';
+import logger from '../middleware/logger.js';
+
+// Lua script for atomic compare-and-delete (ensures we only delete our own lock)
+const RELEASE_LOCK_LUA = `
+  if redis.call("get", KEYS[1]) == ARGV[1] then
+      return redis.call("del", KEYS[1])
+  else
+      return 0
+  end
+`;
+
+export async function runDocumentExpiryWorker() {
+  const lockKey = 'lock:document_expiry_worker';
+  const lockToken = uuidv4();
+  const lockTtlSeconds = 300; // 5 minutes
+
+  // 1. Acquire lock atomically with unique token
+  const acquired = await redisClient.set(lockKey, lockToken, 'EX', lockTtlSeconds, 'NX');
+  if (!acquired) {
+    logger.info('Document expiry worker skipped: lock already held by another instance.');
+    return;
+  }
+
+  try {
+    logger.info({ lockToken }, 'Document expiry worker acquired lock. Processing batch...');
+    // ... document expiry query and notification logic ...
+  } catch (err) {
+    logger.error({ err }, 'Error occurred during document expiry processing');
+  } finally {
+    // 2. Safely release lock using atomic Lua script (prevents deleting another worker's lock)
+    try {
+      await redisClient.eval(RELEASE_LOCK_LUA, 1, lockKey, lockToken);
+      logger.info('Document expiry worker released lock safely.');
+    } catch (releaseErr) {
+      logger.error({ err: releaseErr }, 'Failed to release document expiry lock safely');
+    }
+  }
+}
 const REMINDER_WINDOWS = [
   { days: 30, label: '30 days' },
   { days: 14, label: '14 days' },
   { days: 7, label: '7 days' },
 ];
+// backend/api/src/services/documentExpiryService.js (Excerpt)
 
+// BEFORE:
+// await sendPushNotification({
+//   userId,
+//   notif_type: 'document_expiry',
+//   title: 'Document Expiring Soon',
+//   body: 'Your uploaded document is about to expire.'
+// });
+
+// FIXED: Use valid 'document' notif_type per issue #6964
+await sendPushNotification({
+  userId,
+  notif_type: 'document',
+  title: 'Document Expiring Soon',
+  body: 'Your uploaded document is about to expire.',
+});
 const DEFAULT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const DOCS_PAGE_SIZE = 1000;
 const LOCK_KEY = 'document:expiry:worker:lock';
@@ -85,6 +142,7 @@ async function hasExistingNotification(userId, documentId, daysRemaining) {
 export async function processDocumentExpiryBatch() {
   let lockAcquired = false;
   let leaseExtender = null;
+  let leaseLost = false;
   const lockToken = `${process.pid}:${crypto.randomUUID()}`;
 
   if (redisClient) {
@@ -96,12 +154,17 @@ export async function processDocumentExpiryBatch() {
       }
       lockAcquired = true;
       leaseExtender = setInterval(async () => {
+        if (leaseLost) return;
         try {
           const extended = await redisClient.eval(EXTEND_LOCK_SCRIPT, 1, LOCK_KEY, lockToken, LOCK_TTL_SECONDS);
           if (!extended) {
+            leaseLost = true;
+            clearInterval(leaseExtender);
             logger.warn('[document-expiry] Lock lease was not extended because ownership changed.');
           }
         } catch (err) {
+          leaseLost = true;
+          clearInterval(leaseExtender);
           logger.warn('[document-expiry] Failed to extend lock lease:', err.message);
         }
       }, LEASE_EXTENSION_INTERVAL_MS);
@@ -123,6 +186,7 @@ export async function processDocumentExpiryBatch() {
 
   try {
     for (const window of REMINDER_WINDOWS) {
+      if (leaseLost) return;
       const windowStart = startOfDay(new Date(now.getTime() + window.days * 24 * 60 * 60 * 1000));
       const windowEnd = endOfDay(new Date(now.getTime() + window.days * 24 * 60 * 60 * 1000));
 
@@ -131,6 +195,7 @@ export async function processDocumentExpiryBatch() {
         let offset = 0;
         let page = [];
         do {
+          if (leaseLost) return;
           const { data, error } = await supabaseAdmin
             .from('driver_documents')
             .select('id, driver_id, document_type, valid_until')
@@ -141,8 +206,10 @@ export async function processDocumentExpiryBatch() {
             .order('id', { ascending: true })
             .range(offset, offset + DOCS_PAGE_SIZE - 1);
 
+          if (leaseLost) return;
+
           if (error) {
-            throw new Error(error.message);
+            throw new Error(error.message, { cause: error });
           }
 
           page = data || [];
@@ -150,7 +217,7 @@ export async function processDocumentExpiryBatch() {
           offset += page.length;
         } while (page.length === DOCS_PAGE_SIZE);
       } catch (err) {
-        logger.error(`[document-expiry] Failed to query documents for ${window.label} window:`, err.message);
+        logger.error({ err }, `[document-expiry] Failed to query documents for ${window.label} window: ${err.message}`);
         continue;
       }
 
@@ -162,12 +229,14 @@ export async function processDocumentExpiryBatch() {
       logger.info(`[document-expiry] Found ${documents.length} document(s) expiring in ${window.label} window.`);
 
       for (const doc of documents) {
+        if (leaseLost) return;
         if (!doc.driver_id || !doc.id) {
           logger.warn('[document-expiry] Skipping document with missing driver_id or id:', doc.id);
           continue;
         }
 
         const alreadyNotified = await hasExistingNotification(doc.driver_id, doc.id, window.days);
+        if (leaseLost) return;
         if (alreadyNotified) {
           logger.info(`[document-expiry] Document ${doc.id} already notified for ${window.label} window, skipping.`);
           continue;
@@ -196,7 +265,7 @@ export async function processDocumentExpiryBatch() {
           totalNotificationsSent++;
           logger.info(`[document-expiry] Sent ${window.label} expiry alert for ${docLabel} (doc: ${doc.id}) to user ${doc.driver_id}`);
         } catch (err) {
-          logger.error(`[document-expiry] Failed to send notification for document ${doc.id}:`, err.message);
+          logger.error({ err, docId: doc.id }, `[document-expiry] Failed to send notification for document ${doc.id}: ${err.message}`);
         }
       }
     }
@@ -206,27 +275,27 @@ export async function processDocumentExpiryBatch() {
     }
 
     if (lockAcquired && redisClient) {
+      try {
+        const released = await redisClient.eval(
+          RELEASE_LOCK_SCRIPT,
+          1,
+          LOCK_KEY,
+          lockToken
+        );
 
-try {
-  const released = await redisClient.eval(
-    RELEASE_LOCK_SCRIPT,
-    1,
-    LOCK_KEY,
-    lockToken
-  );
-
-  if (!released) {
-    logger.warn(
-      { lockKey: LOCK_KEY, lockToken },
-      'Document expiry lock release returned 0 - lock may have been released by another process'
-    );
-  }
-} catch (err) {
-  logger.error(
-    { err, lockKey: LOCK_KEY, lockToken },
-    'Failed to release document expiry worker lock'
-  );
-}    }
+        if (!released) {
+          logger.warn(
+            { lockKey: LOCK_KEY, lockToken },
+            'Document expiry lock release returned 0 - lock may have been released by another process'
+          );
+        }
+      } catch (err) {
+        logger.error(
+          { err, lockKey: LOCK_KEY, lockToken },
+          'Failed to release document expiry worker lock'
+        );
+      }
+    }
 
     if (!lockAcquired) {
       workerRunning = false;

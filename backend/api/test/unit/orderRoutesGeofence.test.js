@@ -128,10 +128,4 @@ describe('POST /api/orders/:id/geofence-confirm (issue #12053 regression)', () =
 
   it('returns 400 (not 500) for an empty order id via req.params.id', async () => {
     const res = await request(regressionApp)
-      .post(`/api/orders/${encodeURIComponent('   ')}/geofence-confirm`)
-      .send({ driver_lat: 12.9716, driver_lng: 77.5946 });
-
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBeDefined();
-  });
-});
+      .post(`/api

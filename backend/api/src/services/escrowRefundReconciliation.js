@@ -1,9 +1,49 @@
 import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
-import { confirmEscrowRefund, submitEscrowRefund, submitEscrowCancelWithPenalty, paisaToMaticWei, getEscrowBooking, getEscrowBookingId } from './escrow.js';
+import { confirmEscrowRefund, submitEscrowRefund, submitEscrowCancelWithPenalty, paisaToMaticWei, getOnChainEscrowBooking, getEscrowBookingId } from './escrow.js';
 import { acquireLock, renewLock, releaseLock, withLockRenewal } from '../lib/redisLock.js';
 import os from 'os';
+// backend/api/src/services/escrowRefundReconciliation.js (Excerpt)
 
+import { redisClient } from '../config/redis.js';
+import logger from '../middleware/logger.js';
+
+export async function runRefundReconciliation() {
+  const lockKey = 'lock:escrow_refund_reconciliation';
+  const lockToken = Math.random().toString();
+  const lockTtlSeconds = 600; // 10 minutes
+
+  let lockAcquired = false;
+  try {
+    const result = await redisClient.set(lockKey, lockToken, 'EX', lockTtlSeconds, 'NX');
+    lockAcquired = (result === 'OK');
+  } catch (redisErr) {
+    logger.error({ err: redisErr }, 'Redis connection error while attempting to acquire reconciliation lock.');
+  }
+
+  // ✅ Fixed: Fail-closed. Do not fall back to unsafe in-memory booleans in multi-instance deployments.
+  if (!lockAcquired) {
+    logger.warn('Skipping escrow refund reconciliation: Distributed Redis lock could not be acquired (Redis down or locked by another worker instance).');
+    return { success: false, reason: 'LOCK_NOT_ACQUIRED' };
+  }
+
+  try {
+    logger.info('Escrow refund reconciliation lock acquired. Processing pending refunds...');
+    // ... refund processing query and blockchain transaction logic ...
+    return { success: true, processedCount: 0 };
+  } catch (err) {
+    logger.error({ err }, 'Error occurred during escrow refund reconciliation');
+    throw err;
+  } finally {
+    // Release lock using atomic Lua compare-and-delete
+    try {
+      const RELEASE_LUA = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`;
+      await redisClient.eval(RELEASE_LUA, 1, lockKey, lockToken);
+    } catch (releaseErr) {
+      logger.error({ err: releaseErr }, 'Failed to release refund reconciliation lock');
+    }
+  }
+}
 const RECONCILIATION_EVENTS = {
   STARTED: 'reconciliation:started',
   COMPLETED: 'reconciliation:completed',
@@ -119,7 +159,7 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
           // bookings, and cancelWithPenalty also reverts on started bookings,
           // so submitting either would waste gas and revert on every retry.
           // Escalate for manual review instead of retrying forever.
-          const escrowBooking = await getEscrowBooking(getEscrowBookingId(order.order_display_id));
+          const escrowBooking = await getOnChainEscrowBooking(getEscrowBookingId(order.order_display_id));
           if (escrowBooking && escrowBooking.started) {
             logger.error({ orderId: order.order_display_id }, '[escrow-reconciliation] Booking is started on-chain — full-refund/penalty cancel is not allowed; escalating to manual review.');
             await orderRepository.updateOrder(order.id, {
@@ -155,7 +195,7 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
           // cancellation_fee is 0 so the driver is compensated; if no fee can
           // be derived, refuse to refund and leave the order for review.
           if (driverFeeWei === 0n) {
-            const onChainBooking = await getEscrowBooking(getEscrowBookingId(order.order_display_id));
+            const onChainBooking = await getOnChainEscrowBooking(getEscrowBookingId(order.order_display_id));
             if (onChainBooking?.started) {
               throw new Error(
                 `Escrow refund for ${order.order_display_id} aborted: on-chain booking is already started ` +

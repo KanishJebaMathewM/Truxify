@@ -1,0 +1,38 @@
+name: Native mid-trip reachability
+on:
+  pull_request:
+    paths:
+      - backend/ml/app/models/mid_trip_reoptimiser.py
+      - backend/ml/tests/test_mid_trip_reachability.py
+      - backend/ml/tests/test_mid_trip_insertion_complexity.py
+      - .github/workflows/mid-trip-reachability.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-routing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PYTHONPATH: backend/ml
+      OSRM_BASE_URL: http://127.0.0.1:1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest==9.0.3 ruff==0.16.9 requests==2.32.3 scipy==1.14.1 numpy==1.26.4
+      - name: Native road certificates, finite controls and work bounds
+        run: >-
+          python -m pytest backend/ml/tests/test_mid_trip_reachability.py
+          backend/ml/tests/test_mid_trip_insertion_complexity.py
+          backend/ml/tests/test_mid_trip_deadline_insertion.py
+          backend/ml/tests/test_mid_trip_payment_validation.py
+          backend/ml/tests/test_mid_trip_road_eta.py
+          backend/ml/tests/test_mid_trip_model.py -q
+      - name: Scoped source analysis
+        run: |
+          python -m ruff check backend/ml/tests/test_mid_trip_reachability.py backend/ml/tests/test_mid_trip_insertion_complexity.py
+          python -m ruff check backend/ml/app/models/mid_trip_reoptimiser.py --select E9,F63,F7,F82

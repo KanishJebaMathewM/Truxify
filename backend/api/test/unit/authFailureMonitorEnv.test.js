@@ -15,6 +15,7 @@ const { default: authFailureMonitor } = await import('../../src/middleware/authF
 
 function makeReq(overrides = {}) {
   return {
+    headers: {},
     ip: '10.0.0.1',
     method: 'POST',
     originalUrl: '/api/auth/login',
@@ -27,6 +28,12 @@ function makeRes() {
   let finishHandler = null;
   return {
     statusCode: 401,
+    setHeader: vi.fn(),
+    status: vi.fn(function status(code) {
+      this.statusCode = code;
+      return this;
+    }),
+    json: vi.fn(),
     on: vi.fn((event, handler) => {
       if (event === 'finish') finishHandler = handler;
     }),
@@ -63,36 +70,36 @@ describe('authFailureMonitor env clamping', () => {
     delete process.env.AUTH_FAILURE_WINDOW_MS;
   });
 
-  it('skips monitoring entirely in test environment', () => {
+  it('continues monitoring in test environment', () => {
     process.env.NODE_ENV = 'test';
-    const { next } = simulateFailures(10);
+    const { next } = simulateFailures(3, { reqOverrides: { ip: '10.0.0.2' } });
     expect(next).toHaveBeenCalled();
-    expect(mockLogger.warn).not.toHaveBeenCalled();
+    expect(mockLogger.warn).toHaveBeenCalled();
   });
 
   it('uses the default threshold when env is invalid (zero)', () => {
     process.env.AUTH_FAILURE_THRESHOLD = '0';
-    simulateFailures(5);
+    simulateFailures(3, { reqOverrides: { ip: '10.0.0.3' } });
     expect(mockLogger.warn).toHaveBeenCalled();
   });
 
   it('uses the default threshold when env is not a number', () => {
     process.env.AUTH_FAILURE_THRESHOLD = 'abc';
-    simulateFailures(5);
+    simulateFailures(3, { reqOverrides: { ip: '10.0.0.4' } });
     expect(mockLogger.warn).toHaveBeenCalled();
   });
 
   it('uses the default window when env is below the 1s floor', () => {
     process.env.AUTH_FAILURE_WINDOW_MS = '100';
-    // 5 rapid failures with a clamped window must still trip the threshold
-    simulateFailures(5);
+    // Rapid failures with a clamped window must still trip the threshold.
+    simulateFailures(3, { reqOverrides: { ip: '10.0.0.5' } });
     expect(mockLogger.warn).toHaveBeenCalled();
   });
 
-  it('includes requestId in the structured warning payload', () => {
-    simulateFailures(5);
+  it('includes failure details in the structured warning payload', () => {
+    simulateFailures(3, { reqOverrides: { ip: '10.0.0.6' } });
     expect(mockLogger.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ requestId: 'req-123', ip: '10.0.0.1' }),
+      expect.objectContaining({ ip: '10.0.0.6', failureCount: 3, threshold: 3 }),
       expect.any(String),
     );
   });

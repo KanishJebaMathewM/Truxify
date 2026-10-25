@@ -1,8 +1,5 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:truxify_shared/truxify_shared.dart';
-import 'package:truxify_shared/src/models/notification_item.dart';
-import 'package:truxify_shared/src/services/notification_router.dart';
 
 void main() {
   group('NotificationRouter (customer)', () {

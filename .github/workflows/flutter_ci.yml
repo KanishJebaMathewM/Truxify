@@ -1,12 +1,11 @@
 name: Flutter CI
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
     branches:
       - main
+    paths:
+      - 'apps/**'
 
 permissions:
   contents: read
@@ -15,6 +14,7 @@ jobs:
   l10n_consistency:
     name: Localization Consistency
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -31,6 +31,7 @@ jobs:
   build_and_test:
     name: Flutter Lint & Test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: l10n_consistency
 
     strategy:
@@ -46,7 +47,6 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
         with:
-          flutter-version: '3.22.0'
           channel: 'stable'
 
       - name: Install Dependencies

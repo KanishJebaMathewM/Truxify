@@ -8,6 +8,7 @@ import {
   ORDER_READ_MODEL_TABLE,
   ORDER_READ_MODEL_COLUMNS,
   ORDER_READ_MODEL_PRIMARY_KEY,
+  ORDER_STATUSES,
   assertOrderReadModelRow,
   deriveOrderStatus,
   deriveEventTypeFromTimeline,
@@ -242,5 +243,24 @@ describe('deriveEventTypeFromTimeline', () => {
     assert.equal(deriveEventTypeFromTimeline([]), null);
     assert.equal(deriveEventTypeFromTimeline(null), null);
     assert.equal(deriveEventTypeFromTimeline([{}]), null);
+  });
+});
+describe('ORDER_STATUSES — projection status contract', () => {
+  test('contains every status emitted by the event-sourcing and Kafka projections', () => {
+    const emittedStatuses = [
+      'created',
+      'assigned',
+      'paid',
+      'in_transit',
+      'completed',
+      'settled',
+    ];
+
+    for (const status of emittedStatuses) {
+      assert.ok(
+        ORDER_STATUSES.includes(status),
+        `canonical ORDER_STATUSES must contain emitted status: ${status}`
+      );
+    }
   });
 });

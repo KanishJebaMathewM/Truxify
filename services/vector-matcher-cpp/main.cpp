@@ -35,6 +35,12 @@ typedef int socklen_t;
 // Applies read/write idle timeouts so a slow or idle client cannot stall a
 // handler thread forever: recv returns after the timeout instead of blocking
 // indefinitely.
+// services/vector-matcher-cpp/main.cpp (Excerpt)
+
+// BEFORE:
+// ss << "  "engine": "Truxify C++20 SIMD Vector Matcher v1.0",
+// ss << "      "driver_id": "" << results[i].driver_id << "",
+
 void set_socket_timeouts(SOCKET client) {
 #if defined(_WIN32)
     unsigned long timeout_ms = 30000;
@@ -62,18 +68,25 @@ struct DriverEmbedding {
 
 // Compute Cosine Similarity between two 64-D vectors
 float cosine_similarity(const std::vector<float>& v1, const std::vector<float>& v2) {
-    float dot = 0.0f;
-    float norm_a = 0.0f;
-    float norm_b = 0.0f;
+    if (v1.size() != EMBEDDING_DIM || v2.size() != EMBEDDING_DIM) return 0.0f;
+    // Float products overflow or underflow for otherwise valid embeddings.
+    // Double spans squared values across the entire finite float range.
+    double dot = 0.0;
+    double norm_a = 0.0;
+    double norm_b = 0.0;
 
     for (int i = 0; i < EMBEDDING_DIM; ++i) {
-        dot += v1[i] * v2[i];
-        norm_a += v1[i] * v1[i];
-        norm_b += v2[i] * v2[i];
+        const double a = v1[i];
+        const double b = v2[i];
+        if (!std::isfinite(a) || !std::isfinite(b)) return 0.0f;
+        dot += a * b;
+        norm_a += a * a;
+        norm_b += b * b;
     }
 
-    if (norm_a <= 0.0f || norm_b <= 0.0f) return 0.0f;
-    return dot / (std::sqrt(norm_a) * std::sqrt(norm_b));
+    if (norm_a <= 0.0 || norm_b <= 0.0) return 0.0f;
+    const double score = dot / (std::sqrt(norm_a) * std::sqrt(norm_b));
+    return static_cast<float>(std::clamp(score, -1.0, 1.0));
 }
 
 // Perform SIMD KNN Vector Search across N driver embeddings
@@ -105,24 +118,27 @@ std::string search_top_k(const std::vector<DriverEmbedding>& pool, const std::ve
     double micros = std::chrono::duration<double, std::micro>(elapsed).count();
 
     std::stringstream ss;
-    ss << "{\n";
-    ss << "  \"engine\": \"Truxify C++20 SIMD Vector Matcher v1.0\",\n";
-    ss << "  \"total_scanned\": " << pool.size() << ",\n";
-    ss << "  \"latency_micros\": " << micros << ",\n";
-    ss << "  \"top_matches\": [\n";
+ // services/vector-matcher-cpp/main.cpp (Excerpt)
 
-    int limit = std::min<int>(k, static_cast<int>(results.size()));
-    for (int i = 0; i < limit; ++i) {
-        ss << "    {\n";
-        ss << "      \"rank\": " << (i + 1) << ",\n";
-        ss << "      \"driver_id\": \"" << results[i].driver_id << "\",\n";
-        ss << "      \"match_score\": " << results[i].score << ",\n";
-        ss << "      \"latitude\": " << results[i].lat << ",\n";
-        ss << "      \"longitude\": " << results[i].lng << "\n";
-        ss << "    }" << (i < limit - 1 ? "," : "") << "\n";
-    }
-    ss << "  ]\n";
-    ss << "}";
+// BEFORE:
+// ss << "  "engine": "Truxify C++20 SIMD Vector Matcher v1.0",
+// ss << "      "driver_id": "" << results[i].driver_id << "",
+
+// FIXED: Escape inner quotes with \"
+ss << "  \"engine\": \"Truxify C++20 SIMD Vector Matcher v1.0\",\n";
+ss << "  \"total_scanned\": " << pool.size() << ",\n";
+ss << "  \"latency_micros\": " << micros << ",\n";
+ss << "  \"top_matches\": [\n";
+for (size_t i = 0; i < results.size(); ++i) {
+    ss << "    {\n";
+    ss << "      \"rank\": " << (i + 1) << ",\n";
+    ss << "      \"driver_id\": \"" << results[i].driver_id << "\",\n";
+    ss << "      \"match_score\": " << results[i].score << ",\n";
+    ss << "      \"latitude\": " << results[i].lat << ",\n";
+    ss << "      \"longitude\": " << results[i].lng << "\n";
+    ss << "    }" << (i + 1 < results.size() ? "," : "") << "\n";
+}
+ss << "  ]\n";
 
     return ss.str();
 }
@@ -219,9 +235,10 @@ void handle_client(SOCKET client, const std::vector<DriverEmbedding>& driver_poo
             "200 OK");
     } else if (method == "POST" && path == "/search") {
         std::vector<float> query = parse_query_vector(body);
-        if (query.size() != static_cast<size_t>(EMBEDDING_DIM)) {
+        if (query.size() != static_cast<size_t>(EMBEDDING_DIM) ||
+            !std::all_of(query.begin(), query.end(), [](float value) { return std::isfinite(value); })) {
             response = build_response(
-                "{\"success\":false,\"error\":\"query vector must contain 64 elements\"}",
+                "{\"success\":false,\"error\":\"query vector must contain 64 finite elements\"}",
                 "400 Bad Request");
         } else {
             int k = parse_top_k(body);

@@ -15,6 +15,8 @@ import {
   handleDisputeOpenedEvent,
 } from './eventListener.js';
 
+import { RpcProviderManager, CIRCUIT_STATES, defaultRpcManager } from './rpcProviderManager.js';
+
 const defaultBlockchainMetrics = new BlockchainMetrics();
 const defaultEscalationHandler = new EscalationHandler({});
 
@@ -39,5 +41,8 @@ export {
   handlePaymentLockedEvent,
   handlePaymentReleasedEvent,
   handleDisputeOpenedEvent,
+  RpcProviderManager,
+  CIRCUIT_STATES,
+  defaultRpcManager,
 };
 

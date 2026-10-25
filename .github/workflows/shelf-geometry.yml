@@ -1,0 +1,39 @@
+name: Native shelf geometry
+on:
+  pull_request:
+    paths:
+      - 'backend/ml/app/models/bin_packing.py'
+      - 'backend/ml/app/models/shelf_geometry.py'
+      - 'backend/ml/tests/test_shelf_geometry.py'
+      - 'backend/ml/tests/test_shelf_fit_index.py'
+      - '.github/workflows/shelf-geometry.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-shelf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PYTHONPATH: backend/ml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest==9.0.3 ruff==0.16.9 requests==2.32.3 scipy==1.14.1 numpy==1.26.4
+      - name: Native geometry witnesses and ordered search
+        run: >-
+          python -m pytest backend/ml/tests/test_shelf_geometry.py
+          backend/ml/tests/test_shelf_fit_index.py
+          backend/ml/tests/test_bin_packing_orientation.py
+          backend/ml/tests/test_bin_packing_coordinate_validation.py
+          backend/ml/tests/test_bin_packing_address_count_validation.py
+          backend/ml/tests/test_bin_packing_algo.py
+          backend/ml/tests/test_bin_packing_spatial_sequence.py -q
+      - name: Analyze scoped sources
+        run: |
+          python -m ruff check backend/ml/app/models/shelf_geometry.py backend/ml/tests/test_shelf_geometry.py backend/ml/tests/test_shelf_fit_index.py
+          python -m ruff check backend/ml/app/models/bin_packing.py --select E9,F63,F7,F82

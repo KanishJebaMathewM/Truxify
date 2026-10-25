@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 
-import 'package:flutter_gen/gen_l10n/app_localizations.dart';
+import 'package:truxify/l10n/app_localizations.dart';
 import 'app.dart';
 import 'constants/firebase_config.dart';
 import 'constants/supabase_config.dart';
@@ -54,7 +54,7 @@ void main() async {
     try {
       await Supabase.initialize(
         url: SupabaseConfig.url,
-        anonKey: SupabaseConfig.publishableKey,
+        publishableKey: SupabaseConfig.publishableKey,
       );
     } catch (e) {
       debugPrint('Supabase initialization failed: $e');

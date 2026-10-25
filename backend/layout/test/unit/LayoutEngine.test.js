@@ -3,7 +3,7 @@ import LayoutEngine from '../../LayoutEngine.js';
 import LayoutNode from '../../LayoutNode.js';
 
 vi.mock('../../../api/src/middleware/logger.js', () => ({
-    default: { info: vi.fn(), error: vi.fn(), warn: vi.fn() }
+    default: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }
 }));
 
 describe('LayoutEngine', () => {

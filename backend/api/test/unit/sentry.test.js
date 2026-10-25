@@ -108,7 +108,6 @@ describe("sentryErrorHandler", () => {
   });
 
   it("returned handler delegates to the inner Sentry error handler with (err, req, res, next)", () => {
-    // Capture the arguments passed to the inner handler by wrapping the returned function
     let capturedNext;
     const wrappedNext = vi.fn((...args) => {
       capturedNext = args;
@@ -116,21 +115,14 @@ describe("sentryErrorHandler", () => {
     const err = new Error("test error");
     const req = { requestId: "req-1" };
     const res = { statusCode: 500 };
-    // The inner handler receives (err, req, res, next); we only verify it calls next
     const innerFn = sentryErrorHandler();
-    // sentryErrorHandler() returns Sentry.expressErrorHandler()
-    // which itself returns a handler(err, req, res, next)
-    // We verify the returned handler exists and is callable
     expect(innerFn).toBeDefined();
     expect(typeof innerFn).toBe("function");
-    // Call with mock args - verify it does not throw
     expect(() => innerFn(err, req, res, wrappedNext)).not.toThrow();
   });
 });
 
 describe("sentry — error filter and level", () => {
-  // We can test the shouldIgnoreError and getSentryLevel logic through initSentry behavior.
-  // Verify that initSentry does not throw for any combination of SENTRY_DSN.
   it("initSentry does not throw when SENTRY_DSN is a valid URL", () => {
     vi.stubEnv("SENTRY_DSN", "https://abc@sentry.io/456");
     expect(() => initSentry()).not.toThrow();
@@ -168,7 +160,7 @@ describe("sentry — error filter and level", () => {
       
       const normalEvent = {
         exception: {
-          values: [{ value: "Normal error" }]
+          values: [{ value: "Normal error", type: "Error" }]
         }
       };
       expect(beforeSend(normalEvent)).toBe(normalEvent);
@@ -176,6 +168,7 @@ describe("sentry — error filter and level", () => {
       global.Error = OriginalError;
     }
   });
+});
 
 describe('shouldIgnoreError', () => {
   it('returns true for ECONNRESET errors', () => {
@@ -206,6 +199,4 @@ describe('shouldIgnoreError', () => {
     const err = new Error('No code');
     expect(shouldIgnoreError(err)).toBe(false);
   });
-});
-
 });

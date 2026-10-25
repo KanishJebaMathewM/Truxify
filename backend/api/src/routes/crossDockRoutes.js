@@ -16,6 +16,7 @@
  */
 
 import express from 'express';
+import { z } from 'zod';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
@@ -40,6 +41,16 @@ import {
 } from '../services/order/crossDockService.js';
 
 const router = express.Router();
+
+const crossDockListQuerySchema = z.object({
+  status: z.string().min(1).max(32).optional(),
+  limit: z.preprocess(
+    (val) => (val === undefined || val === null || val === ''
+      ? undefined
+      : (isNaN(Number(val)) ? val : Number(val))),
+    z.number().int().min(1).max(100),
+  ).default(50),
+});
 
 function handleError(res, err, label) {
   if (err instanceof DomainError) {
@@ -123,8 +134,11 @@ router.get(
   requirePolicy('crossdock:list'),
   async (req, res) => {
     try {
-      const status = req.query.status;
-      const limit = req.query.limit ? parseInt(req.query.limit, 10) : 50;
+      const parsed = crossDockListQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return res.status(400).json({ error: 'Invalid list query', details: parsed.error.issues });
+      }
+      const { status, limit } = parsed.data;
       const transfers = await listTransfers({ driverId: req.user.id, status, limit });
       return res.json({ transfers });
     } catch (err) {

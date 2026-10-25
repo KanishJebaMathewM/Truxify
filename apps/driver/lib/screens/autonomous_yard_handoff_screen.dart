@@ -136,8 +136,8 @@ class _AutonomousYardHandoffScreenState extends State<AutonomousYardHandoffScree
           child: Column(
             children: [
               CircularProgressIndicator(color: Colors.indigo),
-              const SizedBox(height: 16),
-              const Text('Pull into the Drop Zone to trigger autonomous dispatch.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+              SizedBox(height: 16),
+              Text('Pull into the Drop Zone to trigger autonomous dispatch.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
             ],
           ),
         ),

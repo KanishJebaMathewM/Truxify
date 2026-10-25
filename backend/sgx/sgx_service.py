@@ -105,11 +105,13 @@ class SGXService:
             # In production: call ecall_store_data
             # For demo: simulate secure storage
             data_hash = hashlib.sha256(data.encode()).hexdigest()
+            storage_index = self.secure_counter
+            self.secure_counter += 1
             
             return {
                 'success': True,
                 'data_hash': data_hash,
-                'storage_index': self.secure_counter,
+                'storage_index': storage_index,
                 'enclave_id': self.enclave_id,
                 'timestamp': datetime.now().isoformat()
             }

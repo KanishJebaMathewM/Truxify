@@ -1,0 +1,32 @@
+name: Native diffusion condition ownership
+on:
+  pull_request:
+    paths:
+      - 'backend/ml/diffusion/model.py'
+      - 'backend/ml/tests/test_diffusion_condition_ownership.py'
+      - '.github/workflows/diffusion-condition-ownership.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-conditioning:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Native CPU dependencies
+        run: |
+          python -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install numpy==1.26.4 tqdm==4.67.1 pytest==9.0.3 ruff==0.16.9
+      - name: Native condition ownership and checkpoint protocol
+        env:
+          PYTHONPATH: backend/ml
+          OMP_NUM_THREADS: '1'
+        run: python -m pytest -q backend/ml/tests/test_diffusion_condition_ownership.py backend/ml/tests/test_diffusion.py backend/ml/tests/test_diffusion_trainer.py
+      - name: Scoped analysis
+        run: python -m ruff check backend/ml/diffusion/model.py backend/ml/tests/test_diffusion_condition_ownership.py --select E9,F63,F7,F82

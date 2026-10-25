@@ -1,8 +1,11 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import logger from '../middleware/logger.js';
 import { mongoDb as mongoDbClient } from '../config/db.js';
+import { classifyTelemetryBulkOutcome } from './telemetryBulkOutcome.js';
 
 // ============================================================================
 // Shared buffered telemetry persistence pipeline.
@@ -26,7 +29,7 @@ const BUFFER_WARN_THRESHOLD = 0.5;
 const BUFFER_CRIT_THRESHOLD = 0.8;
 const FLUSH_RETRY_BASE_MS = parseInt(process.env.TELEMETRY_FLUSH_RETRY_BASE_MS, 10) || 1000;
 const FLUSH_RETRY_MAX_MS = parseInt(process.env.TELEMETRY_FLUSH_RETRY_MAX_MS, 10) || 60000;
-const SHUTDOWN_FLUSH_TIMEOUT_MS = parseInt(process.env.TELEMETRY_SHUTDOWN_FLUSH_TIMEOUT_MS, 10) || 10000;
+const SHUTDOWN_FLUSH_TIMEOUT_MS = boundedShutdownMs(process.env.TELEMETRY_SHUTDOWN_FLUSH_TIMEOUT_MS, 10000);
 const SHUTDOWN_DEFAULT_WAIT_MS = 10000;
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -41,6 +44,19 @@ const getMongoDb = () => (mongoDbOverride !== undefined ? mongoDbOverride : mong
 let retryQueue = [];
 let flushBackoffMs = FLUSH_RETRY_BASE_MS;
 let currentFlushPromise = null;
+let inFlightRecords = [];
+let shutdownPromise = null;
+let shutdownStarted = false;
+let shutdownCompleted = false;
+
+// Shutdown is terminal for this module instance. Bounds prevent invalid timer
+// values from turning the drain into an indefinite wait or immediate overflow.
+function boundedShutdownMs(value, fallback) {
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 30000
+    ? parsed : fallback;
+}
 let flushMutex = false;
 let isSchedulerActive = false;
 let telemetryFlushTimer = null;
@@ -52,6 +68,7 @@ let telemetryTotalFlushed = 0;
 let telemetryTotalDropped = 0;
 let telemetryRaceDropped = 0;
 let telemetryOverflowDropped = 0;
+let telemetryValidationDropped = 0;
 let telemetryFlushRetries = 0;
 let lastFlushAt = null;
 let lastFlushDurationMs = null;
@@ -128,6 +145,13 @@ const buffer = new TelemetryRingBuffer(MAX_BUFFER_SIZE);
  */
 function enqueue(record) {
   eventsReceived++;
+  if (shutdownCompleted) {
+    // Producers must be stopped by the caller before shutdown. Late arrivals
+    // are explicitly metered instead of creating uncheckpointed pending work.
+    telemetryTotalDropped++;
+    logger.warn('[TRUXIFY SHUTDOWN] Dropped telemetry received after shutdown completed.');
+    return 1;
+  }
   let dropped;
   try {
     dropped = buffer.push(record);
@@ -146,7 +170,7 @@ function enqueue(record) {
 
   // Batch-size trigger: opportunistically flush (fire-and-forget) once a full
   // batch is buffered so we do not wait for the interval tick at high volume.
-  if (buffer.length >= BATCH_SIZE) {
+  if (!shutdownStarted && buffer.length >= BATCH_SIZE) {
     void flush();
   }
 
@@ -163,10 +187,17 @@ function enqueue(record) {
  *   the happy path).
  * - Transient errors: all failed records are prepended back into the active
  *   buffer (oldest retries first) and the next flush backs off exponentially.
- * - Validation errors (code 121 / BulkWriteError): the offending documents are
- *   dropped permanently with a metric + log. Retrying them would loop forever.
+ * - Partial bulk outcomes: confirmed indexed validation failures are dropped;
+ *   complete acknowledged successes are excluded from retries. Other outcomes
+ *   remain recoverable, including write-concern and malformed-metadata cases.
  */
 function flush() {
+  if (shutdownStarted) return currentFlushPromise ?? undefined;
+  return flushOwned();
+}
+
+// Only the shutdown drain may start another write after the scheduler stops.
+function flushOwned() {
   // Not async: an async function would wrap the in-flight promise in a fresh
   // outer promise on every call, so concurrent callers would NOT receive the
   // same reference. Returning `currentFlushPromise` directly (or `undefined`)
@@ -203,65 +234,42 @@ function flush() {
     return undefined;
   }
 
+  inFlightRecords = recordsToFlush;
   const flushStartedAt = Date.now();
   currentFlushPromise = (async () => {
     logger.info(`[TRUXIFY BATCH CONTROL] Committing bulk cluster of ${recordsToFlush.length} spatial rows to MongoDB...`);
     try {
-      const collection = getMongoDb().collection('telemetry');
-      await collection.insertMany(recordsToFlush, { ordered: false });
+      await Promise.resolve().then(() => getMongoDb().collection('telemetry').insertMany(recordsToFlush, { ordered: false }));
       telemetryTotalFlushed += recordsToFlush.length;
       logger.info(`[TRUXIFY DB SUCCESS] Successfully flushed ${recordsToFlush.length} records to MongoDB telemetry collection. Total flushed: ${telemetryTotalFlushed}`);
       flushBackoffMs = FLUSH_RETRY_BASE_MS;
       lastFlushError = null;
     } catch (err) {
-      const isBulkWriteError =
-        err.code === 121 ||
-        err.name === 'BulkWriteError' ||
-        (err.message && err.message.includes('Document failed validation'));
-
-      if (isBulkWriteError) {
-        // Permanent failure — retrying the offending documents can never
-        // succeed, so drop them and report instead of looping forever.
-        const failedIndices = err.writeErrors
-          ? new Set(err.writeErrors.map((e) => e.index))
-          : null;
-
-        if (failedIndices) {
-          const sampleErrors = err.writeErrors.slice(0, 5).map((e) =>
-            `doc ${e.index}: ${e.err?.message || 'unknown'}`
-          ).join('; ');
-          logger.error(`[TRUXIFY VALIDATION] ${err.writeErrors.length} documents failed validation. Samples: ${sampleErrors}`);
-
-          const failed = recordsToFlush.filter((_, i) => failedIndices.has(i));
-          if (failed.length > 0) {
-            telemetryTotalDropped += failed.length;
-            telemetryOverflowDropped += failed.length;
-            logger.warn(`[TRUXIFY VALIDATION DROP] Dropped ${failed.length} permanently-invalid telemetry records.`);
-          }
-          // With ordered:false the remaining documents WERE inserted — count
-          // them so the metrics reflect reality and never double-write them.
-          telemetryTotalFlushed += recordsToFlush.length - failed.length;
-        } else {
-          logger.error(`[TRUXIFY VALIDATION] Bulk insert validation error: ${err.message}`);
-          telemetryTotalDropped += recordsToFlush.length;
-          telemetryOverflowDropped += recordsToFlush.length;
-          logger.warn(`[TRUXIFY VALIDATION DROP] Dropped ${recordsToFlush.length} permanently-invalid telemetry records.`);
-        }
-      } else {
-        // Transient — back off and retry the whole batch (oldest first).
+      const outcome = classifyTelemetryBulkOutcome(recordsToFlush, err);
+      telemetryTotalFlushed += outcome.inserted.length;
+      if (outcome.invalid.length > 0) {
+        telemetryTotalDropped += outcome.invalid.length;
+        telemetryValidationDropped += outcome.invalid.length;
+        logger.warn(`[TRUXIFY VALIDATION DROP] Dropped ${outcome.invalid.length} confirmed validation-rejected telemetry records.`);
+      }
+      if (outcome.retry.length > 0) {
         flushBackoffMs = Math.min(flushBackoffMs * 2, FLUSH_RETRY_MAX_MS);
         telemetryFlushRetries++;
-        lastFlushError = err.message;
-        const overflowDrop = buffer.prepend(recordsToFlush);
+        lastFlushError = err?.message || 'Uncertain telemetry bulk insert outcome';
+        const overflowDrop = buffer.prepend(outcome.retry);
         if (overflowDrop > 0) {
           telemetryTotalDropped += overflowDrop;
           telemetryOverflowDropped += overflowDrop;
-          logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after flush failure.`);
+          logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest retry records due to capacity after flush failure.`);
         }
+      } else {
+        flushBackoffMs = FLUSH_RETRY_BASE_MS;
+        lastFlushError = null;
       }
     } finally {
       lastFlushDurationMs = Date.now() - flushStartedAt;
       lastFlushAt = new Date().toISOString();
+      inFlightRecords = [];
       currentFlushPromise = null;
       flushMutex = false;
     }
@@ -305,7 +313,26 @@ async function loadRecoveryFile() {
     if (fs.existsSync(RECOVERY_FILE_PATH)) {
       const content = fs.readFileSync(RECOVERY_FILE_PATH, 'utf-8').trim();
       if (content) {
-        const records = content.split('\n').filter(Boolean).map((line) => JSON.parse(line));
+        // Parse line-by-line and skip corrupt records instead of failing the
+        // whole batch. A single malformed line used to throw out of this map,
+        // hit the outer catch, and delete the recovery file — losing every
+        // other (valid) record the file existed to preserve.
+        let skipped = 0;
+        const records = content
+          .split('\n')
+          .filter(Boolean)
+          .flatMap((line) => {
+            try {
+              return [JSON.parse(line)];
+            } catch (parseErr) {
+              skipped++;
+              logger.warn(`[TRUXIFY RECOVERY] Skipping malformed telemetry record: ${parseErr.message}`);
+              return [];
+            }
+          });
+        if (skipped > 0) {
+          logger.warn(`[TRUXIFY RECOVERY] Skipped ${skipped} malformed telemetry record(s).`);
+        }
         if (records.length > 0) {
           buffer.prepend(records);
           logger.info(`[TRUXIFY RECOVERY] Loaded ${records.length} telemetry records from recovery file. Buffer size: ${buffer.length}`);
@@ -321,7 +348,7 @@ async function loadRecoveryFile() {
 
 /** Starts the flush scheduler + buffer monitor. Idempotent. */
 function start() {
-  if (isSchedulerActive) return;
+  if (isSchedulerActive || shutdownStarted) return;
   isSchedulerActive = true;
   void loadRecoveryFile();
   scheduleNextFlush();
@@ -332,121 +359,81 @@ function start() {
 
 // ── Shutdown ─────────────────────────────────────────────────────────────────
 /**
- * Stops the scheduler, waits up to `MONGODB_SHUTDOWN_WAIT_MS` (read at call
- * time so tests can set it after import) for MongoDB, then performs a final
- * flush. When MongoDB never becomes available the pending records are written
- * to the recovery file AND retained in the buffer (never silently lost), and a
- * warning is emitted. Safe to call repeatedly.
+ * Terminal, coalesced shutdown. A single monotonic budget covers Mongo readiness
+ * and every owned write. At expiry, checkpoint owned + queued records and return;
+ * late driver settlement never deletes that checkpoint. Recovery is at-least-once
+ * (an uncertain write may have committed), not Mongo cancellation or rollback.
  */
-async function shutdown() {
-  if (telemetryFlushTimer) {
-    clearTimeout(telemetryFlushTimer);
-    telemetryFlushTimer = null;
-  }
-  if (telemetryMonitorTimer) {
-    clearInterval(telemetryMonitorTimer);
-    telemetryMonitorTimer = null;
-  }
+function shutdown() {
+  if (shutdownPromise) return shutdownPromise;
+  shutdownStarted = true;
+  if (telemetryFlushTimer) clearTimeout(telemetryFlushTimer);
+  if (telemetryMonitorTimer) clearInterval(telemetryMonitorTimer);
+  telemetryFlushTimer = null;
+  telemetryMonitorTimer = null;
   isSchedulerActive = false;
+  // Defer execution so even a synchronous failure cannot race the assignment.
+  shutdownPromise = Promise.resolve().then(drainForShutdown);
+  return shutdownPromise;
+}
 
-  const parsedWait = parseInt(process.env.MONGODB_SHUTDOWN_WAIT_MS, 10);
-  const mongoMaxWaitMs = Number.isNaN(parsedWait) ? SHUTDOWN_DEFAULT_WAIT_MS : parsedWait;
-
-  if (mongoMaxWaitMs > 0) {
-    const mongoPollIntervalMs = Math.min(500, mongoMaxWaitMs);
-    const mongoWaitStart = Date.now();
-    while (!getMongoDb() && Date.now() - mongoWaitStart < mongoMaxWaitMs) {
-      await new Promise((resolve) => setTimeout(resolve, mongoPollIntervalMs));
-    }
-    if (!getMongoDb()) {
-      const allPending = [...retryQueue, ...buffer.toArray()];
-      if (allPending.length > 0) {
-        try {
-          const lines = allPending.map((r) => JSON.stringify(r)).join('\n');
-          fs.writeFileSync(RECOVERY_FILE_PATH, lines + '\n', { encoding: 'utf-8', mode: 0o600 });
-          logger.warn(`[TRUXIFY SHUTDOWN] MongoDB not available. Wrote ${allPending.length} telemetry records to recovery file: ${RECOVERY_FILE_PATH}`);
-        } catch (fileErr) {
-          logger.error(`[TRUXIFY SHUTDOWN] Failed to write recovery file: ${fileErr.message}. ${allPending.length} records lost.`);
-        }
-      }
-    }
-  }
-
-  // Wait for any in-flight flush to complete.
-  if (currentFlushPromise) {
-    try {
-      await currentFlushPromise;
-    } catch (err) {
-      // Ignore; the final flush below retries.
-    }
-  }
-
+async function waitWithinDeadline(work, deadline) {
+  const remaining = deadline - performance.now();
+  if (remaining <= 0) return false;
+  let timer;
   try {
-    // Capture the records the final flush will attempt BEFORE it atomically
-    // swaps them out of the buffer, so a timeout branch can recover them
-    // instead of silently losing them when the process exits.
-    const pendingRecords = [...retryQueue, ...buffer.toArray()];
+    return await Promise.race([
+      Promise.resolve(work).then(() => true, () => true),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(false), remaining); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
-    const finalFlush = flush();
-    if (finalFlush) {
-      let timedOut = false;
-      const timeoutPromise = new Promise((resolve) => {
-        setTimeout(() => {
-          timedOut = true;
-          resolve();
-        }, SHUTDOWN_FLUSH_TIMEOUT_MS);
-      });
-      await Promise.race([finalFlush, timeoutPromise]);
+function checkpointPending() {
+  const pending = [...inFlightRecords, ...retryQueue, ...buffer.toArray()];
+  if (pending.length === 0) return;
+  const tempPath = `${RECOVERY_FILE_PATH}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    // Synchronous capture/replace cannot interleave with flush settlement or
+    // enqueue. Rename preserves the last complete snapshot on write failure.
+    const lines = pending.map((record) => JSON.stringify(record)).join('\n');
+    fs.writeFileSync(tempPath, lines + '\n', { encoding: 'utf-8', mode: 0o600, flag: 'wx' });
+    fs.renameSync(tempPath, RECOVERY_FILE_PATH);
+    logger.warn(`[TRUXIFY SHUTDOWN] Checkpointed ${pending.length} pending telemetry records to ${RECOVERY_FILE_PATH}`);
+  } catch (err) {
+    logger.error(`[TRUXIFY SHUTDOWN] Recovery checkpoint failed: ${err.message}. ${pending.length} records remain in memory.`);
+  } finally {
+    try { fs.unlinkSync(tempPath); } catch (_) { /* renamed or not created */ }
+  }
+}
 
-      if (timedOut) {
-        // The in-flight insert is still pending. Persist a copy to the
-        // recovery file so a process exit cannot lose the records, then let
-        // the underlying flush settle and DISCARD the recovery copy if it
-        // actually succeeds (avoids re-inserting already-persisted rows on
-        // the next startup).
-        let wroteRecovery = false;
-        try {
-          const lines = pendingRecords.map((r) => JSON.stringify(r)).join('\n');
-          fs.writeFileSync(RECOVERY_FILE_PATH, lines + '\n', { encoding: 'utf-8', mode: 0o600 });
-          wroteRecovery = true;
-          logger.warn(
-            `[TRUXIFY SHUTDOWN] Final flush exceeded ${SHUTDOWN_FLUSH_TIMEOUT_MS}ms. ` +
-            `Wrote ${pendingRecords.length} telemetry records to recovery file: ${RECOVERY_FILE_PATH}`
-          );
-        } catch (fileErr) {
-          logger.error(
-            `[TRUXIFY SHUTDOWN] Failed to write recovery file on flush timeout: ${fileErr.message}. ` +
-            `${pendingRecords.length} records may be lost.`
-          );
-        }
-
-        try {
-          await finalFlush;
-          if (wroteRecovery) {
-            try {
-              fs.unlinkSync(RECOVERY_FILE_PATH);
-            } catch (_) {
-              /* ignore */
-            }
-          }
-        } catch (flushErr) {
-          if (wroteRecovery) {
-            logger.warn(
-              `[TRUXIFY SHUTDOWN] Final flush failed after timeout; ` +
-              `${pendingRecords.length} records retained in recovery file.`
-            );
-          } else {
-            logger.error(
-              `[TRUXIFY SHUTDOWN] Final flush failed and recovery write failed: ` +
-              `${pendingRecords.length} records lost.`,
-              flushErr.message
-            );
-          }
-        }
-      }
+async function drainForShutdown() {
+  const mongoWaitMs = boundedShutdownMs(process.env.MONGODB_SHUTDOWN_WAIT_MS, SHUTDOWN_DEFAULT_WAIT_MS);
+  const startedAt = performance.now();
+  const mongoDeadline = startedAt + mongoWaitMs;
+  const deadline = mongoDeadline + SHUTDOWN_FLUSH_TIMEOUT_MS;
+  try {
+    // An existing write owns its batch even if Mongo becomes unavailable.
+    if (currentFlushPromise && !await waitWithinDeadline(currentFlushPromise, deadline)) return;
+    while (!getMongoDb() && performance.now() < mongoDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(500, Math.max(0, mongoDeadline - performance.now()))));
+    }
+    if (!getMongoDb() || performance.now() >= deadline) return;
+    // Final writes share the remaining budget. A failed flush requeues records;
+    // do not spin on immediate failures or start overlapping driver operations.
+    while (buffer.length + retryQueue.length > 0 && performance.now() < deadline) {
+      const retriesBefore = telemetryFlushRetries;
+      const work = flushOwned();
+      if (!work || !await waitWithinDeadline(work, deadline)) break;
+      if (telemetryFlushRetries > retriesBefore) break;
     }
   } catch (err) {
-    logger.error('[shutdown] Failed to flush telemetry buffer:', err.message);
+    logger.error('[shutdown] Failed to drain telemetry buffer:', err.message);
+  } finally {
+    checkpointPending();
+    shutdownCompleted = true;
   }
 }
 
@@ -491,6 +478,7 @@ function getMetrics() {
     eventsFlushed: telemetryTotalFlushed,
     eventsDropped: telemetryTotalDropped,
     overflowDropped: telemetryOverflowDropped,
+    validationDropped: telemetryValidationDropped,
     raceDropped: telemetryRaceDropped,
     retryCount: telemetryFlushRetries,
     lastFlushAt,
@@ -513,6 +501,9 @@ function getState() {
     isSchedulerActive,
     isFlushing: Boolean(currentFlushPromise),
     bufferSize: buffer.length,
+    inFlightSize: inFlightRecords.length,
+    shutdownStarted,
+    shutdownCompleted,
     retryQueueSize: retryQueue.length,
     flushBackoffMs,
   };
@@ -554,6 +545,10 @@ const _test = {
     retryQueue = [];
     flushBackoffMs = FLUSH_RETRY_BASE_MS;
     currentFlushPromise = null;
+    inFlightRecords = [];
+    shutdownPromise = null;
+    shutdownStarted = false;
+    shutdownCompleted = false;
     flushMutex = false;
     isSchedulerActive = false;
     if (telemetryFlushTimer) {
@@ -569,6 +564,7 @@ const _test = {
     telemetryTotalDropped = 0;
     telemetryRaceDropped = 0;
     telemetryOverflowDropped = 0;
+    telemetryValidationDropped = 0;
     telemetryFlushRetries = 0;
     lastFlushAt = null;
     lastFlushDurationMs = null;

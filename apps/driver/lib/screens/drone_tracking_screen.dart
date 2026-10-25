@@ -118,7 +118,7 @@ class _DroneTrackingScreenState extends State<DroneTrackingScreen> {
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         border: Border.all(color: isDocked ? Colors.green : Colors.cyan, width: 2),
-        color: (isDocked ? Colors.green : Colors.cyan).withOpacity(0.1),
+        color: (isDocked ? Colors.green : Colors.cyan).withValues(alpha: 0.1),
       ),
       child: Center(
         child: Icon(

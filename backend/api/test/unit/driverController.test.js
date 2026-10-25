@@ -3,6 +3,9 @@ import { getDriverById, getDriverTrips, updateDriver } from '../../src/controlle
 import { supabaseAdmin } from '../../src/config/db.js';
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: null,
   supabaseAdmin: {
     from: vi.fn(),
@@ -116,6 +119,15 @@ describe('driverController', () => {
         total: 25,
         totalPages: 3,
         trips: mockTrips,
+        data: mockTrips,
+        pagination: {
+          page: 2,
+          limit: 10,
+          total: 25,
+          totalPages: 3,
+          hasNextPage: true,
+          hasPreviousPage: true,
+        },
       });
     });
 

@@ -49,12 +49,18 @@ contract StoragePoR is Ownable {
 
     function registerProvider(uint256 _collateral) external payable {
         require(msg.value >= _collateral, "Insufficient collateral deposit");
+        require(!providers[msg.sender].active, "Already registered");
         providers[msg.sender] = NodeStatus({
             storageProvider: msg.sender,
             lastVerifiedBlock: block.number,
-            lockedCollateral: msg.value,
+            lockedCollateral: _collateral,
             active: true
         });
+        uint256 excess = msg.value - _collateral;
+        if (excess > 0) {
+            (bool sent, ) = payable(msg.sender).call{value: excess}("");
+            require(sent, "Excess refund failed");
+        }
     }
 
     /**
@@ -107,10 +113,12 @@ contract StoragePoR is Ownable {
             node.lockedCollateral = 0;
 
             if (penalty > 0) {
-                payable(owner()).transfer(penalty); // Bounded penalty
+                (bool penaltySent, ) = payable(owner()).call{value: penalty}("");
+                require(penaltySent, "Penalty transfer failed"); // Bounded penalty
             }
             if (returned > 0) {
-                payable(_provider).transfer(returned); // Restitution
+                (bool returnedSent, ) = payable(_provider).call{value: returned}("");
+                require(returnedSent, "Restitution transfer failed"); // Restitution
             }
 
             emit ProviderSlashed(_provider, penalty);

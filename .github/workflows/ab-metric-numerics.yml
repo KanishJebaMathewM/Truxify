@@ -1,0 +1,40 @@
+name: Native A/B metric numerics
+on:
+  pull_request:
+    paths:
+      - 'backend/ml/services/**'
+      - 'backend/ml/app/models/**'
+      - 'backend/ml/app/execution.py'
+      - 'backend/ml/routes/ab_testing.py'
+      - 'backend/ml/tests/test_ab*.py'
+      - 'backend/ml/requirements.txt'
+      - 'backend/ml/docs/ab-*.md'
+      - 'docs/architecture/ab-*.md'
+      - '.github/workflows/ab-metric-numerics.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-numerics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        sklearn: ['1.5.2', '1.9.0']
+    env:
+      PYTHONPATH: backend/ml
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -m pip install numpy==1.26.4 scipy==1.14.1 scikit-learn==${{ matrix.sklearn }} pandas==2.2.3 sqlalchemy==2.0.36 fastapi==0.116.1 httpx==0.28.1 requests==2.32.3 redis==5.0.8 aiohttp==3.11.11 pytest==9.0.3 ruff==0.16.9
+      - run: >-
+          python -m pytest backend/ml/tests/test_ab_metric_numerics.py
+          backend/ml/tests/test_ab_testing_model.py backend/ml/tests/test_ab_testing_shadow_metrics.py
+          backend/ml/tests/test_ab_experiment_ledger.py backend/ml/tests/test_ab_rollback_ownership.py -q
+      - run: |
+          python -m ruff check backend/ml/services/ab_metric_comparison.py backend/ml/services/ab_testing.py backend/ml/tests/test_ab_metric_numerics.py
+          python -m ruff check backend/ml/routes/ab_testing.py --ignore DTZ005,DTZ003,BLE001

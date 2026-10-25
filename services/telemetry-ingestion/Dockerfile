@@ -17,4 +17,9 @@ COPY --from=builder /app/telemetry-ingestion .
 
 EXPOSE 8085
 
+USER nobody
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:${TELEMETRY_PORT:-8085}/api/v1/telemetry/health || exit 1
+
 CMD ["./telemetry-ingestion"]

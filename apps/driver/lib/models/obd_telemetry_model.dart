@@ -48,3 +48,19 @@ class ObdTelemetry {
     );
   }
 }
+
+/// Live OBD-II telemetry from the maintenance service (the fleet maintenance
+/// screen's model; distinct from the backend-facing ObdTelemetry report).
+class ObdTelemetryModel {
+  final double engineTemperature; // °C
+  final double tirePressure; // PSI
+  final double fluidLevels; // %
+  final DateTime timestamp;
+
+  const ObdTelemetryModel({
+    required this.engineTemperature,
+    required this.tirePressure,
+    required this.fluidLevels,
+    required this.timestamp,
+  });
+}

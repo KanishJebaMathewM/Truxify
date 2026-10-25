@@ -62,12 +62,19 @@ describe('LoadOfferCacheService', () => {
       expect(true).toBe(true);
     });
 
-    it('increments the region and global versions', async () => {
-      const incr = vi.fn().mockResolvedValue(1);
-      dbMock.redisClient = { incr };
-      await LoadOfferCacheService.invalidateRegion(12.9716, 77.5946);
-      expect(incr).toHaveBeenCalledTimes(2);
-    });
+    it('increments the version for the calculated region', async () => {
+  const incr = vi.fn().mockResolvedValue(1);
+  dbMock.redisClient = { incr };
+
+  const region = LoadOfferCacheService.getRegion(12.9716, 77.5946);
+
+  await LoadOfferCacheService.invalidateRegion(12.9716, 77.5946);
+
+  expect(incr).toHaveBeenCalledTimes(1);
+  expect(incr).toHaveBeenCalledWith(
+    `version:load_offers:region:${region}`
+  );
+});
 
     it('increments only the global version for the global region', async () => {
       const incr = vi.fn().mockResolvedValue(1);

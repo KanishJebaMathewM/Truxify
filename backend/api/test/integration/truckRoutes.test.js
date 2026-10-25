@@ -10,11 +10,19 @@ let mockTelemetryResults = [];
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
   supabaseAdmin: m.supabase,
+  // The truck routes build a caller-scoped client per request.
+  createUserClient: () => m.supabase,
   firebaseAdmin: null,
   redisClient: null,
+  // The truck-search cache version check reads the Upstash client.
+  upstashRedisClient: null,
   mongoDb: {
     collection: (name) => ({
       find: () => ({
+        // The route now bounds the telemetry scan with .limit(200).
+        limit: () => ({
+          toArray: () => Promise.resolve(mockTelemetryResults),
+        }),
         toArray: () => Promise.resolve(mockTelemetryResults),
       }),
     }),
@@ -64,7 +72,7 @@ describe('Truck Routes', () => {
       const res = await request(buildApp())
         .post('/api/trucks')
         .set(CUSTOMER_HEADERS)
-        .send({ name: 'My Truck', number_plate: 'MH12AB1234', max_capacity_tons: 5 });
+        .send({ name: 'My Truck', number_plate: 'MH12AB1234', max_capacity_tons: 5 , truck_type: 'Open Body'});
 
       expect(res.status).toBe(403);
     });
@@ -73,7 +81,7 @@ describe('Truck Routes', () => {
       const res = await request(buildApp())
         .post('/api/trucks')
         .set(DRIVER_HEADERS)
-        .send({ name: 'Big Blue', number_plate: 'MH12AB1234', max_capacity_tons: 10 });
+        .send({ name: "Big Blue", number_plate: "MH12AB1234", max_capacity_tons: 10, truck_type: "Open Body" });
 
       expect(res.status).toBe(201);
       expect(res.body.message).toBe('Truck registered successfully.');
@@ -83,7 +91,7 @@ describe('Truck Routes', () => {
       // Verify truck was inserted into store
       const insertCall = m.calls.find(c => c.table === 'trucks' && c.mode === 'insert');
       expect(insertCall).toBeDefined();
-      expect(insertCall.payload.owner_id).toBe('driver-uuid-456');
+      expect(insertCall.payload.driver_id).toBe('driver-uuid-456');
       expect(insertCall.payload.max_capacity_tons).toBe(10);
     });
 
@@ -91,7 +99,7 @@ describe('Truck Routes', () => {
       const res = await request(buildApp())
         .post('/api/trucks')
         .set(DRIVER_HEADERS)
-        .send({ name: 'Red Rig', number_plate: 'mh12ab5678', max_capacity_tons: 8 });
+        .send({ name: 'Red Rig', number_plate: 'mh12ab5678', max_capacity_tons: 8 , truck_type: 'Open Body'});
 
       expect(res.status).toBe(201);
       const insertCall = m.calls.find(c => c.table === 'trucks' && c.mode === 'insert');
@@ -112,7 +120,7 @@ describe('Truck Routes', () => {
       const res = await request(buildApp())
         .post('/api/trucks')
         .set(DRIVER_HEADERS)
-        .send({ name: 'Bad Plate', number_plate: 'INVALID-PLATE', max_capacity_tons: 5 });
+        .send({ name: 'Bad Plate', number_plate: 'INVALID-PLATE', max_capacity_tons: 5 , truck_type: 'Open Body'});
 
       expect(res.status).toBe(400);
     });
@@ -121,19 +129,19 @@ describe('Truck Routes', () => {
       const res = await request(buildApp())
         .post('/api/trucks')
         .set(DRIVER_HEADERS)
-        .send({ name: 'Tiny', number_plate: 'MH12AB9999', max_capacity_tons: 0 });
+        .send({ name: 'Tiny', number_plate: 'MH12AB9999', max_capacity_tons: 0 , truck_type: 'Open Body'});
 
       expect(res.status).toBe(400);
     });
 
     it('returns 409 when number plate is already registered', async () => {
       // Pre-seed the plate as already existing
-      m.store.trucks.push({ id: 'truck-existing', number_plate: 'MH12AB1234', owner_id: 'other-driver' });
+      m.store.trucks.push({ id: 'truck-existing', number_plate: 'MH12AB1234', driver_id: 'other-driver' });
 
       const res = await request(buildApp())
         .post('/api/trucks')
         .set(DRIVER_HEADERS)
-        .send({ name: 'Duplicate', number_plate: 'MH12AB1234', max_capacity_tons: 5 });
+        .send({ name: 'Duplicate', number_plate: 'MH12AB1234', max_capacity_tons: 5 , truck_type: 'Open Body'});
 
       expect(res.status).toBe(409);
       expect(res.body.error).toContain('already registered');
@@ -143,7 +151,7 @@ describe('Truck Routes', () => {
       const res = await request(buildApp())
         .post('/api/trucks')
         .set(DRIVER_HEADERS)
-        .send({ name: 'Big Blue', number_plate: '  mh12ab1234  ', max_capacity_tons: 10 });
+        .send({ name: 'Big Blue', number_plate: '  mh12ab1234  ', max_capacity_tons: 10 , truck_type: 'Open Body'});
 
       expect(res.status).toBe(201);
       const insertCall = m.calls.find(c => c.table === 'trucks' && c.mode === 'insert');
@@ -151,12 +159,12 @@ describe('Truck Routes', () => {
     });
 
     it('normalises separators before duplicate lookup', async () => {
-      m.store.trucks.push({ id: 'truck-existing', number_plate: 'MH12AB1234', owner_id: 'other-driver' });
+      m.store.trucks.push({ id: 'truck-existing', number_plate: 'MH12AB1234', driver_id: 'other-driver' });
 
       const res = await request(buildApp())
         .post('/api/trucks')
         .set(DRIVER_HEADERS)
-        .send({ name: 'Duplicate', number_plate: 'MH 12 AB 1234', max_capacity_tons: 5 });
+        .send({ name: 'Duplicate', number_plate: 'MH 12 AB 1234', max_capacity_tons: 5 , truck_type: 'Open Body'});
 
       expect(res.status).toBe(409);
       const checkCall = m.calls.find(c => c.table === 'trucks' && c.mode === 'select');
@@ -184,9 +192,9 @@ describe('Truck Routes', () => {
 
     it('returns only trucks belonging to the authenticated driver', async () => {
       m.store.trucks.push(
-        { id: 'truck-1', name: 'Truck A', number_plate: 'MH12AB0001', max_capacity_tons: 5, owner_id: 'driver-uuid-456', created_at: '2026-06-01T00:00:00Z' },
-        { id: 'truck-2', name: 'Truck B', number_plate: 'MH12AB0002', max_capacity_tons: 10, owner_id: 'driver-uuid-456', created_at: '2026-06-02T00:00:00Z' },
-        { id: 'truck-other', name: 'Other Driver Truck', number_plate: 'DL01C9999', max_capacity_tons: 15, owner_id: 'another-driver', created_at: '2026-06-01T00:00:00Z' },
+        { id: 'truck-1', name: 'Truck A', number_plate: 'MH12AB0001', max_capacity_tons: 5, driver_id: 'driver-uuid-456', created_at: '2026-06-01T00:00:00Z' },
+        { id: 'truck-2', name: 'Truck B', number_plate: 'MH12AB0002', max_capacity_tons: 10, driver_id: 'driver-uuid-456', created_at: '2026-06-02T00:00:00Z' },
+        { id: 'truck-other', name: 'Other Driver Truck', number_plate: 'DL01C9999', max_capacity_tons: 15, driver_id: 'another-driver', created_at: '2026-06-01T00:00:00Z' },
       );
 
       const res = await request(buildApp())
@@ -202,8 +210,8 @@ describe('Truck Routes', () => {
 
     it('supports name filtering using name query param', async () => {
       m.store.trucks.push(
-        { id: 'truck-1', name: 'Big Blue Truck', number_plate: 'MH12AB0001', max_capacity_tons: 5, owner_id: 'driver-uuid-456', created_at: '2026-06-01T00:00:00Z' },
-        { id: 'truck-2', name: 'Tiny Red Truck', number_plate: 'MH12AB0002', max_capacity_tons: 10, owner_id: 'driver-uuid-456', created_at: '2026-06-02T00:00:00Z' }
+        { id: 'truck-1', name: 'Big Blue Truck', number_plate: 'MH12AB0001', max_capacity_tons: 5, driver_id: 'driver-uuid-456', created_at: '2026-06-01T00:00:00Z' },
+        { id: 'truck-2', name: 'Tiny Red Truck', number_plate: 'MH12AB0002', max_capacity_tons: 10, driver_id: 'driver-uuid-456', created_at: '2026-06-02T00:00:00Z' }
       );
 
       const res = await request(buildApp())
@@ -222,7 +230,7 @@ describe('Truck Routes', () => {
     function seedSearchData() {
       mockTelemetryResults = [{ driver_id: 'driver-uuid-456' }];
       m.store.trucks = [
-        { id: 'truck-open', name: 'Open Body Truck', number_plate: 'MH12AB0001', max_capacity_tons: 10, owner_id: 'driver-uuid-456' },
+        { id: 'truck-open', name: 'Open Body Truck', number_plate: 'MH12AB0001', max_capacity_tons: 10, driver_id: 'driver-uuid-456' },
       ];
       m.store.driver_details = [
         { user_id: 'driver-uuid-456', is_online: true, truck_id: 'truck-open', rating: 4.5, total_trips: 100, completion_rate: 95 },
@@ -284,8 +292,8 @@ describe('Truck Routes', () => {
     it('filters by capacity range', async () => {
       mockTelemetryResults = [{ driver_id: 'driver-uuid-456' }];
       m.store.trucks = [
-        { id: 'truck-small', name: 'Mini Truck', number_plate: 'MH12AB0001', max_capacity_tons: 3, owner_id: 'driver-uuid-456' },
-        { id: 'truck-big', name: 'Container Truck', number_plate: 'MH12AB0002', max_capacity_tons: 15, owner_id: 'driver-uuid-456' },
+        { id: 'truck-small', name: 'Mini Truck', number_plate: 'MH12AB0001', max_capacity_tons: 3, driver_id: 'driver-uuid-456' },
+        { id: 'truck-big', name: 'Container Truck', number_plate: 'MH12AB0002', max_capacity_tons: 15, driver_id: 'driver-uuid-456' },
       ];
       m.store.driver_details = [
         { user_id: 'driver-uuid-456', is_online: true, truck_id: 'truck-small', rating: 4.0, total_trips: 50, completion_rate: 90 },
@@ -306,7 +314,7 @@ describe('Truck Routes', () => {
     it('filters by truck_type using the stored truck type', async () => {
       mockTelemetryResults = [{ driver_id: 'driver-uuid-456' }];
       m.store.trucks = [
-        { id: 'truck-reefer', name: 'Tata 407', truck_type: 'Refrigerated', number_plate: 'MH12AB0001', max_capacity_tons: 10, owner_id: 'driver-uuid-456' },
+        { id: 'truck-reefer', name: 'Tata 407', truck_type: 'Refrigerated', number_plate: 'MH12AB0001', max_capacity_tons: 10, driver_id: 'driver-uuid-456' },
       ];
       m.store.driver_details = [
         { user_id: 'driver-uuid-456', is_online: true, truck_id: 'truck-reefer', rating: 4.5, total_trips: 100, completion_rate: 95 },
@@ -341,8 +349,8 @@ describe('Truck Routes', () => {
         { driver_id: 'driver-reefer' },
       ];
       m.store.trucks = [
-        { id: 'truck-open', name: 'Open Body Truck', truck_type: 'Open Body', number_plate: 'MH12AB0001', max_capacity_tons: 10, owner_id: 'driver-open' },
-        { id: 'truck-reefer', name: 'Cold Chain Truck', truck_type: 'Refrigerated', number_plate: 'MH12AB0002', max_capacity_tons: 10, owner_id: 'driver-reefer' },
+        { id: 'truck-open', name: 'Open Body Truck', truck_type: 'Open Body', number_plate: 'MH12AB0001', max_capacity_tons: 10, driver_id: 'driver-open' },
+        { id: 'truck-reefer', name: 'Cold Chain Truck', truck_type: 'Refrigerated', number_plate: 'MH12AB0002', max_capacity_tons: 10, driver_id: 'driver-reefer' },
       ];
       m.store.driver_details = [
         { user_id: 'driver-open', is_online: true, truck_id: 'truck-open', rating: 4.2, total_trips: 50, completion_rate: 95 },

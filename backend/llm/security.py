@@ -15,9 +15,19 @@ logger = logging.getLogger(__name__)
 bearer_scheme = HTTPBearer(auto_error=False)
 
 # JWT configuration
-JWT_SECRET = os.getenv("JWT_SECRET", "your-secret-key-change-in-production")
+JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
 JWT_ALGORITHM = "HS256"
 JWT_ISSUER = os.getenv("JWT_ISSUER", "truxify")
+
+if not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET must be configured for the LLM service")
+
+if JWT_SECRET in {
+    "your-secret-key-change-in-production",
+    "truxify-jwt-secret-key",
+    "secret",
+}:
+    raise RuntimeError("JWT_SECRET must not use a publicly-known default")
 
 # Trusted roles for RAG write access
 RAG_WRITE_ROLES = {"admin", "driver", "fleet_manager"}

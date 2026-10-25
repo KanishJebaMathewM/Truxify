@@ -514,3 +514,118 @@ describe('escrow service — setEscrowContractPaused (on-chain pause)', () => {
     expect(res.error).toContain('Transaction succeeded but contract paused() is still false');
   });
 });
+
+describe('escrow service — submitEscrowRefund (configured contract)', () => {
+  const ORDER_ID = '#FF20260701';
+  let cancelBookingStub, waitStub, pausedFlag;
+
+  beforeEach(() => {
+    vi.resetModules();
+
+    process.env.POLYGON_RPC_URL = 'http://mock-rpc';
+    process.env.ESCROW_CONTRACT_ADDRESS = '0x1111111111111111111111111111111111111111';
+    process.env.RELAYER_WALLET_PRIVATE_KEY = '0x' + 'a'.repeat(64);
+
+    // The circuit breaker fails closed without Redis, so control it directly.
+    pausedFlag = false;
+    vi.doMock('../../src/services/escrowCircuitBreaker.js', () => ({
+      isEscrowPaused: async () => pausedFlag,
+      escrowPausedResult: (bookingId, extra = {}) => ({
+        txHash: null,
+        bookingId,
+        error: 'Escrow is paused',
+        code: 'ESCROW_PAUSED',
+        ...extra,
+      }),
+    }));
+
+    waitStub = vi.fn().mockResolvedValue({ status: 1, hash: '0xrefundreceipt', blockNumber: 7 });
+    cancelBookingStub = vi.fn().mockResolvedValue({ hash: '0xcancelhash', wait: waitStub });
+
+    // Mirrors the real ESCROW_ABI: the deployed TruxifyEscrow exposes
+    // cancelBooking but NO refundFunds, so ethers returns `undefined` for it.
+    global.__mockEthersContractInstance = {
+      cancelBooking: cancelBookingStub,
+      runner: { provider: { getNetwork: async () => ({ chainId: 137 }) } },
+    };
+  });
+
+  afterEach(() => {
+    delete process.env.POLYGON_RPC_URL;
+    delete process.env.ESCROW_CONTRACT_ADDRESS;
+    delete process.env.RELAYER_WALLET_PRIVATE_KEY;
+    global.__mockEthersContractInstance = undefined;
+    vi.doUnmock('../../src/services/escrowCircuitBreaker.js');
+    vi.restoreAllMocks();
+  });
+
+  it('submits exactly one cancelBooking tx and never calls a refundFunds method', async () => {
+    const { submitEscrowRefund, getEscrowBookingId } = await import('../../src/services/escrow.js');
+
+    const result = await submitEscrowRefund(ORDER_ID);
+
+    expect(cancelBookingStub).toHaveBeenCalledTimes(1);
+    expect(cancelBookingStub).toHaveBeenCalledWith(getEscrowBookingId(ORDER_ID));
+    expect(result.error).toBeUndefined();
+    expect(result.bookingId).toBe(getEscrowBookingId(ORDER_ID));
+    expect(typeof result.waitForConfirmation).toBe('function');
+  });
+
+  it('returns the hash of the cancelBooking tx so callers can persist refund_tx_hash', async () => {
+    const { submitEscrowRefund } = await import('../../src/services/escrow.js');
+
+    const result = await submitEscrowRefund(ORDER_ID);
+
+    expect(result.txHash).toBe('0xcancelhash');
+  });
+
+  it('waitForConfirmation waits on the same cancelBooking tx and returns its receipt', async () => {
+    const { submitEscrowRefund } = await import('../../src/services/escrow.js');
+
+    const result = await submitEscrowRefund(ORDER_ID);
+    const receipt = await result.waitForConfirmation();
+
+    expect(waitStub).toHaveBeenCalledWith(1);
+    expect(receipt.hash).toBe('0xrefundreceipt');
+  });
+
+  it('waitForConfirmation rejects when the refund tx reverted', async () => {
+    const { submitEscrowRefund } = await import('../../src/services/escrow.js');
+    waitStub.mockResolvedValue({ status: 0 });
+
+    const result = await submitEscrowRefund(ORDER_ID);
+
+    await expect(result.waitForConfirmation()).rejects.toThrow('reverted or was not found');
+  });
+
+  it('waitForConfirmation rejects when no receipt is returned', async () => {
+    const { submitEscrowRefund } = await import('../../src/services/escrow.js');
+    waitStub.mockResolvedValue(null);
+
+    const result = await submitEscrowRefund(ORDER_ID);
+
+    await expect(result.waitForConfirmation()).rejects.toThrow('reverted or was not found');
+  });
+
+  it('reports a failed cancelBooking submission as { txHash: null, error } instead of throwing', async () => {
+    const { submitEscrowRefund } = await import('../../src/services/escrow.js');
+    cancelBookingStub.mockRejectedValue(new Error('nonce too low'));
+
+    const result = await submitEscrowRefund(ORDER_ID);
+
+    expect(result.txHash).toBeNull();
+    expect(result.error).toContain('nonce too low');
+    expect(result.waitForConfirmation).toBeUndefined();
+  });
+
+  it('does not touch the chain while the escrow circuit breaker is open', async () => {
+    const { submitEscrowRefund } = await import('../../src/services/escrow.js');
+    pausedFlag = true;
+
+    const result = await submitEscrowRefund(ORDER_ID);
+
+    expect(cancelBookingStub).not.toHaveBeenCalled();
+    expect(result.txHash).toBeNull();
+    expect(result.code).toBe('ESCROW_PAUSED');
+  });
+});

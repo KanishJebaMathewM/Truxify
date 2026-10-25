@@ -33,19 +33,95 @@
  *           type: string
  *           description: FCM token to unregister
  */
+// backend/api/src/routes/deviceRoutes.js (Excerpt)
 
+/**
+ * @route GET /api/devices/platforms
+ * @desc Retrieve a list of unique registered device platforms
+ * @access Private / Admin
+ */
+router.get('/platforms', authenticate, async (req, res) => {
+  try {
+    // FIX/FEATURE: Query registered platforms from user_devices per issue #2361
+    const { data, error } = await supabase
+      .from('user_devices')
+      .select('platform')
+      .not('platform', 'is', null);
+
+    if (error) {
+      logger.error({ err: error }, '[deviceRoutes] Failed to fetch device platforms from database');
+      return res.status(500).json({
+        success: false,
+        error: `Failed to retrieve platforms: ${error.message}`,
+      });
+    }
+
+    // Deduplicate platform types (e.g., ['android', 'ios', 'web'])
+    const uniquePlatforms = [...new Set((data || []).map((row) => row.platform))];
+
+    return res.status(200).json({
+      success: true,
+      count: uniquePlatforms.length,
+      platforms: uniquePlatforms,
+    });
+  } catch (err) {
+    logger.error({ err }, '[deviceRoutes] Unexpected exception in GET /platforms');
+    return res.status(500).json({
+      success: false,
+      error: `Internal server error: ${err.message}`,
+    });
+  }
+});
 import express from 'express';
 import { 
   registerDeviceToken, 
   unregisterDeviceToken, 
   getDevicePlatforms,
-  pruneDevices 
+  pruneDevices,
+  syncLocations
 } from '../controllers/deviceController.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import { registerDeviceSchema, unregisterDeviceSchema } from '../validation/requestSchemas.js';
 import { deviceLimiter } from '../middleware/rateLimiter.js';
+// backend/api/src/routes/deviceRoutes.js (Excerpt)
 
+import { Router } from 'express';
+import { getUniquePlatforms } from '../services/deviceService.js';
+import { authenticate } from '../middleware/auth.js';
+import { logger } from '../utils/logger.js';
+
+const router = Router();
+
+/**
+ * GET /api/devices/platforms
+ * Returns a list of unique registered device platforms.
+ */
+router.get('/platforms', authenticate, async (req, res) => {
+  try {
+    const result = await getUniquePlatforms();
+
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        error: result.error,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      platforms: result.platforms,
+    });
+  } catch (err) {
+    logger.error({ err }, '[deviceRoutes] Error in GET /api/devices/platforms');
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error while fetching platforms',
+    });
+  }
+});
+
+export default router;
 const router = express.Router();
 
 /**
@@ -115,6 +191,9 @@ router.post('/unregister', authenticate, deviceLimiter, validateBody(unregisterD
 
 // GET /api/devices/platforms
 router.get('/platforms', authenticate, getDevicePlatforms);
+
+// POST /api/devices/locations/sync
+router.post('/locations/sync', authenticate, syncLocations);
 
 /**
  * @openapi

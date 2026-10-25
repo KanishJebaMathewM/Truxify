@@ -105,7 +105,8 @@ def test_too_short_decrypted_payload_raises_error(hybrid, hybrid_key):
         'hybrid_id': hybrid_key.get('hybrid_id', 'unknown')
     }
     
-    with pytest.raises(ValueError, match="is shorter than quantum secret size"):
+    # Post-#11676 framing: the deliberate message names the framing header.
+    with pytest.raises(ValueError, match="is shorter than"):
         hybrid.hybrid_decrypt(malformed_ciphertext, hybrid_key)
 
 
@@ -114,9 +115,14 @@ def test_tampered_quantum_secret_suffix_raises_error(hybrid, hybrid_key):
     # Encrypt data with fake quantum secret appended (e.g. wrong 32 bytes)
     wrong_secret = b"X" * 32
     plaintext = b"Valid Payload"
+    # Post-#11676 the payload is framed: 4-byte big-endian length prefix +
+    # data + quantum secret suffix. The tamper must keep the framing intact to
+    # reach the suffix verification (an unframed fabrication now fails earlier,
+    # at the length-prefix check).
+    framed = len(plaintext).to_bytes(4, 'big') + plaintext + wrong_secret
     
     encrypted_tampered = hybrid_key['classical']['public'].encrypt(
-        plaintext + wrong_secret,
+        framed,
         padding.OAEP(
             mgf=padding.MGF1(algorithm=hashes.SHA256()),
             algorithm=hashes.SHA256(),
@@ -132,7 +138,7 @@ def test_tampered_quantum_secret_suffix_raises_error(hybrid, hybrid_key):
         'hybrid_id': hybrid_key.get('hybrid_id', 'unknown')
     }
     
-    with pytest.raises(ValueError, match="Quantum secret suffix verification failed"):
+    with pytest.raises(ValueError, match="Quantum secret verification failed"):
         hybrid.hybrid_decrypt(tampered_ciphertext, hybrid_key)
 
 
@@ -146,3 +152,38 @@ def test_hybrid_sign_verify_and_metrics(hybrid, hybrid_key):
     metrics = hybrid.get_key_metrics(hybrid_key)
     assert metrics['classical_key_size'] == 2048
     assert metrics['algorithm'] == 'RSA-2048 + Kyber-768 + Dilithium'
+
+
+def test_hybrid_sign_uses_supplied_key_after_another_keypair_is_generated(hybrid):
+    first_key = hybrid.generate_hybrid_keypair()
+    second_key = hybrid.generate_hybrid_keypair()
+    message = b"signed by the first key"
+
+    signature = hybrid.hybrid_sign(message, first_key)
+
+    assert hybrid.hybrid_verify(message, signature, first_key) is True
+    assert hybrid.hybrid_verify(message, signature, second_key) is False
+
+
+def test_hybrid_verify_uses_supplied_public_key_without_shared_state(hybrid):
+    first_key = hybrid.generate_hybrid_keypair()
+    message = b"signed by an independent client"
+    signature = hybrid.hybrid_sign(message, first_key)
+
+    other_client = HybridCrypto()
+    assert other_client.hybrid_verify(message, signature, first_key) is True
+    assert other_client.hybrid_verify(message, signature, other_client.generate_hybrid_keypair()) is False
+
+
+def test_hybrid_sign_requires_private_key(hybrid, hybrid_key):
+    public_only_key = {'dilithium': {'public': hybrid_key['dilithium']['public']}}
+
+    with pytest.raises(ValueError, match="private key is required"):
+        hybrid.hybrid_sign(b"message", public_only_key)
+
+
+def test_hybrid_verify_requires_public_key(hybrid, hybrid_key):
+    private_only_key = {'dilithium': {'private': hybrid_key['dilithium']['private']}}
+
+    with pytest.raises(ValueError, match="public key is required"):
+        hybrid.hybrid_verify(b"message", b"signature", private_only_key)

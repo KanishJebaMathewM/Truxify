@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 echo "🚀 Setting up Snyk Shift-Left Security..."
 
@@ -7,7 +8,7 @@ curl -sL https://static.snyk.io/cli/latest/snyk-linux | sudo tee /usr/local/bin/
 sudo chmod +x /usr/local/bin/snyk
 
 # Authenticate
-snyk auth ${SNYK_TOKEN}
+snyk auth "$SNYK_TOKEN"
 
 # Test configuration
 snyk config get

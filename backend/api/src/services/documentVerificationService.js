@@ -82,24 +82,42 @@ export async function processDocumentUpload({ driverId, docType, file, storagePa
         reason = `Missing fields: ${fieldValidation.missingFields.join(', ')}`;
     }
 
-    // 9. Persist to database
+    // 9. Persist to database. The table's status constraint uses 'approved'
+    // (not 'verified'), requires mime_type, and has no unique
+    // (driver_id, document_type) key, so an upsert with onConflict cannot work.
     if (supabaseAdmin) {
         try {
-            const { error } = await supabaseAdmin
+            const now = new Date().toISOString();
+            const payload = {
+                driver_id: driverId,
+                document_type: docType,
+                document_number: extractedData.document_number || null,
+                storage_path: storagePath,
+                mime_type: file.mimetype,
+                extracted_data: extractedData,
+                ocr_confidence: confidence,
+                valid_until: extractedData.valid_until || null,
+                status: status === 'verified' ? 'approved' : status,
+                rejection_reason: status === 'rejected' ? reason : null,
+                verified_at: status === 'verified' ? now : null,
+                updated_at: now
+            };
+
+            const { data: existingRows, error: lookupError } = await supabaseAdmin
                 .from('driver_documents')
-                .upsert({
-                    driver_id: driverId,
-                    document_type: docType,
-                    document_number: extractedData.document_number || null,
-                    storage_path: storagePath,
-                    extracted_data: extractedData,
-                    ocr_confidence: confidence,
-                    expiry_date: extractedData.valid_until || null,
-                    status: status,
-                    rejection_reason: reason,
-                    verified_at: status === 'verified' ? new Date().toISOString() : null,
-                    updated_at: new Date().toISOString()
-                }, { onConflict: 'driver_id,document_type' });
+                .select('id')
+                .eq('driver_id', driverId)
+                .eq('document_type', docType)
+                .order('updated_at', { ascending: false })
+                .limit(1);
+
+            if (lookupError) throw lookupError;
+
+            const existing = Array.isArray(existingRows) ? existingRows[0] : null;
+            const write = existing
+                ? supabaseAdmin.from('driver_documents').update(payload).eq('id', existing.id)
+                : supabaseAdmin.from('driver_documents').insert(payload);
+            const { error } = await write;
 
             if (error) {
                 logger.error({ err: error, driverId }, 'Failed to persist document');
@@ -130,20 +148,25 @@ export async function processDocumentUpload({ driverId, docType, file, storagePa
 export async function adminVerifyDocument(documentId, adminId, notes = '') {
     if (!supabaseAdmin) throw new Error('Supabase not configured');
 
-    const { error } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
         .from('driver_documents')
         .update({
-            status: 'verified',
+            status: 'approved',
             verified_at: new Date().toISOString(),
             verified_by: adminId,
             admin_notes: notes,
             rejection_reason: null
         })
-        .eq('id', documentId);
+        .eq('id', documentId)
+        .select('id')
+        .maybeSingle();
 
     if (error) {
         logger.error({ err: error, documentId }, 'Admin verification failed');
         throw new Error('Failed to verify document');
+    }
+    if (!data) {
+        throw new Error('Document not found');
     }
 }
 

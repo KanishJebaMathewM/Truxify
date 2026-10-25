@@ -1,0 +1,27 @@
+name: Shared breaker ownership
+on:
+  pull_request:
+    paths:
+      - 'backend/api/src/lib/circuitBreaker.js'
+      - 'backend/api/test/unit/circuitBreaker.test.js'
+      - 'tools/shared-breaker-tests/**'
+      - '.github/workflows/shared-breaker-ownership.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  breaker-ownership:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Install isolated locked runner
+        working-directory: tools/shared-breaker-tests
+        run: npm ci --ignore-scripts --no-fund
+      - name: Verify actual breaker ownership and existing cases
+        run: tools/shared-breaker-tests/run.sh

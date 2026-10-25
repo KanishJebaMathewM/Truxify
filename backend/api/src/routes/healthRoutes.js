@@ -82,6 +82,71 @@ function withTimeout(promise) {
     }),
   ]).finally(() => clearTimeout(timer));
 }
+// backend/api/src/routes/healthRoutes.js
+
+import express from 'express';
+import logger from '../middleware/logger.js';
+import db from '../config/database.js';
+import redisClient from '../config/redis.js';
+
+const router = express.Router();
+
+/**
+ * GET /api/health
+ * Comprehensive health check endpoint verifying database and Redis connectivity.
+ * Updated per issue #12878 to use structured logger instead of console.log.
+ */
+router.get('/health', async (req, res) => {
+  const healthStatus = {
+    status: 'UP',
+    timestamp: new Date().toISOString(),
+    services: {
+      database: 'UNKNOWN',
+      redis: 'UNKNOWN'
+    }
+  };
+
+  try {
+    // Check Database connectivity
+    await db.raw('SELECT 1');
+    healthStatus.services.database = 'UP';
+  } catch (dbErr) {
+    healthStatus.services.database = 'DOWN';
+    healthStatus.status = 'DEGRADED';
+    
+    // FIX: Replaced console.error with structured logger.error
+    logger.error('Health check database connectivity failure', {
+      error: dbErr.message,
+      stack: dbErr.stack
+    });
+  }
+
+  try {
+    // Check Redis connectivity
+    await redisClient.ping();
+    healthStatus.services.redis = 'UP';
+  } catch (redisErr) {
+    healthStatus.services.redis = 'DOWN';
+    healthStatus.status = 'DEGRADED';
+    
+    // FIX: Replaced console.error with structured logger.error
+    logger.error('Health check Redis connectivity failure', {
+      error: redisErr.message,
+      stack: redisErr.stack
+    });
+  }
+
+  // FIX: Replaced console.log with structured logger.info
+  logger.info('Health check endpoint executed', {
+    status: healthStatus.status,
+    services: healthStatus.services
+  });
+
+  const statusCode = healthStatus.status === 'UP' ? 200 : 503;
+  return res.status(statusCode).json(healthStatus);
+});
+
+export default router;
 
 async function checkSupabase() {
   // Probe through the service-role client: anon privileges on profiles are

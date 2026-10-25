@@ -1,10 +1,12 @@
 import cron from 'node-cron';
+import { randomUUID } from 'node:crypto';
 import logger from '../middleware/logger.js';
 import { supabaseAdmin, redisClient } from '../config/db.js';
 import { WorkerTracer } from '../core/telemetry/WorkerTracer.js';
 
 let devicePruningTask = null;
 let devicePruningRunning = false;
+let devicePruningGeneration = 0;
 
 // Distributed lock: only ONE replica may run the daily sweep at a time.
 // Same pattern as staleOrderWorker / escrow reconciliations.
@@ -13,6 +15,29 @@ const LOCK_TTL_SECONDS = 600;
 
 const DEFAULT_STALE_DEVICE_DAYS = 90;
 const DEFAULT_BATCH_SIZE = 200;
+
+const DEFAULT_MAX_BATCHES = 10;
+
+
+const RENEW_LEASE = `
+  if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('expire', KEYS[1], ARGV[2])
+  end
+  return 0
+`;
+const RELEASE_LEASE = `
+  if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('del', KEYS[1])
+  end
+  return 0
+`;
+
+function boundedSetting(name, fallback, maximum) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value >= 1
+    ? Math.min(Math.floor(value), maximum)
+    : fallback;
+}
 
 /**
  * Daily stale-device sweep.
@@ -28,14 +53,36 @@ const DEFAULT_BATCH_SIZE = 200;
 export async function pruneStaleDevices() {
   if (devicePruningRunning) return;
   devicePruningRunning = true;
+  const leaseClient = redisClient;
+  const databaseClient = supabaseAdmin;
+  const leaseToken = randomUUID();
   let globalLockAcquired = false;
+  let deactivated = 0;
+  let batches = 0;
+
+  // A failed/expired lease never becomes owned again during this run.
+  async function retainLease() {
+    if (!leaseClient) return true; // Process-local guard remains active.
+    try {
+      const retained = await leaseClient.eval(RENEW_LEASE, 1, LOCK_KEY, leaseToken, LOCK_TTL_SECONDS);
+      if (Number(retained) === 1) return true;
+      logger.warn('[DevicePruning] Lease ownership lost; stopping further batch work.');
+    } catch (err) {
+      logger.warn({ err }, '[DevicePruning] Lease renewal failed; stopping further batch work.');
+    }
+    return false;
+  }
 
   try {
-    if (redisClient) {
+    if (!databaseClient) {
+      logger.warn('[DevicePruning] Service-role client not configured — skipping sweep.');
+      return;
+    }
+    if (leaseClient) {
       try {
-        globalLockAcquired = await redisClient.set(LOCK_KEY, process.pid.toString(), 'NX', 'EX', LOCK_TTL_SECONDS);
+        globalLockAcquired = await leaseClient.set(LOCK_KEY, leaseToken, 'NX', 'EX', LOCK_TTL_SECONDS) === 'OK';
       } catch (err) {
-        logger.error('[DevicePruning] Failed to acquire Redis lock, skipping sweep:', err.message);
+        logger.error({ err }, '[DevicePruning] Failed to acquire Redis lock, skipping sweep.');
         return;
       }
       if (!globalLockAcquired) {
@@ -44,59 +91,60 @@ export async function pruneStaleDevices() {
       }
     }
 
-    if (!supabaseAdmin) {
-      logger.warn('[DevicePruning] Service-role client not configured — skipping sweep.');
-      return;
-    }
-
-    const staleDays = Number(process.env.DEVICE_STALE_THRESHOLD_DAYS) || DEFAULT_STALE_DEVICE_DAYS;
-    const batchSize = Number(process.env.DEVICE_PRUNE_BATCH_SIZE) || DEFAULT_BATCH_SIZE;
+    const staleDays = boundedSetting('DEVICE_STALE_THRESHOLD_DAYS', DEFAULT_STALE_DEVICE_DAYS, 3650);
+    const batchSize = boundedSetting('DEVICE_PRUNE_BATCH_SIZE', DEFAULT_BATCH_SIZE, 1000);
+    const maxBatches = boundedSetting('DEVICE_PRUNE_MAX_BATCHES', DEFAULT_MAX_BATCHES, 100);
     const cutoff = new Date(Date.now() - staleDays * 24 * 60 * 60 * 1000).toISOString();
 
-    // Bounded candidate fetch; the guarded UPDATE below is the idempotency gate.
-    const { data: candidates, error: fetchError } = await supabaseAdmin
-      .from('user_devices')
-      .select('id')
-      .eq('is_active', true)
-      .lt('last_seen', cutoff)
-      .limit(batchSize);
+    for (let batch = 0; batch < maxBatches; batch++) {
+      if (!await retainLease()) return;
+      const { data: candidates, error: fetchError } = await databaseClient
+        .from('user_devices')
+        .select('id')
+        .eq('is_active', true)
+        .lt('last_seen', cutoff)
+        .order('last_seen', { ascending: true })
+        .order('id', { ascending: true })
+        .limit(batchSize);
+      if (fetchError) {
+        logger.error({ err: fetchError }, '[DevicePruning] Failed to fetch stale devices.');
+        return;
+      }
+      const ids = (candidates ?? []).map((device) => device.id);
+      if (ids.length === 0) break;
+      if (!await retainLease()) return;
 
-    if (fetchError) {
-      logger.error(`[DevicePruning] Failed to fetch stale devices: ${fetchError.message}`);
-      return;
+      // Redis and PostgreSQL are not one transaction. An already-dispatched
+      // UPDATE may finish after lease loss; freshness is guarded in the UPDATE.
+      const { data: updated, error: updateError } = await databaseClient
+        .from('user_devices')
+        .update({ is_active: false, deactivated_at: new Date().toISOString() })
+        .in('id', ids)
+        .eq('is_active', true)
+        .lt('last_seen', cutoff)
+        .select('id');
+      if (updateError) {
+        logger.error({ err: updateError }, '[DevicePruning] Failed to deactivate stale devices.');
+        return;
+      }
+      deactivated += updated?.length ?? 0;
+      batches++;
+      // Requery the first eligible page: deactivated/refreshed rows disappear.
+      // Do not offset past remaining rows in a mutating candidate set.
     }
-
-    const ids = (candidates ?? []).map((d) => d.id);
-    if (ids.length === 0) {
-      logger.info('[DevicePruning] No stale devices found.');
-      return;
-    }
-
-    const { error: updateError } = await supabaseAdmin
-      .from('user_devices')
-      .update({
-        is_active: false,
-        deactivated_at: new Date().toISOString(),
-      })
-      .in('id', ids)
-      .eq('is_active', true);
-
-    if (updateError) {
-      logger.error(`[DevicePruning] Failed to deactivate stale devices: ${updateError.message}`);
-      return;
-    }
-
-    logger.info(`[DevicePruning] Deactivated ${ids.length} stale device(s) (threshold ${staleDays}d, cutoff ${cutoff}).`);
+    logger.info({ deactivated, batches, maxBatches, batchSize, staleDays, cutoff },
+      '[DevicePruning] Bounded stale-device sweep completed.');
   } catch (err) {
-    logger.error(`[DevicePruning] Unexpected error during sweep: ${err.message}`);
+    logger.error({ err }, '[DevicePruning] Unexpected error during sweep.');
   } finally {
-    if (globalLockAcquired && redisClient) {
+    if (globalLockAcquired && leaseClient) {
       try {
-        await redisClient.del(LOCK_KEY);
+        await leaseClient.eval(RELEASE_LEASE, 1, LOCK_KEY, leaseToken);
       } catch (err) {
-        logger.warn('[DevicePruning] Failed to release global lock:', err.message);
+        logger.warn({ err }, '[DevicePruning] Failed to release own global lock.');
       }
     }
+    // Keep ownership through actual query/update settlement, including failure.
     devicePruningRunning = false;
   }
 }
@@ -107,7 +155,9 @@ export const startDevicePruningWorker = () => {
     return devicePruningTask;
   }
 
+  const generation = ++devicePruningGeneration;
   const tracedHandler = WorkerTracer.wrapCronJob('device-pruning-worker', async () => {
+    if (generation !== devicePruningGeneration || !devicePruningTask) return;
     await pruneStaleDevices();
   }, { schedule: '15 3 * * *' });
 
@@ -119,6 +169,7 @@ export const startDevicePruningWorker = () => {
 };
 
 export const stopDevicePruningWorker = () => {
+  devicePruningGeneration++;
   if (!devicePruningTask) return;
   devicePruningTask.stop();
   devicePruningTask = null;

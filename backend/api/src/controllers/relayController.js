@@ -31,7 +31,8 @@ export async function planRelayRoute(req, res, next) {
     }
 
     const plan = partitionRouteIntoCorridorLegs(origin, destination, Number(totalAmount) || 0, {
-      maxLegDistanceKm: Number(maxLegDistanceKm) || 350,
+      maxLegDistanceKm: maxLegDistanceKm === undefined ? 350
+        : (typeof maxLegDistanceKm === 'number' || typeof maxLegDistanceKm === 'string' ? Number(maxLegDistanceKm) : NaN),
     });
 
     return res.status(200).json({
@@ -39,6 +40,9 @@ export async function planRelayRoute(req, res, next) {
       data: plan,
     });
   } catch (error) {
+    if (error instanceof DomainError) {
+      return res.status(error.status).json({ success: false, error: error.message });
+    }
     logger.error({ error: error.message }, '[relayController.planRelayRoute] Error');
     next(error);
   }
@@ -72,6 +76,13 @@ export async function createRelayBooking(req, res, next) {
       data: session,
     });
   } catch (error) {
+    if (error instanceof DomainError) {
+      return res.status(error.status || 400).json({
+        success: false,
+        error: error.message,
+        details: error.payload,
+      });
+    }
     logger.error({ error: error.message }, '[relayController.createRelayBooking] Error');
     next(error);
   }

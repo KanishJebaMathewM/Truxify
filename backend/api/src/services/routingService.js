@@ -65,6 +65,34 @@ export async function getDriverRoute(driverId, options = {}) {
   }
 }
 
+/** Accept only a complete single-trip permutation before reconstructing stops. */
+function reconstructWaypointPermutation(response, inputStops) {
+  const points = response.waypoints;
+  const count = inputStops.length + 2;
+  if (!Array.isArray(points) || points.length !== count) return null;
+  if (response.trips !== undefined &&
+      (!Array.isArray(response.trips) || response.trips.length !== 1)) return null;
+
+  // Legacy providers omit trip metadata entirely. If present, every point must
+  // belong to trip zero; mixing sub-trips cannot define this fixed-endpoint route.
+  const hasTripMetadata = points.some((point) => point?.trips_index !== undefined);
+  const seen = new Set();
+  for (const point of points) {
+    if (!point || typeof point !== 'object' || Array.isArray(point)) return null;
+    const position = point.waypoint_index;
+    if (!Number.isInteger(position) || position < 0 || position >= count || seen.has(position)) return null;
+    if (hasTripMetadata && point.trips_index !== 0) return null;
+    seen.add(position);
+  }
+  if (points[0].waypoint_index !== 0 || points[count - 1].waypoint_index !== count - 1) return null;
+
+  const ordered = new Array(inputStops.length);
+  for (let i = 1; i < count - 1; i++) {
+    ordered[points[i].waypoint_index - 1] = inputStops[i - 1];
+  }
+  return ordered;
+}
+
 /**
  * Optimizes the order of waypoints for a route using the OSRM Trip API.
  * Integrates predictive work-zone delay logic to dynamically reroute.
@@ -150,30 +178,14 @@ export async function optimizeWaypoints(start, end, waypoints, departureDate, de
       return effectiveWaypoints; // Fallback to original order
     }
 
-    const waypointsResult = response.data.waypoints;
-    if (!waypointsResult || waypointsResult.length === 0) {
+    // OSRM reports points in input order with their positions in the trip.
+    // Reject the whole permutation if it cannot preserve every original stop.
+    const optimized = reconstructWaypointPermutation(response.data, effectiveWaypoints);
+    if (!optimized) {
+      logger.warn('OSRM Trip response is not a complete fixed-endpoint permutation');
       return effectiveWaypoints;
     }
-
-    // OSRM returns waypoints in the order they were provided, but with a `waypoint_index` 
-    // indicating their optimal position in the trip.
-    // Index 0 is the start, Index N is the end.
-    
-    const optimizedWaypoints = new Array(effectiveWaypoints.length);
-
-    // waypointsResult is in input order: [Start, WP1, WP2, ..., End].
-    // Each waypoint's `waypoint_index` is its position in the optimized trip
-    // (0 = start, effectiveWaypoints.length + 1 = end), so subtract 1 for the middle stops.
-    for (let i = 1; i <= effectiveWaypoints.length; i++) {
-      const osrmWp = waypointsResult[i];
-      const optimizedIndex = osrmWp.waypoint_index - 1;
-      if (optimizedIndex >= 0 && optimizedIndex < effectiveWaypoints.length) {
-        optimizedWaypoints[optimizedIndex] = effectiveWaypoints[i - 1];
-      }
-    }
-
-    // Filter out any undefined slots just in case
-    return optimizedWaypoints.filter(Boolean);
+    return optimized;
   } catch (err) {
     logger.error('Failed to optimize route with OSRM:', err?.message ?? String(err));
     return effectiveWaypoints; // Fallback to original order on failure

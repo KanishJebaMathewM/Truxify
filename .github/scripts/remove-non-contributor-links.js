@@ -1,3 +1,4 @@
+
 'use strict';
 
 const TRUSTED_ASSOCIATIONS = new Set([
@@ -8,8 +9,8 @@ const TRUSTED_ASSOCIATIONS = new Set([
 ]);
 
 /**
- * Checks if the author's association indicates they are a non-contributor.
- * @param {string} association - GitHub author_association field value
+ * Checks whether the author's association indicates a non-contributor.
+ * @param {string} association
  * @returns {boolean}
  */
 function isNonContributor(association) {
@@ -18,23 +19,24 @@ function isNonContributor(association) {
 }
 
 /**
- * Detects if text contains any links.
+ * Detects whether text contains links.
  * @param {string} text
  * @returns {boolean}
  */
 function containsLinks(text) {
   if (!text || typeof text !== 'string') return false;
+
   return (
-    /(?:https?|ftp):\/\/[^\s><"')]*/i.test(text) ||
-    /\[([^\]]+)\]\((?:https?|ftp):\/\/[^\s)]+\)/i.test(text) ||
-    /<a\s+[^>]*href=["']?(?:https?|ftp):\/\/[^"'>\s]+["']?[^>]*>(.*?)<\/a>/i.test(text) ||
-    /^\[([^\]]+)\]:\s*(?:https?|ftp):\/\/\S+/mi.test(text) ||
-    /(?<!https?:\/\/|ftp:\/\/)www\.[^\s><"')]*/i.test(text)
+    /(?:https?|ftp):\/\/[^\s><"')]+/i.test(text) ||
+    /\[[^\]]+\]\((?:https?|ftp):\/\/[^\s)]+\)/i.test(text) ||
+    /<a\s+[^>]*href=["']?(?:https?|ftp):\/\/[^"'>\s]+["']?[^>]*>.*?<\/a>/i.test(text) ||
+    /^\[[^\]]+\]:\s*(?:https?|ftp):\/\/\S+/mi.test(text) ||
+    /(?<!https?:\/\/|ftp:\/\/)www\.[^\s><"')]+/i.test(text)
   );
 }
 
 /**
- * Removes/sanitizes links from text and adds a security notice.
+ * Removes links and adds a security notice.
  * @param {string} text
  * @returns {string}
  */
@@ -43,22 +45,38 @@ function removeLinks(text) {
 
   let sanitized = text;
 
-  // Replace Markdown links [text](url) -> text [link removed for security]
-  sanitized = sanitized.replace(/\[([^\]]+)\]\((?:https?|ftp):\/\/[^\s)]+\)/gi, '$1 [link removed for security]');
+  // Replace Markdown links with their visible text.
+  sanitized = sanitized.replace(
+    /\[([^\]]+)\]\((?:https?|ftp):\/\/[^\s)]+\)/gi,
+    '$1 [link removed for security]'
+  );
 
-  // Replace HTML anchor links <a href="...">text</a> -> text [link removed for security]
-  sanitized = sanitized.replace(/<a\s+[^>]*href=["']?(?:https?|ftp):\/\/[^"'>\s]+["']?[^>]*>(.*?)<\/a>/gi, '$1 [link removed for security]');
+  // Replace HTML anchor links.
+  sanitized = sanitized.replace(
+    /<a\s+[^>]*href=["']?(?:https?|ftp):\/\/[^"'>\s]+["']?[^>]*>(.*?)<\/a>/gi,
+    '$1 [link removed for security]'
+  );
 
-  // Replace Reference-style links [id]: http://... -> [id]: # [link removed for security]
-  sanitized = sanitized.replace(/^\[([^\]]+)\]:\s*(?:https?|ftp):\/\/\S+/gmi, '[$1]: # [link removed for security]');
+  // Replace reference-style links.
+  sanitized = sanitized.replace(
+    /^\[([^\]]+)\]:\s*(?:https?|ftp):\/\/\S+/gmi,
+    '[$1]: # [link removed for security]'
+  );
 
-  // Replace remaining raw http/https/ftp URLs
-  sanitized = sanitized.replace(/(?:https?|ftp):\/\/[^\s><"')]*/gi, '[link removed for security]');
+  // Replace remaining raw URLs.
+  sanitized = sanitized.replace(
+    /(?:https?|ftp):\/\/[^\s><"')]+/gi,
+    '[link removed for security]'
+  );
 
-  // Replace www. links
-  sanitized = sanitized.replace(/(?<!https?:\/\/|ftp:\/\/)www\.[^\s><"')]*/gi, '[link removed for security]');
+  // Replace www links not already matched as full URLs.
+  sanitized = sanitized.replace(
+    /(?<!https?:\/\/|ftp:\/\/)www\.[^\s><"')]+/gi,
+    '[link removed for security]'
+  );
 
-  const notice = '\n\n> ⚠️ **Security Notice:** Links posted by non-contributors have been automatically removed.';
+  const notice =
+    '\n\n> ⚠️ **Security Notice:** Links posted by non-contributors have been automatically removed.';
 
   if (!sanitized.includes('Security Notice:')) {
     sanitized += notice;
@@ -68,24 +86,23 @@ function removeLinks(text) {
 }
 
 /**
- * Main handler function executed on real-time GitHub events.
+ * Handles real-time issue, PR, and comment events.
  * @param {object} params
- * @param {object} params.github - GitHub Octokit REST instance
- * @param {object} params.context - GitHub context instance
- * @param {object} params.core - GitHub core instance
+ * @param {object} params.github
+ * @param {object} params.context
+ * @param {object} params.core
  */
 async function run({ github, context, core }) {
   const payload = context.payload;
   const owner = context.repo.owner;
   const repo = context.repo.repo;
 
-  // Case 1: Issue comment (applies to comments on both Issues and Pull Requests)
+  // Handle issue comments.
   if (payload.comment) {
     const comment = payload.comment;
-    const authorAssociation = comment.author_association;
 
-    if (!isNonContributor(authorAssociation)) {
-      core.info(`Comment author association '${authorAssociation}' is trusted. Skipping.`);
+    if (!isNonContributor(comment.author_association)) {
+      core.info('Comment author is trusted. Skipping.');
       return;
     }
 
@@ -94,7 +111,6 @@ async function run({ github, context, core }) {
       return;
     }
 
-    core.info(`Removing links from comment ID ${comment.id} posted by non-contributor...`);
     const sanitizedBody = removeLinks(comment.body);
 
     await github.rest.issues.updateComment({
@@ -103,62 +119,57 @@ async function run({ github, context, core }) {
       comment_id: comment.id,
       body: sanitizedBody
     });
+
     core.info(`Successfully updated comment ID ${comment.id}.`);
     return;
   }
 
-  // Case 2: Issue created or edited
+  // Handle issue descriptions.
   if (payload.issue) {
     const issue = payload.issue;
-    const authorAssociation = issue.author_association;
 
-    if (!isNonContributor(authorAssociation)) {
-      core.info(`Issue author association '${authorAssociation}' is trusted. Skipping.`);
+    if (!isNonContributor(issue.author_association)) {
+      core.info('Issue author is trusted. Skipping.');
       return;
     }
 
     if (!containsLinks(issue.body)) {
-      core.info('No links detected in non-contributor issue body. Skipping.');
+      core.info('No links detected in issue body. Skipping.');
       return;
     }
-
-    core.info(`Removing links from Issue #${issue.number} posted by non-contributor...`);
-    const sanitizedBody = removeLinks(issue.body);
 
     await github.rest.issues.update({
       owner,
       repo,
       issue_number: issue.number,
-      body: sanitizedBody
+      body: removeLinks(issue.body)
     });
+
     core.info(`Successfully updated Issue #${issue.number}.`);
     return;
   }
 
-  // Case 3: Pull Request created or edited
+  // Handle pull request descriptions.
   if (payload.pull_request) {
     const pr = payload.pull_request;
-    const authorAssociation = pr.author_association;
 
-    if (!isNonContributor(authorAssociation)) {
-      core.info(`PR author association '${authorAssociation}' is trusted. Skipping.`);
+    if (!isNonContributor(pr.author_association)) {
+      core.info('PR author is trusted. Skipping.');
       return;
     }
 
     if (!containsLinks(pr.body)) {
-      core.info('No links detected in non-contributor PR body. Skipping.');
+      core.info('No links detected in PR body. Skipping.');
       return;
     }
-
-    core.info(`Removing links from PR #${pr.number} posted by non-contributor...`);
-    const sanitizedBody = removeLinks(pr.body);
 
     await github.rest.pulls.update({
       owner,
       repo,
       pull_number: pr.number,
-      body: sanitizedBody
+      body: removeLinks(pr.body)
     });
+
     core.info(`Successfully updated PR #${pr.number}.`);
     return;
   }
@@ -167,11 +178,11 @@ async function run({ github, context, core }) {
 }
 
 /**
- * Scans all existing issues, PRs, and comments in the repository and removes links from non-contributors.
+ * Scans existing issues, PRs, and comments.
  * @param {object} params
- * @param {object} params.github - GitHub Octokit REST instance
- * @param {object} params.context - GitHub context instance
- * @param {object} params.core - GitHub core instance
+ * @param {object} params.github
+ * @param {object} params.context
+ * @param {object} params.core
  */
 async function scanAll({ github, context, core }) {
   const owner = context.repo.owner;
@@ -179,21 +190,30 @@ async function scanAll({ github, context, core }) {
 
   core.info(`Starting full repository scan for ${owner}/${repo}...`);
 
-  const issues = await github.paginate(github.rest.issues.listForRepo, {
-    owner,
-    repo,
-    state: 'all',
-    per_page: 100
-  });
+  const issues = await github.paginate(
+    github.rest.issues.listForRepo,
+    {
+      owner,
+      repo,
+      state: 'all',
+      per_page: 100
+    }
+  );
 
-  core.info(`Found ${issues.length} total issues/PRs to inspect.`);
+  core.info(`Found ${issues.length} issues/PRs to inspect.`);
 
   let updatedIssueCount = 0;
   let updatedCommentCount = 0;
 
   for (const issue of issues) {
-    if (isNonContributor(issue.author_association) && containsLinks(issue.body)) {
-      core.info(`Sanitizing body for ${issue.pull_request ? 'PR' : 'Issue'} #${issue.number}...`);
+    if (
+      isNonContributor(issue.author_association) &&
+      containsLinks(issue.body)
+    ) {
+      core.info(
+        `Sanitizing ${issue.pull_request ? 'PR' : 'Issue'} #${issue.number}...`
+      );
+
       const sanitizedBody = removeLinks(issue.body);
 
       if (issue.pull_request) {
@@ -211,35 +231,48 @@ async function scanAll({ github, context, core }) {
           body: sanitizedBody
         });
       }
+
       updatedIssueCount++;
     }
 
-    const comments = await github.paginate(github.rest.issues.listComments, {
-      owner,
-      repo,
-      issue_number: issue.number,
-      per_page: 100
-    });
+    const comments = await github.paginate(
+      github.rest.issues.listComments,
+      {
+        owner,
+        repo,
+        issue_number: issue.number,
+        per_page: 100
+      }
+    );
 
     for (const comment of comments) {
-      if (isNonContributor(comment.author_association) && containsLinks(comment.body)) {
-        core.info(`Sanitizing comment ID ${comment.id} on #${issue.number}...`);
-        const sanitizedBody = removeLinks(comment.body);
+      if (
+        isNonContributor(comment.author_association) &&
+        containsLinks(comment.body)
+      ) {
+        core.info(
+          `Sanitizing comment ID ${comment.id} on #${issue.number}...`
+        );
+
         await github.rest.issues.updateComment({
           owner,
           repo,
           comment_id: comment.id,
-          body: sanitizedBody
+          body: removeLinks(comment.body)
         });
+
         updatedCommentCount++;
       }
     }
   }
 
-  core.info(`Scan complete! Updated ${updatedIssueCount} issue/PR descriptions and ${updatedCommentCount} comments.`);
+  core.info(
+    `Scan complete! Updated ${updatedIssueCount} issue/PR descriptions and ${updatedCommentCount} comments.`
+  );
 }
 
-exports = {
+// Correct CommonJS exports so require() receives these functions.
+module.exports = {
   isNonContributor,
   containsLinks,
   removeLinks,

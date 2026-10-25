@@ -38,7 +38,33 @@ const MIN_PRICE_INR = 100;
  * for a single load in the East Africa corridor.
  */
 const MAX_PRICE_INR = 500_000;
+// backend/api/src/lib/predictionValidator.js
 
+export function validatePrediction(prediction) {
+  // Guard against null, undefined, arrays, or non-object payloads
+  if (!prediction || typeof prediction !== 'object' || Array.isArray(prediction)) {
+    return {
+      isValid: false,
+      errors: ['Prediction payload must be a non-null object']
+    };
+  }
+
+  const errors = [];
+
+  // Proceed with standard property validation checks
+  if (typeof prediction.confidence !== 'number' || prediction.confidence < 0 || prediction.confidence > 1) {
+    errors.push('Confidence must be a number between 0 and 1');
+  }
+
+  if (prediction.etaMinutes !== undefined && (typeof prediction.etaMinutes !== 'number' || prediction.etaMinutes < 0)) {
+    errors.push('ETA minutes must be a non-negative number');
+  }
+
+  return {
+    isValid: errors.length === 0,
+    errors
+  };
+}
 /**
  * Maximum acceptable ratio between max_price and estimated_price.
  * The ML model currently returns ±15% bands, so 3× is a generous ceiling.
@@ -103,6 +129,10 @@ export function validatePricePrediction(raw) {
   if ('min_price' in raw) {
     if (typeof raw.min_price !== 'number' || !Number.isFinite(raw.min_price)) {
       return reject(RejectionReason.INVALID_MIN_PRICE, `min_price is not a finite number: ${raw.min_price}`);
+    }
+    // Reject before rounding: small negatives must not become a valid zero band.
+    if (raw.min_price < 0) {
+      return reject(RejectionReason.INVALID_MIN_PRICE, `min_price must be nonnegative, got ${raw.min_price}`);
     }
     if (raw.min_price > price) {
       return reject(RejectionReason.INVALID_MIN_PRICE, `min_price ${raw.min_price} exceeds estimated_price ${price}`);

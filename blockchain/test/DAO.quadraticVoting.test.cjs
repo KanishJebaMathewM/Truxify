@@ -41,7 +41,7 @@ describe("DAO Quadratic Voting", function () {
     await token.transfer(voter.address, 1_000_000);
     await token.connect(voter).approve(await dao.getAddress(), 1_000_000);
 
-    await dao.registerVoter(ethers.id("identity:voter"));
+    await dao.connect(voter).registerVoter(ethers.id("identity:voter"));
 
     await dao.createProposal("Reduce Corridor Tariff by 5%", 3600);
   });
@@ -102,20 +102,21 @@ describe("DAO Quadratic Voting", function () {
     await expectRevert(dao.connect(voter).voteQuadratic(0, 0), "Votes must be > 0");
   });
 
-  it("refunds the sum of per-call quadratic costs, not (Σvotes)^2", async function () {
+  it("refunds the cumulative quadratic escrow in full on release", async function () {
     const balanceBefore = await token.balanceOf(voter.address);
 
-    // Split 5 votes across calls: 3 then 2 → deposit 9 + 4 = 13 tokens.
+    // Cumulative quadratic pricing (per voteQuadratic): 3 votes costs 9,
+    // then +2 votes brings the total to 5 → 25 - 9 = 16. Escrow = 25.
     await dao.connect(voter).voteQuadratic(0, 3); // cost 9
-    await dao.connect(voter).voteQuadratic(0, 2); // cost 4
+    await dao.connect(voter).voteQuadratic(0, 2); // cost 25 - 9 = 16
 
-    expect(await token.balanceOf(voter.address)).to.equal(balanceBefore - 13n);
+    expect(await token.balanceOf(voter.address)).to.equal(balanceBefore - 25n);
 
     await dao.connect(voter).releaseVotes(0);
 
-    // Must refund exactly 13 (Σ vᵢ²), NOT (3+2)² = 25.
+    // Refund equals the full escrowed amount, so the voter is made whole.
     expect(await token.balanceOf(voter.address)).to.equal(balanceBefore);
-    expect(await dao.tokensHeld(0, voter.address)).to.equal(13n);
+    expect(await dao.tokensHeld(0, voter.address)).to.equal(25n);
   });
 
   it("reverts when releasing votes that were never cast", async function () {

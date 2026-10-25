@@ -1,0 +1,32 @@
+name: Native legacy ETA lifecycle
+on:
+  pull_request:
+    paths:
+      - backend/ml/app/models/eta_prediction.py
+      - backend/ml/tests/test_legacy_eta_lifecycle.py
+      - backend/ml/tests/test_eta_prediction_model.py
+      - .github/workflows/legacy-eta-lifecycle.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-eta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        sklearn: ['1.5.2', '1.9.0']
+    env:
+      PYTHONPATH: backend/ml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: python -m pip install numpy==1.26.4 scipy==1.14.1 scikit-learn==${{ matrix.sklearn }} pytest==9.0.3 ruff==0.16.9 requests==2.32.3
+      - run: python -m pytest backend/ml/tests/test_legacy_eta_lifecycle.py backend/ml/tests/test_eta_prediction_model.py -q
+      - run: |
+          python -m ruff check backend/ml/tests/test_legacy_eta_lifecycle.py
+          python -m ruff check backend/ml/app/models/eta_prediction.py --ignore I001,F401,UP035,UP006,UP045,PTH103,PTH110,PTH118,PTH119,PTH123,S301,TRY300,BLE001

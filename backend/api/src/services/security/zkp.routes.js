@@ -1,8 +1,8 @@
 import express from 'express';
-import zkpService from '../services/zkp/zkp.service.js';
-import { LockAcquisitionError } from '../lib/redisLock.js';
-import { redisRateLimiter } from '../middleware/redisRateLimiter.js';
-import logger from '../middleware/logger.js';
+import zkpService from '../zkp/zkp.service.js';
+import { LockAcquisitionError } from '../../lib/redisLock.js';
+import { redisRateLimiter } from '../../middleware/redisRateLimiter.js';
+import logger from '../../middleware/logger.js';
 
 const router = express.Router();
 

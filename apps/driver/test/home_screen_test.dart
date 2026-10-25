@@ -1,12 +1,17 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify_driver/controllers/app_controller.dart';
+import 'package:truxify_driver/services/battery_service.dart';
 import 'package:truxify_driver/core/app_routes.dart';
 import 'package:truxify_driver/models/app_models.dart';
 import 'package:truxify_driver/screens/destination_picker_screen.dart';
 import 'package:truxify_driver/screens/shell_screen.dart';
 import 'package:truxify_driver/services/marketplace_repository.dart';
+import 'package:provider/provider.dart';
+import 'package:truxify_driver/providers/text_scale_provider.dart';
+import 'package:truxify_driver/l10n/app_localizations.dart';
 import 'package:truxify_driver/theme/app_theme.dart';
 import 'package:truxify_driver/services/driver_earnings_service.dart';
 import 'package:truxify_driver/models/earnings_daily_model.dart';
@@ -70,14 +75,20 @@ Widget _buildTestApp({
 
   return TruxifyScope(
     controller: controller,
-    child: MaterialApp(
-      theme: TruxifyTheme.light(),
-      home: ShellScreen(
-        marketplaceRepo: marketplaceRepo,
-        earningsService: earningsService ?? FakeDriverEarningsService(),
-        mockLocationText: mockLocationText,
-      ),
-      onGenerateRoute: (settings) {
+    child: ChangeNotifierProvider(
+      create: (_) => TextScaleProvider(),
+      child: MaterialApp(
+        theme: TruxifyTheme.light(),
+        // The screens resolve AppLocalizations.of(context)! — provide the
+        // delegates (same pattern as withdraw_bottom_sheet_test).
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: ShellScreen(
+          marketplaceRepo: marketplaceRepo,
+          earningsService: earningsService ?? FakeDriverEarningsService(),
+          mockLocationText: mockLocationText,
+        ),
+        onGenerateRoute: (settings) {
         if (settings.name == AppRoutes.destinationPicker) {
           final args = settings.arguments as DestinationPickerArgs?;
           return MaterialPageRoute<void>(
@@ -92,7 +103,8 @@ Widget _buildTestApp({
         return MaterialPageRoute<void>(
           builder: (_) => const Scaffold(body: SizedBox.shrink()),
         );
-      },
+        },
+      ),
     ),
   );
 }
@@ -103,6 +115,10 @@ Future<void> _pumpTransition(WidgetTester tester) async {
   for (int i = 0; i < 15; i++) {
     await tester.pump(const Duration(milliseconds: 30));
   }
+  // The screen's _withRetry backoff (Future.delayed 1s + 2s on API failure —
+  // every harness run fails the real API) leaves uncancellable timers that
+  // trip the "Timer is still pending" invariant. Flush them in fake time.
+  await tester.pump(const Duration(seconds: 4));
 }
 
 // --- TESTS ---
@@ -116,22 +132,47 @@ void main() {
   setUp(() {
   });
 
+  // BatteryService is a process-wide singleton: startMonitoring() (called by
+  // HomeScreen.initState) starts a Timer.periodic that outlives the disposed
+  // widget tree and trips the "Timer is still pending" invariant. Stop it
+  // after each test.
+  tearDown(() {
+    BatteryService.instance.stopMonitoring();
+  });
+
   testWidgets('driver home shows a compact search bar', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(_buildTestApp());
+    // TripsScreen (shell tab 1) subscribes a Supabase realtime channel
+    // whose reconnect/heartbeat timers self-reschedule forever —
+    // disconnect the socket so nothing is pending at teardown.
+    unawaited(Supabase.instance.client.realtime.disconnect());
+    // TripsScreen (built eagerly as shell tab 1) subscribes a Supabase
+    // realtime channel whose reconnect/heartbeat timers self-reschedule
+    // forever — disconnect the socket so nothing is pending at teardown.
+    unawaited(Supabase.instance.client.realtime.disconnect());
 
     await _pumpTransition(tester);
 
     // Look for the search bar
     expect(find.text('Where are you heading?'), findsOneWidget);
-    
+
+    // Dispose the shell (TripsScreen.dispose removes its realtime channel),
+    // then disconnect the socket and flush the push/rejoin timeout timers.
+    await tester.pumpWidget(const SizedBox());
+    unawaited(Supabase.instance.client.realtime.disconnect());
+    await tester.pump(const Duration(seconds: 15));
   });
 
   testWidgets('driver home expands search and opens the destination picker', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(_buildTestApp());
+    // TripsScreen (shell tab 1) subscribes a Supabase realtime channel
+    // whose reconnect/heartbeat timers self-reschedule forever —
+    // disconnect the socket so nothing is pending at teardown.
+    unawaited(Supabase.instance.client.realtime.disconnect());
 
     await _pumpTransition(tester);
 
@@ -139,15 +180,23 @@ void main() {
     await tester.tap(destinationTile);
     await _pumpTransition(tester);
 
+    // The inline-expansion UX was replaced by navigation to
+    // DestinationPickerScreen — the picker is up with its search field.
+    expect(find.byType(DestinationPickerScreen), findsOneWidget);
     expect(find.byType(TextField), findsOneWidget);
-    expect(find.text('Where are you going?'), findsOneWidget);
+    expect(find.text('Search area, landmark, or city'), findsOneWidget);
+    expect(find.text('Confirm Destination'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField), 'Surat');
     await tester.testTextInput.receiveAction(TextInputAction.search);
     await _pumpTransition(tester);
 
-    expect(find.text('Search area, landmark, or city'), findsOneWidget);
-    expect(find.text('Confirm Destination'), findsOneWidget);
+    // Dispose the shell (TripsScreen.dispose removes its realtime
+    // channel), then disconnect the socket and flush the push/rejoin
+    // timeout timers.
+    await tester.pumpWidget(const SizedBox());
+    unawaited(Supabase.instance.client.realtime.disconnect());
+    await tester.pump(const Duration(seconds: 15));
   });
 
   testWidgets('realtime load offers inserts show notification banner and support navigate & close', (
@@ -155,6 +204,10 @@ void main() {
   ) async {
     final fakeRepo = FakeMarketplaceRepository();
     await tester.pumpWidget(_buildTestApp(marketplaceRepo: fakeRepo));
+    // TripsScreen (shell tab 1) subscribes a Supabase realtime channel
+    // whose reconnect/heartbeat timers self-reschedule forever —
+    // disconnect the socket so nothing is pending at teardown.
+    unawaited(Supabase.instance.client.realtime.disconnect());
     await _pumpTransition(tester);
 
     expect(find.text('New Load Available!'), findsNothing);
@@ -205,6 +258,13 @@ void main() {
 
     expect(find.text('New Load Available!'), findsNothing);
     fakeRepo.dispose();
+
+    // Dispose the shell (TripsScreen.dispose removes its realtime
+    // channel), then disconnect the socket and flush the push/rejoin
+    // timeout timers.
+    await tester.pumpWidget(const SizedBox());
+    unawaited(Supabase.instance.client.realtime.disconnect());
+    await tester.pump(const Duration(seconds: 15));
   });
 
   testWidgets('notification banner dismisses when tapping close button', (
@@ -212,6 +272,10 @@ void main() {
   ) async {
     final fakeRepo = FakeMarketplaceRepository();
     await tester.pumpWidget(_buildTestApp(marketplaceRepo: fakeRepo));
+    // TripsScreen (shell tab 1) subscribes a Supabase realtime channel
+    // whose reconnect/heartbeat timers self-reschedule forever —
+    // disconnect the socket so nothing is pending at teardown.
+    unawaited(Supabase.instance.client.realtime.disconnect());
     await _pumpTransition(tester);
 
     const mockLoad = LoadOffer(
@@ -259,6 +323,13 @@ void main() {
 
     expect(find.text('New Load Available!'), findsNothing);
     fakeRepo.dispose();
+
+    // Dispose the shell (TripsScreen.dispose removes its realtime
+    // channel), then disconnect the socket and flush the push/rejoin
+    // timeout timers.
+    await tester.pumpWidget(const SizedBox());
+    unawaited(Supabase.instance.client.realtime.disconnect());
+    await tester.pump(const Duration(seconds: 15));
   });
 
   testWidgets('notification banner auto-dismisses after 6 seconds', (
@@ -266,6 +337,10 @@ void main() {
   ) async {
     final fakeRepo = FakeMarketplaceRepository();
     await tester.pumpWidget(_buildTestApp(marketplaceRepo: fakeRepo));
+    // TripsScreen (shell tab 1) subscribes a Supabase realtime channel
+    // whose reconnect/heartbeat timers self-reschedule forever —
+    // disconnect the socket so nothing is pending at teardown.
+    unawaited(Supabase.instance.client.realtime.disconnect());
     await _pumpTransition(tester);
 
     const mockLoad = LoadOffer(
@@ -309,6 +384,13 @@ void main() {
 
     expect(find.text('New Load Available!'), findsNothing);
     fakeRepo.dispose();
+
+    // Dispose the shell (TripsScreen.dispose removes its realtime
+    // channel), then disconnect the socket and flush the push/rejoin
+    // timeout timers.
+    await tester.pumpWidget(const SizedBox());
+    unawaited(Supabase.instance.client.realtime.disconnect());
+    await tester.pump(const Duration(seconds: 15));
   });
 
   testWidgets('notification banner shows when driver region matches load route', (
@@ -320,6 +402,10 @@ void main() {
       marketplaceRepo: fakeRepo,
       mockLocationText: 'Chennai, Tamil Nadu, India',
     ));
+    // TripsScreen (shell tab 1) subscribes a Supabase realtime channel
+    // whose reconnect/heartbeat timers self-reschedule forever —
+    // disconnect the socket so nothing is pending at teardown.
+    unawaited(Supabase.instance.client.realtime.disconnect());
     await _pumpTransition(tester);
 
     const mockLoadChennai = LoadOffer(
@@ -360,6 +446,13 @@ void main() {
     // Since driver is in Chennai, and route is "Chennai → Coimbatore", banner MUST show
     expect(find.text('New Load Available!'), findsOneWidget);
     fakeRepo.dispose();
+
+    // Dispose the shell (TripsScreen.dispose removes its realtime
+    // channel), then disconnect the socket and flush the push/rejoin
+    // timeout timers.
+    await tester.pumpWidget(const SizedBox());
+    unawaited(Supabase.instance.client.realtime.disconnect());
+    await tester.pump(const Duration(seconds: 15));
   });
 
   testWidgets('notification banner does not show when driver region does not match load route', (
@@ -371,6 +464,10 @@ void main() {
       marketplaceRepo: fakeRepo,
       mockLocationText: 'Delhi, India',
     ));
+    // TripsScreen (shell tab 1) subscribes a Supabase realtime channel
+    // whose reconnect/heartbeat timers self-reschedule forever —
+    // disconnect the socket so nothing is pending at teardown.
+    unawaited(Supabase.instance.client.realtime.disconnect());
     await _pumpTransition(tester);
 
     const mockLoadCoimbatore = LoadOffer(
@@ -411,5 +508,12 @@ void main() {
     // Since driver is in Delhi, but route is "Chennai → Coimbatore", banner MUST NOT show
     expect(find.text('Pipes • ₹18,500'), findsNothing);
     fakeRepo.dispose();
+
+    // Dispose the shell (TripsScreen.dispose removes its realtime
+    // channel), then disconnect the socket and flush the push/rejoin
+    // timeout timers.
+    await tester.pumpWidget(const SizedBox());
+    unawaited(Supabase.instance.client.realtime.disconnect());
+    await tester.pump(const Duration(seconds: 15));
   });
 }

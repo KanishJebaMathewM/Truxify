@@ -10,6 +10,7 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Tuple, Any
 import noisereduce as nr
+from multimodal.audio_contract import admit_waveform, feature_block, admit_probabilities
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,7 @@ class AudioMonitor:
     
     def extract_features(self, audio_data: np.ndarray) -> np.ndarray:
         """Extract audio features"""
+        audio_data = admit_waveform(audio_data, self.sample_rate, normalized_pcm=False)
         # Mel-spectrogram
         mel_spec = librosa.feature.melspectrogram(
             y=audio_data,
@@ -100,9 +102,9 @@ class AudioMonitor:
         
         # Combine features
         features = np.concatenate([
-            mel_spec_db.flatten()[:1000],
-            mfcc.flatten()[:1000],
-            chroma.flatten()[:1000]
+            feature_block(mel_spec_db),
+            feature_block(mfcc),
+            feature_block(chroma)
         ])
         
         return features
@@ -111,6 +113,7 @@ class AudioMonitor:
         """Detect emergency sounds"""
         try:
             # Preprocess audio
+            audio_data = admit_waveform(audio_data, self.sample_rate, normalized_pcm=False)
             audio_clean = nr.reduce_noise(y=audio_data, sr=self.sample_rate)
             
             # Extract features
@@ -119,8 +122,9 @@ class AudioMonitor:
             
             # Predict
             predictions = self.emergency_sound_model.predict(features, verbose=0)
-            class_idx = np.argmax(predictions[0])
-            confidence = np.max(predictions[0])
+            probabilities = admit_probabilities(predictions, 5)
+            class_idx = int(np.argmax(probabilities))
+            confidence = float(probabilities[class_idx])
             
             detected_class = self.emergency_classes[class_idx]
             is_emergency = detected_class != 'normal'
@@ -131,6 +135,7 @@ class AudioMonitor:
                 self.emergency_count = 0
             
             return {
+                'status': 'OK',
                 'detected': detected_class,
                 'confidence': float(confidence),
                 'is_emergency': is_emergency,
@@ -139,8 +144,9 @@ class AudioMonitor:
             }
             
         except Exception as e:
+            self.emergency_count = 0
             logger.error(f"Emergency sound detection failed: {e}")
-            return {'detected': 'error', 'confidence': 0, 'is_emergency': False}
+            return {'status': 'ERROR', 'detected': 'error', 'confidence': 0, 'is_emergency': False}
     
     def detect_honk(self, audio_data: np.ndarray) -> Dict:
         """Detect honking"""
@@ -151,8 +157,9 @@ class AudioMonitor:
             
             # Predict
             predictions = self.honk_detection_model.predict(features, verbose=0)
-            confidence = np.max(predictions[0])
-            is_honk = confidence > 0.7
+            probabilities = admit_probabilities(predictions, 5)
+            confidence = float(probabilities[0])
+            is_honk = bool(confidence > 0.7)
             
             if is_honk:
                 self.honk_count += 1
@@ -160,6 +167,7 @@ class AudioMonitor:
                 self.honk_count = 0
             
             return {
+                'status': 'OK',
                 'is_honk': is_honk,
                 'confidence': float(confidence),
                 'honk_count': self.honk_count,
@@ -167,8 +175,9 @@ class AudioMonitor:
             }
             
         except Exception as e:
+            self.honk_count = 0
             logger.error(f"Honk detection failed: {e}")
-            return {'is_honk': False, 'confidence': 0}
+            return {'status': 'ERROR', 'is_honk': False, 'confidence': 0}
     
     def analyze_speech_emotion(self, audio_data: np.ndarray) -> Dict:
         """Analyze driver speech emotion"""
@@ -180,17 +189,19 @@ class AudioMonitor:
             # Predict
             predictions = self.speech_emotion_model.predict(features, verbose=0)
             emotions = ['neutral', 'happy', 'sad', 'angry', 'fearful', 'surprised']
-            class_idx = np.argmax(predictions[0])
+            probabilities = admit_probabilities(predictions, 6)
+            class_idx = int(np.argmax(probabilities))
             
             return {
+                'status': 'OK',
                 'emotion': emotions[class_idx],
-                'confidence': float(np.max(predictions[0])),
+                'confidence': float(probabilities[class_idx]),
                 'timestamp': datetime.now().isoformat()
             }
             
         except Exception as e:
             logger.error(f"Speech emotion analysis failed: {e}")
-            return {'emotion': 'unknown', 'confidence': 0}
+            return {'status': 'ERROR', 'emotion': 'unknown', 'confidence': 0}
     
     def record_audio(self, duration: int = None) -> np.ndarray:
         """Record audio from microphone"""
@@ -210,9 +221,10 @@ class AudioMonitor:
             logger.error(f"Audio recording failed: {e}")
             return np.zeros(self.sample_rate * duration)
     
-    def process_audio(self, audio_data: np.ndarray) -> Dict:
+    def process_audio(self, audio_data: np.ndarray, sample_rate: int = 16000) -> Dict:
         """Process audio data"""
         try:
+            audio_data = admit_waveform(audio_data, sample_rate)
             # Detect emergency sounds
             emergency = self.detect_emergency_sounds(audio_data)
             
@@ -226,7 +238,11 @@ class AudioMonitor:
             alert_level = 'SAFE'
             alert_message = 'Normal audio'
             
-            if emergency['is_emergency']:
+            complete = all(part.get('status') == 'OK' for part in (emergency, honk, emotion))
+            if not complete:
+                alert_level = 'UNKNOWN'
+                alert_message = 'Audio analysis is incomplete'
+            elif emergency['is_emergency']:
                 alert_level = 'CRITICAL'
                 alert_message = f"⚠️ Emergency sound detected: {emergency['detected']}"
             elif honk['is_honk'] and honk['honk_count'] > 3:
@@ -234,6 +250,8 @@ class AudioMonitor:
                 alert_message = '⚠️ Excessive honking detected'
             
             result = {
+                'status': 'OK' if complete else 'ERROR',
+                'sample_rate': self.sample_rate,
                 'emergency': emergency,
                 'honk': honk,
                 'emotion': emotion,
@@ -246,17 +264,32 @@ class AudioMonitor:
             self.redis.setex(
                 'audio:latest',
                 60,
-                json.dumps(result)
+                json.dumps(result, allow_nan=False)
             )
             
             return result
             
         except Exception as e:
             logger.error(f"Audio processing failed: {e}")
-            return {'status': 'ERROR', 'error': str(e)}
+            result = {'status': 'ERROR', 'error': str(e), 'alert_level': 'UNKNOWN',
+                    'alert_message': 'Audio analysis unavailable',
+                    'emergency': {'status': 'ERROR', 'is_emergency': False},
+                    'honk': {'status': 'ERROR', 'is_honk': False},
+                    'emotion': {'status': 'ERROR', 'emotion': 'unknown'},
+                    'timestamp': datetime.now().isoformat()}
+            self.emergency_count = 0
+            self.honk_count = 0
+            try:
+                self.redis.setex('audio:latest', 60, json.dumps(result, allow_nan=False))
+            except Exception:
+                logger.error('Audio error report could not be cached')
+            return result
     
     def get_alert(self, result: Dict) -> Dict:
         """Generate audio safety alert"""
+        if result.get('status') != 'OK' or result.get('alert_level') == 'UNKNOWN':
+            return {'level': 'UNKNOWN', 'message': 'Audio analysis unavailable',
+                    'actions': ['Check audio input'], 'timestamp': datetime.now().isoformat()}
         if result['alert_level'] == 'CRITICAL':
             return {
                 'level': 'CRITICAL',

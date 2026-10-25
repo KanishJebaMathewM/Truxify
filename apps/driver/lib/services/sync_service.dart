@@ -10,8 +10,8 @@ typedef UploadProgressCallback = void Function(String status, {double? progress}
 
 class SyncService {
   static final SyncService instance = SyncService._init();
-  TripService _tripService;
-  ApiClient _apiClient;
+  final TripService _tripService;
+  final ApiClient _apiClient;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   bool _isSyncing = false;
 
@@ -36,12 +36,19 @@ class SyncService {
     _connectivitySubscription?.cancel();
   }
 
+  @visibleForTesting
+  Future<void> syncPendingDataForTesting() => _syncPendingData();
+
   Future<void> _syncPendingData() async {
     if (_isSyncing) return;
     _isSyncing = true;
     try {
       final pendingPoDs = await LocalDbService.instance.getPendingPoDs();
       for (final pod in pendingPoDs) {
+        // Tracks whether THIS row's files already uploaded, so the retry in
+        // the catch block does not POST the same files twice when only
+        // markStopCompleted failed (issue #11447 — duplicate PoD uploads).
+        var filesUploaded = false;
         try {
           // Local PoD rows are written by multiple generations of the app;
           // any column may be missing or of the wrong type. Guard every cast
@@ -61,6 +68,7 @@ class SyncService {
 
           if (orderId != null && (photoPath != null || signaturePath != null)) {
             await _uploadPodFiles(orderId, photoPath: photoPath, signaturePath: signaturePath);
+            filesUploaded = true;
           }
           await _tripService.markStopCompleted(stopId, tripId);
           await LocalDbService.instance.markPoDSynced(podId);
@@ -68,7 +76,7 @@ class SyncService {
           final failedPodId = pod['id'] is int ? pod['id'] as int : -1;
           debugPrint('Failed to sync PoD $failedPodId: $e');
           try {
-            if (pod['order_id'] is String && pod['order_id'] != null) {
+            if (!filesUploaded && pod['order_id'] is String && pod['order_id'] != null) {
               final safePhoto = pod['photo_path'] is String ? pod['photo_path'] as String : null;
               final safeSignature = pod['signature_path'] is String ? pod['signature_path'] as String : null;
               await _uploadPodFiles(pod['order_id'] as String, photoPath: safePhoto, signaturePath: safeSignature);
@@ -115,7 +123,7 @@ class SyncService {
     final files = <MultipartFileInfo>[];
 
     if (hasSignature) {
-      final file = File(signaturePath!);
+      final file = File(signaturePath);
       final bytes = await file.readAsBytes();
       files.add(MultipartFileInfo(
         fieldName: 'signature',
@@ -125,7 +133,7 @@ class SyncService {
     }
 
     if (hasPhoto) {
-      final file = File(photoPath!);
+      final file = File(photoPath);
       final bytes = await file.readAsBytes();
       files.add(MultipartFileInfo(
         fieldName: 'photo',

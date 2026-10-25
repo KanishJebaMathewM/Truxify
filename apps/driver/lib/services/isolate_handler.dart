@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:isolate';
 import 'location_mapper.dart';
 

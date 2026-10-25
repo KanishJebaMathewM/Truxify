@@ -30,17 +30,20 @@ import '../utils/driver_utils.dart';
 class HomeScreen extends StatefulWidget {
   final OrderService? orderService;
   final ProfileService? profileService;
-  const HomeScreen({super.key, this.orderService, this.profileService});
+  final CacheManager? cacheManager;
+  const HomeScreen({super.key, this.orderService, this.profileService, this.cacheManager});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final CacheManager _cacheManager = CacheManager();
+  // Injectable seam (same pattern as orderService/profileService) — the real
+  // sqflite-backed manager hangs in VM test harnesses.
+  late final CacheManager _cacheManager =
+      widget.cacheManager ?? CacheManager();
   late final OrderService _orderService;
   late final ProfileService _profileService;
-  bool _isOffline = false;
   bool _isLoading = true;
   String? _error;
   String _locationLabel = 'Surat, Gujarat';
@@ -61,12 +64,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final connectivity = await Connectivity().checkConnectivity();
     final hasNetwork = connectivity.isNotEmpty &&
         !connectivity.contains(ConnectivityResult.none);
-    await _cacheManager.open();
+    // getLastLocation opens the database lazily — the explicit open() here
+    // was redundant (and forces the real sqflite stack in test harnesses).
     final cachedLocation = await _cacheManager.getLastLocation();
     if (!mounted) return;
 
     setState(() {
-      _isOffline = !hasNetwork;
       if (cachedLocation != null) {
         _locationLabel =
             'Last truck location • ${cachedLocation['latitude']?.toStringAsFixed(3)}, ${cachedLocation['longitude']?.toStringAsFixed(3)}';
@@ -138,7 +141,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final drop = order['drop_address']?.toString() ?? '';
       if (pickup.isEmpty || drop.isEmpty) continue;
 
-      final key = '${pickup}|||${drop}';
+      final key = '$pickup|||$drop';
       final existing = routeMap[key];
       final dateStr = order['pickup_date']?.toString() ?? '';
 
@@ -245,7 +248,10 @@ class _HomeScreenState extends State<HomeScreen> {
         _customerName.isNotEmpty ? _customerName.split(' ').first : 'there';
     final greeting = _greetingFor(now);
     // XL: card width grows on wide screens so they don't look tiny
-    final shipmentCardWidth = Breakpoints.isXL(context) ? 260.0 : 200.0;
+    // The card's content (badge + ETA row) needs ~250px or the ETA text
+    // wraps to a character column and overflows the card. The card itself
+    // declares 290 — use it on all widths.
+    final shipmentCardWidth = 290.0;
 
     return Scaffold(
       appBar: AppBar(

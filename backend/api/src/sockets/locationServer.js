@@ -4,7 +4,29 @@ import { verifyAuthToken } from "../middleware/auth.js";
 import { supabase, redisClient } from "../config/db.js";
 import telemetryBuffer from "./telemetryBuffer.js";
 import { CLOCK_SKEW_TOLERANCE_MS } from "./tracker.js";
+// backend/api/src/sockets/locationServer.js (Excerpt)
+import { createSocketRateLimiter } from "../lib/socketRateLimiter.js";
 
+import logger from '../middleware/logger.js';
+
+export function setupLocationSocket(io) {
+  io.on('connection', (socket) => {
+    // FIX: Replace console.log with structured logger.info per issue #7230
+    logger.info({ socketId: socket.id }, '[LocationServer] Client connected');
+
+    socket.on('location:update', (data) => {
+      try {
+        // ... location processing logic ...
+      } catch (err) {
+        logger.error({ err, socketId: socket.id }, '[LocationServer] Failed to process location update');
+      }
+    });
+
+    socket.on('disconnect', (reason) => {
+      logger.info({ socketId: socket.id, reason }, '[LocationServer] Client disconnected');
+    });
+  });
+}
 let io = null;
 let _orderRepository = null;
 
@@ -49,7 +71,25 @@ function startHeartbeatSweep() {
 
   heartbeatTimer = setInterval(() => {
     const now = Date.now();
+// backend/api/src/server.js (Excerpt)
 
+const INSECURE_SECRETS = ['secret', 'changeme', 'your_jwt_secret', 'jwt_secret', '123456'];
+
+function validateJwtSecret() {
+  const secret = process.env.JWT_SECRET;
+  
+  if (!secret || INSECURE_SECRETS.includes(secret.toLowerCase())) {
+    if (process.env.NODE_ENV === 'production') {
+      console.error('FATAL: JWT_SECRET is set to a default or insecure value. Refusing to start in production.');
+      process.exit(1);
+    } else {
+      console.warn('⚠️ WARNING: JWT_SECRET is using an insecure default value. Please generate a secure secret before deploying.');
+    }
+  }
+}
+
+// Call during server bootstrap before listening
+validateJwtSecret();
     for (const [socketId, entry] of activeDrivers) {
       const { driverId, socket, lastPong } = entry;
       const age = now - lastPong;
@@ -266,6 +306,13 @@ export function initLocationServer(httpServer) {
     // Join their booking room (for server-side routing)
     socket.join(`driver:${driverId}`);
 
+    // Per-connection budget for inbound frames. Socket messages bypass the
+    // Express middleware chain, so the HTTP rate limiters cannot cover them.
+    const locationUpdateLimiter = createSocketRateLimiter({
+      refillPerSecond: Number(process.env.WS_LOCATION_MSG_RATE_PER_SEC) || undefined,
+      capacity: Number(process.env.WS_LOCATION_MSG_BURST) || undefined,
+    });
+
     // ── Register in the active-driver map ─────────────────────────────────
     activeDrivers.set(socket.id, {
       driverId,
@@ -303,11 +350,26 @@ export function initLocationServer(httpServer) {
      * live `driver_location` broadcast proceeds immediately without waiting on
      * any MongoDB round-trip.
      */
-    socket.on("location_update", async (payload) => {
-      // Treat any incoming data as proof-of-life (avoids evicting an active
-      // driver who sends location updates but whose pong was dropped).
-      const entry = activeDrivers.get(socket.id);
-      if (entry) entry.lastPong = Date.now();
+socket.on("location_update", async (payload) => {
+    // HTTP rate limiters never see socket frames, so this handler is throttled
+    // per connection. Without it a single socket can drive an unbounded number
+    // of telemetry writes and room broadcasts per second, evicting other
+    // drivers' records from the shared TelemetryRingBuffer on overflow.
+    if (!locationUpdateLimiter.tryConsume()) {
+      if (locationUpdateLimiter.isAbusive()) {
+        logger.error(
+          `[WS] Disconnecting driver ${driverId} for flooding location_update ` +
+            `(${locationUpdateLimiter.getOverRateCount()} over-rate messages)`,
+        );
+        socket.disconnect(true);
+      }
+      return;
+    }
+
+    // Treat any incoming data as proof-of-life (avoids evicting an active
+    // driver who sends location updates but whose pong was dropped).
+    const entry = activeDrivers.get(socket.id);
+    if (entry) entry.lastPong = Date.now();
 
       const { lat, lng, speed = 0, heading = 0, timestamp } = payload || {};
 

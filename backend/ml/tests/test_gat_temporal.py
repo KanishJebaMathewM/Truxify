@@ -25,10 +25,17 @@ def test_feature_dimension_guard():
 
 
 def test_source_node_aggregated_at_every_timestep():
+    torch.manual_seed(0)
     model = SpatialTemporalGAT(
         in_features=1, hidden_features=4, out_features=2,
-        num_layers=1, time_steps=3, prediction_horizon=1,
+        num_layers=1, num_heads=1, time_steps=3, prediction_horizon=1,
     )
+    model.eval()
+    # Positive deterministic weights keep the neighbor signal out of dead
+    # ReLU units; dropout and random initialization cannot fake this assertion.
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.fill_(0.2)
     edge_index = _edge_index()
 
     def predict(source_value_ts1):

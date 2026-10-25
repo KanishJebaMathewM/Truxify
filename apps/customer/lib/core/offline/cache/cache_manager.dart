@@ -253,7 +253,8 @@ class CacheManager {
       };
       final statusIn = activeStatuses.map((s) => "'$s'").join(', ');
       rows = await db.rawQuery(
-        "SELECT * FROM orders WHERE status IN ($statusIn) ORDER BY updated_at DESC LIMIT $limit",
+        "SELECT * FROM orders WHERE status IN ($statusIn) ORDER BY updated_at DESC LIMIT ?",
+        [limit],
       );
     } else {
       rows = await db.query(

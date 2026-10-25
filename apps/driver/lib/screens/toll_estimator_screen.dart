@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'dart:math';
 import '../models/toll_estimator_model.dart';
 import '../services/toll_estimator_service.dart';
 
@@ -196,7 +195,7 @@ class _TollEstimatorScreenState extends State<TollEstimatorScreen> {
       margin: const EdgeInsets.only(bottom: 12),
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: cardColor.withOpacity(0.1),
+          backgroundColor: cardColor.withValues(alpha: 0.1),
           child: Text(toll.country.substring(0, min(3, toll.country.length)).toUpperCase(), style: TextStyle(color: cardColor, fontWeight: FontWeight.bold, fontSize: 12)),
         ),
         title: Text(toll.name, style: const TextStyle(fontWeight: FontWeight.bold)),

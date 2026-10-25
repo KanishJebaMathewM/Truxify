@@ -40,7 +40,7 @@ class EarningsDailyModel {
     double deduction;
     if (rawDeduction != null) {
       final num deductionVal = (rawDeduction is num)
-          ? rawDeduction as num
+          ? rawDeduction
           : (double.tryParse(rawDeduction?.toString() ?? '') ?? 0.0);
       deduction = (deductionVal / 100.0).toDouble();
     } else {

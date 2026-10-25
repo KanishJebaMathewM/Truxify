@@ -5,10 +5,21 @@ async function assertRejectsWith(promise, message) {
   await assert.rejects(promise, (error) => error.message.includes(message));
 }
 
-function encodeProof() {
+// Withdrawal proofs bind public inputs to [recipient, amount] (issue #11988-era
+// hardening: _verifyProof requires input[0] == recipient, input[1] == amount).
+function encodeProof(recipient, amount) {
   return ethers.AbiCoder.defaultAbiCoder().encode(
     ["uint256[2]", "uint256[2][2]", "uint256[2]", "uint256[2]"],
-    [[1, 2], [[1, 2], [1, 2]], [1, 2], [1, 1]]
+    [[1, 2], [[1, 2], [1, 2]], [1, 2], [BigInt(recipient), amount]]
+  );
+}
+
+// A well-formed batch transaction so executeBatch reaches the verifier check
+// instead of failing ABI decoding first.
+function encodeEmptyBatchTx(sender) {
+  return ethers.AbiCoder.defaultAbiCoder().encode(
+    ["address", "address", "uint256", "bytes", "uint256", "uint256", "uint256", "bytes"],
+    [sender.address, sender.address, 0n, "0x", 0n, 0n, 0n, "0x" + "00".repeat(65)]
   );
 }
 
@@ -18,9 +29,9 @@ describe("zkEVM verifier integration", function () {
     await zkEVM.waitForDeployment();
     const [user] = await ethers.getSigners();
 
-    await zkEVM.connect(user).depositToL2({ value: ethers.parseEther("1") });
+    await zkEVM.connect(user)["depositToL2()"]({ value: ethers.parseEther("1") });
     await assertRejectsWith(
-      zkEVM.connect(user).withdrawFromL2(ethers.parseEther("0.5"), encodeProof()),
+      zkEVM.connect(user).withdrawFromL2(ethers.parseEther("0.5"), encodeProof(user.address, ethers.parseEther("0.5"))),
       "zkEVM: verifier not configured"
     );
   });
@@ -28,9 +39,10 @@ describe("zkEVM verifier integration", function () {
   it("reverts clearly when executing a batch without a configured verifier (issue #10798)", async function () {
     const zkEVM = await (await ethers.getContractFactory("zkEVM")).deploy(ethers.ZeroAddress);
     await zkEVM.waitForDeployment();
+    const [owner] = await ethers.getSigners();
 
     await assertRejectsWith(
-      zkEVM.executeBatch(["0x1234"], encodeProof()),
+      zkEVM.executeBatch([encodeEmptyBatchTx(owner)], encodeProof(owner.address, 0n)),
       "zkEVM: verifier not configured"
     );
   });
@@ -42,10 +54,13 @@ describe("zkEVM verifier integration", function () {
     await zkEVM.waitForDeployment();
     const [user] = await ethers.getSigners();
 
-    await zkEVM.connect(user).depositToL2({ value: ethers.parseEther("1") });
+    await zkEVM.connect(user)["depositToL2()"]({ value: ethers.parseEther("1") });
     const before = await ethers.provider.getBalance(user.address);
 
-    const tx = await zkEVM.connect(user).withdrawFromL2(ethers.parseEther("0.5"), encodeProof());
+    const tx = await zkEVM.connect(user).withdrawFromL2(
+      ethers.parseEther("0.5"),
+      encodeProof(user.address, ethers.parseEther("0.5"))
+    );
     await tx.wait();
 
     const after = await ethers.provider.getBalance(user.address);
@@ -60,27 +75,32 @@ describe("zkEVM verifier integration", function () {
     await mockVerifier.waitForDeployment();
     const [user] = await ethers.getSigners();
 
-    await zkEVM.connect(user).depositToL2({ value: ethers.parseEther("1") });
+    await zkEVM.connect(user)["depositToL2()"]({ value: ethers.parseEther("1") });
     await assertRejectsWith(
-      zkEVM.connect(user).withdrawFromL2(ethers.parseEther("0.5"), encodeProof()),
+      zkEVM.connect(user).withdrawFromL2(ethers.parseEther("0.5"), encodeProof(user.address, ethers.parseEther("0.5"))),
       "zkEVM: verifier not configured"
     );
 
     await zkEVM.setVerifier(await mockVerifier.getAddress());
-    await zkEVM.connect(user).withdrawFromL2(ethers.parseEther("0.5"), encodeProof());
+    await zkEVM.connect(user).withdrawFromL2(
+      ethers.parseEther("0.5"),
+      encodeProof(user.address, ethers.parseEther("0.5"))
+    );
     assert.equal(await zkEVM.getBalance(user.address), ethers.parseEther("0.5"));
   });
 
   it("reverts loudly if the configured verifier still fails closed (issue #10798)", async function () {
+    // verifier.sol is a deliberate fail-closed placeholder: verifyProof always
+    // returns false until real circuits are generated.
     const stub = await (await ethers.getContractFactory("Verifier")).deploy();
     await stub.waitForDeployment();
     const zkEVM = await (await ethers.getContractFactory("zkEVM")).deploy(await stub.getAddress());
     await zkEVM.waitForDeployment();
     const [user] = await ethers.getSigners();
 
-    await zkEVM.connect(user).depositToL2({ value: ethers.parseEther("1") });
+    await zkEVM.connect(user)["depositToL2()"]({ value: ethers.parseEther("1") });
     await assertRejectsWith(
-      zkEVM.connect(user).withdrawFromL2(ethers.parseEther("0.5"), encodeProof()),
+      zkEVM.connect(user).withdrawFromL2(ethers.parseEther("0.5"), encodeProof(user.address, ethers.parseEther("0.5"))),
       "Invalid proof"
     );
   });

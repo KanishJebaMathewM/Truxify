@@ -76,8 +76,9 @@ describe('retry helpers', () => {
       const error = { code: 'ECONNRESET' };
       const fn = vi.fn().mockRejectedValue(error);
       const promise = executeWithRetry(fn, { maxRetries: 2, baseDelayMs: 1, maxDelayMs: 10 });
+      const rejection = expect(promise).rejects.toBe(error);
       await vi.advanceTimersByTimeAsync(200);
-      await expect(promise).rejects.toBe(error);
+      await rejection;
       expect(fn).toHaveBeenCalledTimes(3);
     });
 

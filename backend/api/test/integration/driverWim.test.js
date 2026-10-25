@@ -7,6 +7,9 @@ const m = createSupabaseMock();
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
+  supabaseAdmin: m.supabase,
+  // getDriverUserClient(req) builds a per-request client via createUserClient.
+  createUserClient: () => m.supabase,
   firebaseAdmin: null,
   redisClient: null,
   mongoDb: {
@@ -58,29 +61,35 @@ describe('Driver WIM Sync Routes', () => {
     const res = await request(buildApp())
       .post('/api/driver/weigh-stations/sync-weight')
       .set(DRIVER_HEADERS)
+      // syncWeightSchema (strict): vehicleId + truckId + numeric axle positions.
       .send({
-        truck_id: 'truck-1',
-        axles: [{ position: 'steer', pressure_psi: 40 }]
+        vehicleId: 'truck-1',
+        truckId: 'truck-1',
+        axles: [{ position: 0, pressure_psi: 40 }]
       });
 
     expect(res.status).toBe(403);
   });
 
-  it('POST /api/driver/weigh-stations/sync-weight returns 200 BYPASS for legal weights', async () => {
+  // The service deliberately returns UNSUPPORTED until a real WIM provider
+  // (Drivewyze/PrePass) is configured — a fabricated BYPASS verdict must never
+  // be presented as real (see weighStationService + the 1796-era comment).
+  it('POST /api/driver/weigh-stations/sync-weight returns 200 UNSUPPORTED until a WIM provider is configured', async () => {
     const res = await request(buildApp())
       .post('/api/driver/weigh-stations/sync-weight')
       .set(DRIVER_HEADERS)
       .send({
-        truck_id: 'truck-1',
+        vehicleId: 'truck-1',
+        truckId: 'truck-1',
         axles: [
-          { position: 'steer', pressure_psi: 30 },
-          { position: 'drive', pressure_psi: 50 }
+          { position: 0, pressure_psi: 30 },
+          { position: 1, pressure_psi: 50 }
         ]
       });
 
     expect(res.status).toBe(200);
-    expect(res.body.action).toBe('BYPASS');
-    expect(res.body.gross_weight_lbs).toBe(30000);
+    expect(res.body.action).toBe('UNSUPPORTED');
+    expect(res.body.supported).toBe(false);
   });
 
   it('GET /api/driver/weigh-stations/bypass-status returns 503 UNSUPPORTED (no real WIM provider)', async () => {

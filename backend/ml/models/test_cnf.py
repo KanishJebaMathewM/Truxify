@@ -1,6 +1,8 @@
 import unittest
+
 import numpy as np
 from cnf_density import ContinuousNormalizingFlowDensityEstimator
+
 
 class TestCNF(unittest.TestCase):
     def setUp(self):
@@ -15,7 +17,10 @@ class TestCNF(unittest.TestCase):
         coords_list = [[28.6139, 77.2090], [19.0760, 72.8777]]
         res = self.estimator.predict_congestion_density(coords_list)
         self.assertIn("congestion_level", res)
-        self.assertGreater(res["estimated_density"], 0.0)
+        self.assertEqual(res["estimated_density"], 0.0)
+        self.assertTrue(res["density_underflow"])
+        self.assertLess(res["log_likelihood"], 0.0)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

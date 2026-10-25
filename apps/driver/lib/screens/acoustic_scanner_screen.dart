@@ -128,7 +128,7 @@ class _AcousticScannerScreenState extends State<AcousticScannerScreen> with Sing
                 decoration: BoxDecoration(
                   color: Colors.red[600],
                   shape: BoxShape.circle,
-                  boxShadow: [BoxShadow(color: Colors.red.withOpacity(0.4), blurRadius: 20, spreadRadius: 5)],
+                  boxShadow: [BoxShadow(color: Colors.red.withValues(alpha: 0.4), blurRadius: 20, spreadRadius: 5)],
                 ),
                 child: const Icon(Icons.mic, color: Colors.white, size: 60),
               ),
@@ -153,7 +153,7 @@ class _AcousticScannerScreenState extends State<AcousticScannerScreen> with Sing
                 return Container(
                   width: 150 + (_pulseController.value * 20),
                   height: 150 + (_pulseController.value * 20),
-                  decoration: BoxDecoration(color: Colors.red.withOpacity(0.2), shape: BoxShape.circle),
+                  decoration: BoxDecoration(color: Colors.red.withValues(alpha: 0.2), shape: BoxShape.circle),
                   child: Center(
                     child: Container(
                       width: 100,

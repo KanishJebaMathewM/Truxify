@@ -13,7 +13,62 @@
  *         message:
  *           type: string
  */
+// backend/api/src/routes/documentRoutes.js (Excerpt)
 
+import { Router } from 'express';
+import { authenticate } from '../middleware/auth.js';
+import { verifyDigiLockerDocument, anchorHashOnChain } from '../services/documentService.js';
+import { logger } from '../utils/logger.js';
+
+const router = Router();
+
+/**
+ * POST /api/documents/verify-digilocker
+ * Exchanges OAuth code, fetches RC/Licence, hashes via keccak256, and stores on Polygon.
+ */
+router.post('/verify-digilocker', authenticate, async (req, res) => {
+  try {
+    const { authCode, documentType } = req.body; // documentType: 'RC' | 'DL'
+    const driverId = req.user.id;
+
+    if (!authCode || !['RC', 'DL'].includes(documentType)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid request parameters: authCode and valid documentType (RC/DL) are required',
+      });
+    }
+
+    // Step A: Fetch and verify document from DigiLocker API
+    const docResult = await verifyDigiLockerDocument(authCode, documentType);
+    if (!docResult.success) {
+      logger.warn({ driverId, documentType, error: docResult.error }, '[documents] DigiLocker verification failed');
+      return res.status(400).json({ success: false, error: docResult.error });
+    }
+
+    // Step B: Anchor hash on Polygon blockchain via DocumentRegistry contract
+    const txReceipt = await anchorHashOnChain({
+      driverId,
+      documentType,
+      documentHash: docResult.documentHash,
+      metadataUri: docResult.metadataUri,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        verified: true,
+        documentType,
+        txHash: txReceipt.transactionHash,
+        status: 'Govt Verified',
+      },
+    });
+  } catch (err) {
+    logger.error({ err, userId: req.user?.id }, '[documents] Unexpected error in POST /verify-digilocker');
+    return res.status(500).json({ success: false, error: 'Internal server error during document verification' });
+  }
+});
+
+export default router;
 import express from 'express';
 import multer from 'multer';
 import { uploadDriverDocument } from '../controllers/documentController.js';
@@ -72,7 +127,30 @@ const upload = multer({
  *         description: File size exceeds limit
  */
 // POST /api/driver/documents
-router.post('/', authenticate, userLimiter, requirePolicy('document:upload'), upload.single('document'), uploadDriverDocument);
+// Multer errors fire before the controller runs, so handle them here with a
+// structured log; success passes through to the controller unchanged.
+function handleDocumentUpload(req, res, next) {
+  upload.single('document')(req, res, (err) => {
+    if (err) {
+      logger.error(
+        {
+          event: 'DOCUMENT_UPLOAD_ERROR',
+          requestId: req.requestId || req.id,
+          userId: req.user && req.user.id,
+          code: err.code,
+          error: err.message,
+        },
+        'Document upload failed',
+      );
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({ error: 'File size exceeds limit' });
+      }
+      return res.status(400).json({ error: err.message || 'Document upload failed' });
+    }
+    return uploadDriverDocument(req, res, next);
+  });
+}
+router.post('/', authenticate, userLimiter, requirePolicy('document:upload'), handleDocumentUpload);
 
 // POST /api/documents/verify-digilocker
 router.post('/verify-digilocker', authenticate, userLimiter, async (req, res) => {

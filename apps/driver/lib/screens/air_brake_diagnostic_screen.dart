@@ -124,7 +124,7 @@ class _AirBrakeDiagnosticScreenState extends State<AirBrakeDiagnosticScreen> {
                 ),
                 Column(
                   children: [
-                    Text('${psi.toStringAsFixed(1)}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 32, color: psi < 110 ? Colors.orange[800] : Colors.green[800])),
+                    Text(psi.toStringAsFixed(1), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 32, color: psi < 110 ? Colors.orange[800] : Colors.green[800])),
                     const Text('PSI', style: TextStyle(color: Colors.grey, fontSize: 16, fontWeight: FontWeight.bold)),
                   ],
                 ),

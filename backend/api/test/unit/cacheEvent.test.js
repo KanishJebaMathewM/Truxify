@@ -58,7 +58,7 @@ describe('CacheEvent', () => {
     it('creates INVALIDATE_KEY event with correct structure', () => {
       const event = createCacheEvent(CacheEventType.INVALIDATE_KEY, { 
         namespace: 'profile', 
-      key: 'user:profile:sb:123',
+        key: 'user:profile:sb:123',
       });
 
       expect(event).toHaveProperty('id');
@@ -185,18 +185,18 @@ describe('CacheEvent', () => {
     });
 
     it('throws for missing namespace', () => {
-      expect(() => createCacheEvent(CacheEventType.INVALIDATE_KEY, {})).toThrow(TypeError);
+      expect(() => createCacheEvent(CacheEventType.BUMP_VERSION, {})).toThrow(TypeError);
     });
 
     it('throws for empty namespace string', () => {
       expect(() =>
-        createCacheEvent(CacheEventType.INVALIDATE_KEY, { namespace: '  ' }),
+        createCacheEvent(CacheEventType.BUMP_VERSION, { namespace: '   ' }),
       ).toThrow(TypeError);
     });
 
     it('throws for invalid namespace type', () => {
       expect(() =>
-        createCacheEvent(CacheEventType.INVALIDATE_KEY, { namespace: 123 }),
+        createCacheEvent(CacheEventType.BUMP_VERSION, { namespace: 123 }),
       ).toThrow(TypeError);
     });
 
@@ -292,13 +292,13 @@ describe('CacheEvent', () => {
     });
 
     it('returns null when namespace is missing', () => {
-      const result = deserializeCacheEvent(JSON.stringify({ type: 'INVALIDATE_KEY' }));
+      const result = deserializeCacheEvent(JSON.stringify({ type: 'BUMP_VERSION' }));
       expect(result).toBeNull();
     });
 
     it('returns null when namespace is invalid type', () => {
       const result = deserializeCacheEvent(JSON.stringify({
-        type: CacheEventType.INVALIDATE_KEY,
+        type: CacheEventType.BUMP_VERSION,
         namespace: 123,
       }));
       expect(result).toBeNull();

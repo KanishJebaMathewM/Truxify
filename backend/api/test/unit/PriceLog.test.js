@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+// Validation runs locally without any database connection, so exercise the
+// real model instead of the connectionless global mock.
+vi.unmock('mongoose')
 import { PriceLog } from '../../src/models/PriceLog.js'
 
 describe('PriceLog model', () => {

@@ -1,0 +1,45 @@
+name: Native federated round recovery
+on:
+  pull_request:
+    paths:
+      - backend/ml/federated/federated_server.py
+      - backend/ml/federated/round_recovery.py
+      - backend/ml/tests/test_federated_round_recovery.py
+      - backend/ml/tests/test_federated.py
+      - .github/workflows/federated-round-recovery.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        include:
+          - tensorflow: '2.16.1'
+            keras: '3.3.3'
+          - tensorflow: '2.16.2'
+            keras: '3.15.1'
+    env:
+      PYTHONPATH: backend/ml
+      TF_CPP_MIN_LOG_LEVEL: '2'
+      TF_NUM_INTRAOP_THREADS: '1'
+      TF_NUM_INTEROP_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y redis-server
+      - run: python -m pip install tensorflow-cpu==${{ matrix.tensorflow }} keras==${{ matrix.keras }} numpy==1.26.4 scipy==1.14.1 redis==5.0.8 cryptography==44.0.0 pytest==9.0.3 pytest-asyncio==1.3.0 ruff==0.16.9 fastapi==0.116.1 httpx==0.28.1
+      - run: >-
+          python -m pytest backend/ml/tests/test_federated_round_recovery.py
+          backend/ml/tests/test_federated_model_admission.py backend/ml/tests/test_federated.py
+          backend/ml/tests/test_federated_client_round_protocol.py -q
+      - run: |
+          python -m ruff check backend/ml/federated/round_recovery.py backend/ml/tests/test_federated_round_recovery.py backend/ml/tests/test_federated.py
+          python -m ruff check backend/ml/federated/federated_server.py --ignore I001,F401,UP035,UP045,UP006,BLE001,S110,SIM102,DTZ005,C401,RUF010

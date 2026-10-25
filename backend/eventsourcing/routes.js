@@ -134,38 +134,29 @@ router.get('/eventsourcing/stats', authenticate, requireRole(['admin']), async (
     }
 });
 
-// Rebuild projections
-// Loads every persisted event in batches, groups by aggregate, and reconstructs
-// each aggregate from its latest valid snapshot plus only the newer events (see
-// EventStoreCore.rebuildFromRows). Read models therefore match live aggregates.
+// Rebuild projections with one bounded page and one aggregate state in memory.
+// Orders need aggregate/version order; drivers need global assignment chronology.
+async function* rebuildPages(driverAssignmentsOnly = false) {
+    let offset = 0;
+    while (true) {
+        let query = supabase.from('event_store').select('*');
+        query = driverAssignmentsOnly
+            ? query.eq('event_type', 'DRIVER_ASSIGNED').order('timestamp', { ascending: true })
+            : query.order('aggregate_id', { ascending: true }).order('version', { ascending: true });
+        const { data, error } = await query
+            .order('event_id', { ascending: true })
+            .range(offset, offset + REBUILD_BATCH_SIZE - 1);
+        if (error) throw error;
+        if (!data?.length) return;
+        yield data;
+        if (data.length < REBUILD_BATCH_SIZE) return;
+        offset += REBUILD_BATCH_SIZE;
+    }
+}
+
 router.post('/eventsourcing/rebuild', authenticate, requireRole(['admin']), async (req, res) => {
     try {
-        const allRows = [];
-        let offset = 0;
-
-        while (true) {
-            const { data, error } = await supabase
-                .from('event_store')
-                .select('*')
-                .order('timestamp', { ascending: true })
-                .range(offset, offset + REBUILD_BATCH_SIZE - 1);
-
-            if (error) {
-                logger.error('Rebuild error:', error);
-                return res.status(500).json({
-                    success: false,
-                    error: 'Projection rebuild failed',
-                    code: 'EVENT_STORE_INTERNAL_ERROR',
-                });
-            }
-
-            if (!data || data.length === 0) break;
-            allRows.push(...data);
-            if (data.length < REBUILD_BATCH_SIZE) break;
-            offset += REBUILD_BATCH_SIZE;
-        }
-
-        const result = await eventStore.rebuildProjections(allRows);
+        const result = await eventStore.rebuildProjectionsFromPages(rebuildPages(), rebuildPages(true));
 
         res.json({
             success: true,

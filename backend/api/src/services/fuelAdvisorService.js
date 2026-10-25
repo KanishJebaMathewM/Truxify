@@ -1,4 +1,5 @@
 import { DomainError } from './order/domainError.js';
+import { supabaseAdmin } from '../config/db.js';
 
 /**
  * Calculates fuel efficiency (e.g. km/L) from distance and fuel consumed.
@@ -9,6 +10,38 @@ import { DomainError } from './order/domainError.js';
  * @param {Object|number} [options] - Safe fallback value or options object ({ fallback, throwOnError })
  * @returns {number} Safe fuel efficiency value
  */
+// backend/api/src/services/fuelAdvisorService.js (Cleaned Excerpt)
+
+/**
+ * Calculates fuel efficiency based on distance and fuel amount.
+ * @param {number} distance - Distance traveled in kilometers or miles.
+ * @param {number} fuelAmount - Fuel consumed in liters or gallons.
+ * @param {Object} [options={}] - Additional calculation options (e.g., metric units).
+ * @returns {number} Calculated efficiency rating.
+ */
+export function calculateFuelEfficiency(distance, fuelAmount, options = {}) {
+  if (typeof distance !== 'number' || typeof fuelAmount !== 'number') {
+    throw new TypeError('Distance and fuel amount must be valid numbers.');
+  }
+
+  if (fuelAmount <= 0) {
+    if (options.strict) {
+      throw new Error('Fuel amount must be greater than zero.');
+    }
+    return 0.0;
+  }
+
+  if (distance < 0) {
+    throw new Error('Distance cannot be negative.');
+  }
+
+  const efficiency = distance / fuelAmount;
+  return Number(efficiency.toFixed(2));
+}
+
+export default {
+  calculateFuelEfficiency
+};
 export function calculateFuelEfficiency(distance, fuelAmount, options = {}) {
   const fallback = typeof options === 'number' ? options : (options?.fallback ?? 0);
   const throwOnError = typeof options === 'object' && options?.throwOnError === true;
@@ -178,13 +211,13 @@ export class FuelAdvisorService {
    * @returns {Promise<Object>} Recommendation payload
    */
   async getFuelRecommendation(truckId, destinationLat, destinationLng) {
-    this.logger?.info(`[FuelAdvisorService] Computing recommendation for truck ${truckId} heading to ${destinationLat},${destinationLng}`);
+    this.logger?.info({ event: 'FUEL_RECOMMENDATION_COMPUTE', truckId, destinationLat, destinationLng }, 'Computing fuel recommendation');
 
     // 1. Get average engine load from recent telemetry
     const avgEngineLoad = await this._getAverageEngineLoad(truckId);
 
     // 2. Get weather forecast for destination
-    const weather = await this.weatherService.getWeatherForecast(destinationLat, destinationLng);
+    const weather = await this._getWeatherSafely(destinationLat, destinationLng);
     if (!weather || !Number.isFinite(weather.temperature_c)) {
       this.logger?.warn('[FuelAdvisorService] Weather service unavailable or returned invalid data — using safe default B20.');
       return {
@@ -226,6 +259,20 @@ export class FuelAdvisorService {
         average_engine_load_percent: Math.round(avgEngineLoad)
       }
     };
+  }
+
+  /**
+   * Fetches a weather forecast without letting provider failures crash the
+   * recommendation, which deliberately degrades to a safe default. A throwing
+   * external API must not take down the whole fueling-advisor endpoint.
+   */
+  async _getWeatherSafely(destinationLat, destinationLng) {
+    try {
+      return await this.weatherService.getWeatherForecast(destinationLat, destinationLng);
+    } catch (err) {
+      this.logger?.warn(`[FuelAdvisorService] Weather service failed: ${err?.message ?? String(err)}`);
+      return null;
+    }
   }
 
   /**
@@ -283,7 +330,7 @@ export class FuelAdvisorService {
 
       for (const event of events) {
         const load = event.metadata?.engineLoad;
-        if (load !== undefined && load !== null && typeof load === 'number') {
+        if (Number.isFinite(load) && load >= 0 && load <= 100) {
           totalLoad += load;
           count++;
         }
@@ -291,7 +338,7 @@ export class FuelAdvisorService {
 
       return count > 0 ? totalLoad / count : 50;
     } catch (err) {
-      this.logger?.error(`[FuelAdvisorService] Error computing engine load: ${err?.message ?? String(err)}`);
+      this.logger?.error({ event: 'FUEL_ENGINE_LOAD_ERROR', error: err?.message ?? String(err) }, 'Error computing engine load');
       return 50; // Fallback
     }
   }

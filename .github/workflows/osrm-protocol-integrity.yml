@@ -1,0 +1,35 @@
+name: Python OSRM protocol integrity
+on:
+  pull_request:
+    paths:
+      - backend/ml/utils/osrm_client.py
+      - backend/ml/app/models/mid_trip_reoptimiser.py
+      - backend/ml/tests/test_osrm_protocol_integrity.py
+      - backend/ml/tests/test_mid_trip_road_eta.py
+      - backend/ml/tests/test_mid_trip_deadline_insertion.py
+      - backend/ml/tests/test_mid_trip_insertion_complexity.py
+      - .github/workflows/osrm-protocol-integrity.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-http:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: backend/ml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: python -m pip install requests==2.33.0 pytest==9.0.3 ruff==0.16.9
+      - run: python -m ruff check backend/ml/utils/osrm_client.py backend/ml/tests/test_osrm_protocol_integrity.py
+      - run: >-
+          python -m pytest -q
+          backend/ml/tests/test_osrm_protocol_integrity.py
+          backend/ml/tests/test_mid_trip_road_eta.py
+          backend/ml/tests/test_mid_trip_deadline_insertion.py
+          backend/ml/tests/test_mid_trip_insertion_complexity.py

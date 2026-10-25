@@ -87,21 +87,22 @@ describe('parseDisplayId', () => {
     const result = parseDisplayId('#FF20260814ABC123DEF456');
     expect(result.valid).toBe(true);
     expect(result.displayId).toBe('#FF20260814ABC123DEF456');
+    expect(result.error).toBeNull();
   });
 
-  it('returns valid: false for null', () => {
-    expect(parseDisplayId(null).valid).toBe(false);
-    expect(parseDisplayId(null).error).toBe('null input');
-  });
-
-  it('returns valid: false for non-string', () => {
-    expect(parseDisplayId(123).valid).toBe(false);
-    expect(parseDisplayId(123).error).toContain('string');
+  it('returns valid: false for null, undefined, empty, or non-string inputs', () => {
+    expect(parseDisplayId(null)).toEqual({ valid: false, error: 'Display ID must be a non-empty string' });
+    expect(parseDisplayId(undefined)).toEqual({ valid: false, error: 'Display ID must be a non-empty string' });
+    expect(parseDisplayId('')).toEqual({ valid: false, error: 'Display ID must be a non-empty string' });
+    expect(parseDisplayId(123)).toEqual({ valid: false, error: 'Display ID must be a non-empty string' });
   });
 
   it('returns valid: false for invalid format', () => {
-    expect(parseDisplayId('INVALID').valid).toBe(false);
-    expect(parseDisplayId('INVALID').error).toBe('Invalid order display id format');
+    expect(parseDisplayId('INVALID')).toEqual({
+      valid: false,
+      displayId: null,
+      error: 'Invalid order display ID format'
+    });
   });
 });
 

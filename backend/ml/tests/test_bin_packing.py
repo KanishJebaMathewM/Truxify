@@ -20,6 +20,7 @@ def packing_payload():
             {"lat": 19.076, "lng": 72.877},
             {"lat": 28.614, "lng": 77.209},
         ],
+        "route_start": {"lat": 19.076, "lng": 72.877},
     }
 
 
@@ -43,7 +44,6 @@ def test_packing_single_package():
 
 def test_packing_oversized_package():
     payload = packing_payload()
-    # Add an oversized package
     payload["packages"].append(
         {"length": 10.0, "width": 3.0, "height": 3.0, "weight": 500.0}
     )
@@ -51,7 +51,6 @@ def test_packing_oversized_package():
     response = client.post("/optimise/packing", json=payload)
     assert response.status_code == 200
     data = response.json()
-    # The oversized package should be unpacked because it exceeds truck dimensions
     assert len(data["unpacked_packages"]) > 0
 
 
@@ -60,6 +59,38 @@ def test_packing_invalid_zero_dimension():
     payload["packages"][0]["length"] = 0
     response = client.post("/optimise/packing", json=payload)
     assert response.status_code == 422
+
+
+def test_packing_missing_route_start():
+    payload = packing_payload()
+    payload.pop("route_start")
+    response = client.post("/optimise/packing", json=payload)
+    assert response.status_code == 422
+
+
+def test_packing_invalid_route_start():
+    payload = packing_payload()
+    payload["route_start"] = {"lat": 91.0, "lng": 77.0}
+    response = client.post("/optimise/packing", json=payload)
+    assert response.status_code == 422
+
+
+def test_packing_route_start_controls_first_stop():
+    payload = {
+        "packages": [
+            {"length": 1.0, "width": 1.0, "height": 1.0, "weight": 100.0},
+            {"length": 1.0, "width": 1.0, "height": 1.0, "weight": 100.0},
+        ],
+        "truck": {"length": 6.0, "width": 2.5, "height": 2.5, "max_weight": 10000.0},
+        "delivery_addresses": [
+            {"lat": 19.076, "lng": 72.877},
+            {"lat": 28.614, "lng": 77.209},
+        ],
+        "route_start": {"lat": 28.614, "lng": 77.209},
+    }
+    response = client.post("/optimise/packing", json=payload)
+    assert response.status_code == 200
+    assert response.json()["stop_sequence"] == [1, 0]
 
 
 def test_packing_auth_missing(monkeypatch):
@@ -92,6 +123,7 @@ def test_packing_no_3d_shelf_height_overlaps():
             {"lat": 19.1, "lng": 72.1},
             {"lat": 19.2, "lng": 72.2},
         ],
+        "route_start": {"lat": 19.0, "lng": 72.0},
     }
     response = client.post("/optimise/packing", json=payload)
     assert response.status_code == 200
@@ -124,4 +156,3 @@ def test_packing_no_3d_shelf_height_overlaps():
                 overlaps_3d.append((boxes[i]["index"], boxes[j]["index"]))
 
     assert len(overlaps_3d) == 0, f"Found 3D overlaps: {overlaps_3d}"
-

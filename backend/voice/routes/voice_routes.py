@@ -1,10 +1,12 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional, Dict
 import json
 import base64
 from datetime import datetime
 from services.voice_ai_service import VoiceAIService
+from security import require_user
+from audio_limits import read_limited_audio
 
 router = APIRouter(prefix="/voice", tags=["Voice AI"])
 
@@ -29,24 +31,18 @@ class VoiceResponse(BaseModel):
 @router.post("/process", response_model=VoiceResponse)
 async def process_voice(
     audio: Optional[UploadFile] = File(None),
-    user_id: str = Form(...),
-    language_code: Optional[str] = Form(None)
+    language_code: Optional[str] = Form(None),
+    current_user_id: str = Depends(require_user)
 ):
     """Process voice command with language detection"""
     try:
-        # Read audio
         if audio:
-            audio_data = await audio.read()
-            if not audio_data:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Audio file cannot be empty"
-                    )
+            audio_data = await read_limited_audio(audio)
         else:
             raise HTTPException(status_code=400, detail="Audio data required")
         
         # Process command
-        result = await voice_service.process_voice_command(audio_data, user_id)
+        result = await voice_service.process_voice_command(audio_data, current_user_id)
         
         return VoiceResponse(
             success=result.get('success', False),
@@ -59,6 +55,8 @@ async def process_voice(
             timestamp=result.get('timestamp', datetime.now().isoformat())
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         return VoiceResponse(
             success=False,
@@ -67,16 +65,21 @@ async def process_voice(
         )
 
 @router.post("/detect-language")
-async def detect_language(audio: UploadFile = File(...)):
+async def detect_language(
+    audio: UploadFile = File(...),
+    _: str = Depends(require_user)
+):
     """Detect language from audio"""
     try:
-        audio_data = await audio.read()
+        audio_data = await read_limited_audio(audio)
         result = await voice_service.detect_language(audio_data)
         return {
             'success': True,
             'data': result,
             'timestamp': datetime.now().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         return {
             'success': False,
@@ -86,22 +89,20 @@ async def detect_language(audio: UploadFile = File(...)):
 @router.post("/transcribe")
 async def transcribe_speech(
     audio: UploadFile = File(...),
-    language_code: Optional[str] = Form(None)
+    language_code: Optional[str] = Form(None),
+    _: str = Depends(require_user)
 ):
     """Transcribe speech with dialect support"""
     try:
-        audio_data = await audio.read()
-        if not audio_data:
-            raise HTTPException(
-                status_code=400,
-                detail="Audio file cannot be empty"
-                 )
+        audio_data = await read_limited_audio(audio)
         result = await voice_service.transcribe_speech(audio_data, language_code)
         return {
             'success': True,
             'data': result,
             'timestamp': datetime.now().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         return {
             'success': False,
@@ -111,7 +112,8 @@ async def transcribe_speech(
 @router.post("/synthesize")
 async def synthesize_speech(
     text: str = Form(...),
-    language_code: str = Form('hi')
+    language_code: str = Form('hi'),
+    _: str = Depends(require_user)
 ):
     """Generate speech from text"""
     try:
@@ -139,7 +141,9 @@ async def get_supported_languages():
     }
 
 @router.get("/stats")
-async def get_language_stats():
+async def get_language_stats(
+    _: str = Depends(require_user)
+):
     """Get language usage statistics"""
     stats = await voice_service.get_language_stats()
     return {
@@ -169,7 +173,8 @@ async def get_dialects(language_code: str):
 async def translate_text(
     text: str = Form(...),
     source_lang: str = Form('hi'),
-    target_lang: str = Form('en')
+    target_lang: str = Form('en'),
+    _: str = Depends(require_user)
 ):
     """Translate text between languages"""
     try:

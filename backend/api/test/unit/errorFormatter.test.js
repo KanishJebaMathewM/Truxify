@@ -47,12 +47,12 @@ describe('errorFormatter', () => {
     it('formats custom AppError / ValidationError / NotFoundError subclasses', () => {
       const notFound = new NotFoundError('User profile not found');
       const resultNotFound = formatError(notFound);
-      expect(resultNotFound.error.code).toBe('NotFoundError');
+      expect(resultNotFound.error.code).toBe('NOT_FOUND');
       expect(resultNotFound.error.message).toBe('User profile not found');
 
       const validation = new ValidationError('Payload invalid');
       const resultValidation = formatError(validation);
-      expect(resultValidation.error.code).toBe('ValidationError');
+      expect(resultValidation.error.code).toBe('VALIDATION_ERROR');
       expect(resultValidation.error.message).toBe('Payload invalid');
     });
 

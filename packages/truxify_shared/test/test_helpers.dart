@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mockito/annotations.dart';
-import 'package:mockito/mockito.dart';
 
 // ─── Mock Service Interfaces ─────────────────────────────────────────────────
 // These mirror the actual service classes in the app.

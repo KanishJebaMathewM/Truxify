@@ -1,20 +1,20 @@
-import os
-from fastapi import APIRouter, HTTPException, UploadFile, File
-from pydantic import BaseModel
-from typing import Dict, Any, Optional
-import json
-import base64
-import numpy as np
-import cv2
-import soundfile as sf
 import io
-from datetime import datetime
+import json
 import logging
-import redis
+import os
+from datetime import datetime
 
-from multimodal.vision_monitor import VisionMonitor
+import cv2
+import numpy as np
+import redis
+import soundfile as sf
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from multimodal.audio_monitor import AudioMonitor
-from multimodal.sensor_fusion import SensorFusion
+from multimodal.vision_monitor import VisionMonitor
+from multimodal.vision_execution import process_encoded_frame, read_latest_vision
+from app.execution import run_inference
+from routes.safety_fusion_routes import router as fusion_router
+from routes.safety_fusion_routes import sensor_fusion
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/safety", tags=["Driver Safety"])
@@ -75,14 +75,7 @@ async def _read_upload(file, allowed_mimes):
 # Initialize monitors
 vision_monitor = VisionMonitor()
 audio_monitor = AudioMonitor()
-sensor_fusion = SensorFusion()
-
-class SafetyAlertResponse(BaseModel):
-    alert_level: str
-    alert_message: str
-    fusion_risk: float
-    actions: list
-    timestamp: str
+router.include_router(fusion_router)
 
 @router.post("/vision/analyze")
 async def analyze_vision_frame(file: UploadFile = File(...)):
@@ -90,11 +83,7 @@ async def analyze_vision_frame(file: UploadFile = File(...)):
     try:
         # Read image (bounded, MIME-checked)
         contents = await _read_upload(file, _ALLOWED_VISION_MIME)
-        nparr = np.frombuffer(contents, np.uint8)
-        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        
-        # Process frame
-        result = vision_monitor.process_frame(frame)
+        result = await run_inference(process_encoded_frame, vision_monitor, contents)
         
         return {
             'success': True,
@@ -118,10 +107,10 @@ async def analyze_audio(file: UploadFile = File(...)):
         audio_data, sr = sf.read(io.BytesIO(contents))
         
         # Process audio
-        result = audio_monitor.process_audio(audio_data)
+        result = audio_monitor.process_audio(audio_data, sample_rate=int(sr))
         
         return {
-            'success': True,
+            'success': result.get('status') == 'OK',
             'data': result,
             'timestamp': datetime.now().isoformat()
         }
@@ -134,7 +123,7 @@ async def analyze_audio(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/audio/record")
-async def record_audio(duration: int = 2):
+async def record_audio(duration: int = Query(2, ge=1, le=10)):
     """Record and analyze audio"""
     try:
         # Record audio
@@ -154,63 +143,15 @@ async def record_audio(duration: int = 2):
 
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/fusion/analyze")
-async def analyze_safety(
-    vision_data: Optional[Dict] = None,
-    audio_data: Optional[Dict] = None,
-    sensor_data: Optional[Dict] = None
-):
-    """Analyze safety using all modalities"""
-    try:
-        # If no data provided, get latest
-        if vision_data is None:
-            vision_data = json.loads(vision_monitor.redis.get('vision:latest') or '{}')
-        if audio_data is None:
-            audio_data = json.loads(audio_monitor.redis.get('audio:latest') or '{}')
-        if sensor_data is None:
-            sensor_data = {}
-        
-        # Fuse data
-        result = sensor_fusion.fuse_data(vision_data, audio_data, sensor_data)
-        
-        return {
-            'success': True,
-            'data': result,
-            'timestamp': datetime.now().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"Safety analysis failed: {e}")
-        logger.error(f"Internal error: {e}")
-
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@router.get("/fusion/report", response_model=SafetyAlertResponse)
-async def get_safety_report():
-    """Get latest safety report"""
-    try:
-        report = sensor_fusion.get_safety_report()
-        return SafetyAlertResponse(
-            alert_level=report['alert_level'],
-            alert_message=report['alert_message'],
-            fusion_risk=report['fusion_risk'],
-            actions=report.get('actions', []),
-            timestamp=report['timestamp']
-        )
-    except Exception as e:
-        logger.error(f"Safety report failed: {e}")
-        logger.error(f"Internal error: {e}")
-
-        raise HTTPException(status_code=500, detail="Internal server error")
-
 @router.get("/vision/status")
 async def get_vision_status():
     """Get latest vision monitoring status"""
     try:
-        data = vision_monitor.redis.get('vision:latest')
-        if data:
+        has_data, data = await run_inference(read_latest_vision, vision_monitor)
+        if has_data:
             return {
                 'success': True,
-                'data': json.loads(data),
+                'data': data,
                 'timestamp': datetime.now().isoformat()
             }
         return {
@@ -218,6 +159,8 @@ async def get_vision_status():
             'data': None,
             'message': 'No vision data available'
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Vision status failed: {e}")
         logger.error(f"Internal error: {e}")
@@ -265,6 +208,8 @@ async def get_fusion_stats():
 @router.post("/alert/trigger")
 async def trigger_alert(level: str = "WARNING"):
     """Manually trigger safety alert"""
+    if level not in ("INFO", "WARNING", "CRITICAL"):
+        raise HTTPException(status_code=422, detail="level must be one of INFO, WARNING, CRITICAL.")
     try:
         alert = {
             'level': level,

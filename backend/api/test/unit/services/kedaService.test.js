@@ -243,8 +243,12 @@ describe('services/kedaService.js Unit Tests', () => {
         success: false,
         error: 'Network Error (ECONNREFUSED)',
       });
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        expect.objectContaining({ event: 'KEDA_METRICS_FETCH_ERROR' }),
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'KEDA_METRICS_FETCH_ERROR',
+          error: 'Network Error (ECONNREFUSED)',
+          stack: expect.any(String),
+        }),
         'Metrics fetch failed'
       );
     });

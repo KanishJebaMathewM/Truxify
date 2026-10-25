@@ -5,7 +5,29 @@ import { getLiveTrafficMultiplier } from '../trafficService.js';
 import { getHaversineDistance } from '../routingService.js';
 import { broadcastOrderEta } from '../../sockets/tracker.js';
 import { emitEtaUpdateToBooking } from '../../sockets/locationServer.js';
+// backend/api/src/services/orderService.js (or orderRoutes.js excerpt)
 
+async function completeTripAndReleaseEscrow(orderId) {
+  // 1. Attempt atomic state transition to prevent race conditions
+  const { data: updatedOrder, error: updateError } = await supabase
+    .from('orders')
+    .update({ status: 'COMPLETED', completed_at: new Date().toISOString() })
+    .eq('id', orderId)
+    .eq('status', 'IN_PROGRESS') // Crucial: Ensures only 1 request succeeds
+    .select()
+    .single();
+
+  if (updateError || !updatedOrder) {
+    // State was already modified by concurrent request
+    const error = new Error('Trip already completed or escrow already released.');
+    error.statusCode = 400;
+    throw error;
+  }
+import { validateCoordinate } from '../../utils/coordinates.js';
+
+  // 2. Proceed with secure blockchain escrow release for the single winner
+  return await releaseEscrowFunds(orderId);
+}
 /** Order statuses where live ETA updates are meaningful. */
 export const ACTIVE_ETA_STATUSES = [
   'truck_assigned',
@@ -90,11 +112,13 @@ export function resolveDestinationForOrder(order) {
   const lat = usePickup ? order.pickup_lat : order.drop_lat;
   const lng = usePickup ? order.pickup_lng : order.drop_lng;
 
-  if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) {
+  const latitude = validateCoordinate(lat, 'lat');
+  const longitude = validateCoordinate(lng, 'lng');
+  if (!latitude.valid || !longitude.valid) {
     return null;
   }
 
-  return { lat: Number(lat), lng: Number(lng) };
+  return { lat: latitude.value, lng: longitude.value };
 }
 
 export function isActiveEtaStatus(status) {

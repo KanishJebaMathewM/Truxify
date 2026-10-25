@@ -1,5 +1,8 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import hre from "hardhat";
+// Named { ethers } from the CJS 'hardhat' module breaks under the root
+// type:module scope — destructure from the default import instead.
+const { ethers } = hre;
 
 describe("DAO Quadratic Voting", function () {
   it("Should calculate quadratic cost = votes^2 correctly", async function () {
@@ -14,7 +17,7 @@ describe("DAO Quadratic Voting", function () {
     await token.transfer(voter.address, 100);
     await token.connect(voter).approve(await dao.getAddress(), 100);
 
-    await dao.registerVoter(ethers.id("identity:alice"));
+    await dao.connect(voter).registerVoter(ethers.id("identity:alice"));
 
     await dao.createProposal("Reduce Corridor Tariff by 5%", 3600);
 

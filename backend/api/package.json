@@ -21,19 +21,6 @@
     "benchmark:postgis": "node scripts/benchmark-postgis.js",
     "benchmark:loads": "node scripts/benchmark-load-marketplace.js"
   },
-"dependencies": {
-  "@opentelemetry/exporter-trace-otlp-grpc": "^1.20.0",
-  "@opentelemetry/instrumentation-express": "^0.43.0",
-  "@opentelemetry/instrumentation-http": "^0.47.0",
-  "@opentelemetry/instrumentation-mongodb": "^0.43.0",
-  "@opentelemetry/instrumentation-pino": "^0.39.0",
-  "@opentelemetry/instrumentation-redis": "^0.35.0",
-  "@opentelemetry/instrumentation-winston": "^0.37.0",
-  "@opentelemetry/resources": "^1.20.0",
-  "@opentelemetry/sdk-trace-base": "^1.20.0",
-  "@opentelemetry/sdk-trace-node": "^1.20.0",
-  "@opentelemetry/semantic-conventions": "^1.20.0"
-
   "dependencies": {
     "@opentelemetry/exporter-trace-otlp-grpc": "^0.221.0",
     "@opentelemetry/instrumentation-express": "^0.69.0",
@@ -79,6 +66,7 @@
     "swagger-jsdoc": "^6.3.0",
     "swagger-ui-express": "^5.0.1",
     "twilio": "^5.13.1",
+    "winston": "^3.19.0",
     "ws": "^8.21.3",
     "zod": "^4.4.3"
   },

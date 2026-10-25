@@ -1,82 +1,41 @@
-import { AsyncLocalStorage } from 'async_hooks';
+// backend/api/src/middleware/correlationId.js
 import { randomUUID } from 'crypto';
+import axios from 'axios';
 import logger from './logger.js';
-// backend/api/src/middleware/correlationId.js
+import {
+  correlationContext,
+  getCorrelationId,
+  getCorrelationStore,
+} from '../lib/correlationContext.js';
 
-import { randomUUID } from 'crypto';
+export { correlationContext, getCorrelationId, getCorrelationStore };
 
-// Enforce safe character set and length cap matching requestId.js
+// Safe correlation ID format to prevent header injection & unbound header reflection
 const SAFE_CORRELATION_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
- * Middleware to extract, validate, or generate a secure correlation ID.
- * Updated per issue #10492 to prevent log injection and unbounded header reflection.
- */
-export function correlationIdMiddleware(req, res, next) {
-  const header = req.headers['x-correlation-id'];
-  
-  let correlationId;
-  if (typeof header === 'string' && SAFE_CORRELATION_ID.test(header.trim())) {
-    correlationId = header.trim();
-  } else {
-    correlationId = randomUUID();
-  }
-
-  req.correlationId = correlationId;
-  res.setHeader('X-Correlation-ID', correlationId);
-
-  next();
-}
-
-export default correlationIdMiddleware;
-export const correlationContext = new AsyncLocalStorage();
-
-const SAFE_CORRELATION_ID = /^[A-Za-z0-9_-]{1,64}$/;
-// backend/api/src/middleware/correlationId.js
-
-import { AsyncLocalStorage } from 'async_hooks';
-import { v4 as uuidv4 } from 'uuid';
-
-const correlationStorage = new AsyncLocalStorage();
-
-/**
- * Retrieves the current correlation store context.
- * @returns {Object|undefined} Current store containing correlationId.
- */
-export function getCorrelationStore() {
-  return correlationStorage.getStore();
-}
-
-/**
- * Runs a callback function within an asynchronous correlation ID context.
- * @param {string} correlationId - Unique request tracing ID.
- * @param {Function} callback - Function to execute within context.
- * @returns {any} Result of the callback execution.
+ * Runs a callback within an asynchronous correlation context.
+ * @param {string} correlationId
+ * @param {Function} callback
+ * @returns {*}
  */
 export function runWithCorrelationId(correlationId, callback) {
-  const store = { correlationId: correlationId || uuidv4() };
-  return correlationStorage.run(store, callback);
+  const safeId =
+    typeof correlationId === 'string' && SAFE_CORRELATION_ID.test(correlationId.trim())
+      ? correlationId.trim()
+      : correlationId;
+  return correlationContext.run({ correlationId: safeId }, callback);
 }
 
 /**
- * Express middleware to attach or generate a correlation ID for request tracing.
+ * Express middleware to generate or forward X-Correlation-ID header,
+ * attach to req.correlationId, set response header, and run in async context.
  */
 export function correlationIdMiddleware(req, res, next) {
-  const incomingId = req.headers['x-correlation-id'] || req.headers['x-request-id'] || uuidv4();
-  
-  req.correlationId = incomingId;
-  res.setHeader('X-Correlation-ID', incomingId);
-
-  runWithCorrelationId(incomingId, () => {
-    next();
-  });
-}
-export function correlationIdMiddleware(req, res, next) {
-  const headers = req?.headers || {};
   const rawHeader =
-    headers['x-correlation-id'] ??
-    headers['X-Correlation-ID'] ??
-    headers['x-correlation-ID'];
+    req.headers?.['x-correlation-id'] ??
+    req.headers?.['X-Correlation-ID'] ??
+    req.headers?.['x-correlation-ID'];
 
   const header = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
 
@@ -89,29 +48,85 @@ export function correlationIdMiddleware(req, res, next) {
     req.correlationId = correlationId;
   }
 
-  if (typeof res?.setHeader === 'function') {
+  if (res && typeof res.setHeader === 'function') {
     res.setHeader('X-Correlation-ID', correlationId);
   }
 
-  logger.debug(
-    {
-      event: 'CORRELATION_ID_SET',
-      correlationId,
-      requestId: req?.requestId || req?.id,
-    },
-    `Correlation ID ${correlationId} ${
-      isPropagated ? 'propagated from client' : 'generated'
-    }`,
-  );
+  if (res?.locals) {
+    res.locals.correlationId = correlationId;
+  }
 
-  const store = { correlationId };
-  correlationContext.run(store, next);
+  if (logger && typeof logger.debug === 'function') {
+    logger.debug(
+      {
+        event: 'CORRELATION_ID_SET',
+        correlationId,
+        requestId: req?.requestId || req?.id,
+      },
+      `Correlation ID ${correlationId} ${
+        isPropagated ? 'propagated from client' : 'generated'
+      }`,
+    );
+  }
+
+  return correlationContext.run({ correlationId }, next);
 }
 
-export function runWithCorrelationId(correlationId, fn) {
-  return correlationContext.run({ correlationId }, fn);
+/**
+ * Request/response logging middleware.
+ * Logs method, path, status code, duration ms, and correlationId on every response finish.
+ */
+export function requestLoggingMiddleware(req, res, next) {
+  const start = Date.now();
+
+  res.on('finish', () => {
+    const durationMs = Date.now() - start;
+    const statusCode = res.statusCode;
+    const level = statusCode >= 500 ? 'error' : statusCode >= 400 ? 'warn' : 'info';
+    const correlationId = req.correlationId || getCorrelationId();
+
+    if (logger && typeof logger[level] === 'function') {
+      logger[level]('Request completed', {
+        method: req.method,
+        path: req.originalUrl || req.url,
+        statusCode,
+        durationMs,
+        correlationId,
+      });
+    }
+  });
+
+  next();
 }
 
-export function getCorrelationStore() {
-  return correlationContext.getStore() ?? {};
+/**
+ * Helper to construct headers for outgoing requests (including FastAPI calls)
+ * with the active X-Correlation-ID attached.
+ * @param {Object} [extraHeaders={}]
+ * @returns {Object}
+ */
+export function getFastApiHeaders(extraHeaders = {}) {
+  const correlationId = getCorrelationId();
+  return {
+    'Content-Type': 'application/json',
+    ...(correlationId ? { 'X-Correlation-ID': correlationId } : {}),
+    ...extraHeaders,
+  };
 }
+
+// Automatically configure Axios request interceptor so all outgoing calls
+// (such as calls to FastAPI / ML engine) forward the X-Correlation-ID header.
+if (axios && axios.interceptors && axios.interceptors.request) {
+  axios.interceptors.request.use((config) => {
+    const correlationId = getCorrelationId();
+    if (correlationId) {
+      config.headers = config.headers || {};
+      if (!config.headers['X-Correlation-ID'] && !config.headers['x-correlation-id']) {
+        config.headers['X-Correlation-ID'] = correlationId;
+      }
+    }
+    return config;
+  });
+}
+
+export default correlationIdMiddleware;

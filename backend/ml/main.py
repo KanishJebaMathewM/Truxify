@@ -22,7 +22,7 @@ if sentry_dsn:
 
 import numpy as np
 from datetime import datetime, timedelta
-from fastapi import FastAPI, HTTPException, Depends, Query, UploadFile, File
+from fastapi import FastAPI, HTTPException, Depends, Query, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -105,8 +105,20 @@ app.add_middleware(
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["X-API-Key", "Content-Type"],
+    allow_headers=["X-API-Key", "Content-Type", "X-Correlation-ID", "x-correlation-id"],
 )
+
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    correlation_id = request.headers.get("x-correlation-id") or request.headers.get("X-Correlation-ID")
+    if correlation_id:
+        logger.info(f"Incoming request {request.method} {request.url.path} [correlationId={correlation_id}]")
+    else:
+        logger.info(f"Incoming request {request.method} {request.url.path}")
+    response = await call_next(request)
+    if correlation_id:
+        response.headers["X-Correlation-ID"] = correlation_id
+    return response
 
 
 @app.on_event("startup")

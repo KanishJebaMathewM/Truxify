@@ -6,7 +6,49 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 import logger from '../../backend/api/src/middleware/logger.js';
+import fs from 'fs/promises';
+import path from 'path';
+import os from 'os';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 
+const execFileAsync = promisify(execFile);
+
+export async function evaluatePolicy(inputData, policyPath) {
+  // FIX: Create an isolated temporary directory/file per evaluation to prevent concurrent races per issue #4968
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'opa-eval-'));
+  const inputFilePath = path.join(tmpDir, 'input.json');
+
+  try {
+    await fs.writeFile(inputFilePath, JSON.stringify(inputData), 'utf8');
+
+    // Execute opa eval using the isolated input file
+    const { stdout, stderr } = await execFileAsync('opa', [
+      'eval',
+      '-i',
+      inputFilePath,
+      '-d',
+      policyPath,
+      'data.authz.allow',
+    ]);
+
+    if (stderr) {
+      console.warn('[OPA Service] Warning during evaluation:', stderr);
+    }
+
+    const result = JSON.parse(stdout);
+    const allow = result.result?.[0]?.expressions?.[0]?.value ?? false;
+
+    return { allow };
+  } finally {
+    // Guaranteed cleanup of the unique temporary file and directory
+    try {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    } catch (cleanupErr) {
+      console.error('[OPA Service] Failed to clean up temp files:', cleanupErr);
+    }
+  }
+}
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 

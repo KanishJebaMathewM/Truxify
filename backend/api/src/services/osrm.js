@@ -2,6 +2,19 @@ import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import CircuitBreaker from 'opossum';
 import { measureExecution } from '../core/performanceMetrics.js';
+// backend/api/src/services/osrm.js (Excerpt)
+
+import logger from '../middleware/logger.js';
+
+// ... inside OSRM routing / caching function ...
+
+try {
+  await redisClient.set(cacheKey, JSON.stringify(result), 'EX', CACHE_TTL_SECONDS);
+} catch (error) {
+  logger.warn('[OSRMService] Failed to write routing result to Redis cache', {
+    error: error.message,
+    cacheKey
+  });
 import logger from '../middleware/logger.js';
 import { validateCoordinate } from '../utils/coordinates.js';
 

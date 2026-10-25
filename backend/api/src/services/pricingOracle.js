@@ -1,6 +1,29 @@
 /**
  * Baseline rate multipliers per equipment type ($/mile baseline).
  */
+// backend/api/src/services/pricing.js (Excerpt)
+
+import logger from '../middleware/logger.js';
+
+const KM_TO_MILES_FACTOR = 0.621371;
+
+/**
+ * Converts a distance in kilometers to statute miles.
+ * @param {number} km - Distance in kilometers
+ * @returns {number} Distance in miles rounded to 4 decimal places
+ */
+export function convertKmToMiles(km) {
+  if (typeof km !== 'number' || Number.isNaN(km)) {
+    throw new TypeError('Distance in kilometers must be a valid number.');
+  }
+
+  if (km < 0) {
+    throw new Error('Distance in kilometers cannot be negative.');
+  }
+
+  const miles = km * KM_TO_MILES_FACTOR;
+  return Number(miles.toFixed(4));
+}
 const BASELINE_RATES_PER_MILE = {
     DRY_VAN: 2.35,
     REEFER: 2.85,

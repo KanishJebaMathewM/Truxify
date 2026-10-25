@@ -54,28 +54,37 @@ import {
   invalidateCachedProfile,
   invalidateCachedSupabaseProfile,
 } from "../lib/profileCache.js";
-import { firebaseAdmin, supabase, redisClient } from "../config/db.js";
+import {
+  firebaseAdmin,
+  supabase,
+  supabaseAdmin,
+  redisClient,
+} from "../config/db.js";
 import {
   OTP_MAX_FAILED_ATTEMPTS,
   OTP_LOCKOUT_MINUTES,
 } from "../services/order/orderNotificationService.js";
 import logger from "../middleware/logger.js";
+import { refreshToken } from "../controllers/authController.js";
+// backend/api/src/routes/authRoutes.js (Excerpt)
 import { getJwtSecret } from "../config/jwtSecret.js";
+
+import express from 'express';
+import { userLimiter } from '../middleware/rateLimiter.js'; // ✅ Retained single import
+// ... other imports ...
 
 const router = express.Router();
 
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per `window` (here, per 15 minutes)
-  message: {
-    success: false,
-    message: "Too many requests from this IP, please try again later.",
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+// ... route definitions using userLimiter ...
+const router = express.Router();
 
-router.use(authLimiter);
+// Router-wide rate limiting for /api/auth is applied once, where the router is
+// mounted in src/index.js (`app.use('/api/auth', authLimiter, authRoutes)`),
+// using the shared Redis-backed authLimiter from middleware/rateLimiter.js.
+// Do not add a second router-level limiter here: it double-counts every auth
+// request, keeps per-process in-memory counts that are not shared across
+// replicas, and ignores the AUTH_RATE_LIMIT_* settings (see #2273, #10200).
+// Per-route limiters such as the ones on /request-otp and /verify-otp are fine.
 
 /**
  * Exchange a valid rotating refresh token for a backend JWT and a new refresh token.
@@ -180,7 +189,52 @@ router.get("/session", authenticate, userLimiter, (req, res) => {
     user: req.user,
   });
 });
+// backend/api/src/routes/authRoutes.js (Excerpt)
 
+const express = require('express');
+const router = express.Router();
+const authService = require('../services/authService');
+
+/**
+ * @route   POST /api/auth/verify-otp
+ * @desc    Verify OTP code and issue session token
+ * @access  Public
+ */
+router.post('/verify-otp', async (req, res, next) => {
+  try {
+    const { identifier, otp } = req.body;
+
+    // 1. Input Validation
+    if (!identifier || !otp) {
+      return res.status(400).json({
+        error: 'INVALID_REQUEST',
+        message: 'Both identifier (email/phone) and otp are required.'
+      });
+    }
+
+    // 2. Verify OTP via service layer
+    const result = await authService.verifyOtp({ identifier, otp });
+
+    if (!result.success) {
+      return res.status(result.statusCode || 400).json({
+        error: result.errorCode || 'VERIFICATION_FAILED',
+        message: result.message
+      });
+    }
+
+    // 3. Return session token on successful verification
+    return res.status(200).json({
+      success: true,
+      message: 'OTP verified successfully.',
+      token: result.token,
+      user: result.user
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+module.exports = router;
 import crypto from "crypto";
 import { z } from "zod";
 import { verifyOtpHash } from "../lib/otpHashing.js";
@@ -365,6 +419,21 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
 
   const { phone, otp } = parsed.data;
 
+  // phone_otps has RLS enabled and all grants to anon/authenticated were
+  // revoked by 20260811120000_secure_phone_otps_rls.sql. Only the service-role
+  // client can read the hash/salt or consume a row, so fail closed instead of
+  // falling back to the anon client (which would always return 500/not found).
+  if (!supabaseAdmin) {
+    logger.error(
+      { event: "AUTH_OTP_ADMIN_CLIENT_MISSING" },
+      "SUPABASE_SERVICE_ROLE_KEY is required to verify phone OTPs",
+    );
+    return res.status(503).json({
+      success: false,
+      error: "OTP verification is temporarily unavailable.",
+    });
+  }
+
   try {
     if (await checkAuthOtpLockout(phone)) {
       return res.status(429).json({
@@ -373,8 +442,10 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
       });
     }
 
-    // Look up the latest unused, active, unexpired OTP for this phone number
-    const { data: otpRecord, error: fetchErr } = await supabase
+    // Look up the latest unused, active, unexpired OTP for this phone number.
+    // The service-role client is required because the table is service_role
+    // only; the anon client would be denied by RLS.
+    const { data: otpRecord, error: fetchErr } = await supabaseAdmin
       .from("phone_otps")
       .select("id, otp_hash, otp_salt, expires_at, verified, is_active")
       .eq("phone", phone)
@@ -386,13 +457,12 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
       .maybeSingle();
 
     if (fetchErr) {
-      logger.error({ event: "AUTH_OTP_DB_FETCH_ERROR", error: fetchErr.message }, "DB fetch error during OTP verification");
       logger.error(
         {
           event: "AUTH_OTP_DB_FETCH_ERROR",
           error: fetchErr.message,
         },
-        "DB fetch error"
+        "DB fetch error during OTP verification",
       );
       return res.status(500).json({ success: false, error: "Internal server error." });
     }
@@ -428,22 +498,42 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
       });
     }
 
-    // Consume the OTP so it cannot be reused
-    const { error: updateErr } = await supabase
+    // Consume the OTP atomically. The verified/is_active predicates make the
+    // update conditional on the row still being unused, so two concurrent
+    // requests that both read the same row cannot both succeed.
+    const { data: consumed, error: updateErr } = await supabaseAdmin
       .from("phone_otps")
-      .update({ verified: true, verified_at: new Date().toISOString(), is_active: false })
-      .eq("id", otpRecord.id);
+      .update({
+        verified: true,
+        verified_at: new Date().toISOString(),
+        is_active: false,
+      })
+      .eq("id", otpRecord.id)
+      .eq("verified", false)
+      .eq("is_active", true)
+      .select("id")
+      .maybeSingle();
 
     if (updateErr) {
-      logger.error({ event: "AUTH_OTP_MARK_VERIFIED_ERROR", error: updateErr.message }, "Failed to mark OTP as verified");
       logger.error(
         {
           event: "AUTH_OTP_VERIFICATION_UPDATE_ERROR",
           error: updateErr.message,
         },
-        "Failed to mark OTP as verified"
+        "Failed to mark OTP as verified",
       );
       return res.status(500).json({ success: false, error: "Internal server error." });
+    }
+
+    if (!consumed) {
+      logger.warn(
+        { event: "AUTH_OTP_CONSUME_RACE", otpId: otpRecord.id },
+        "OTP was already consumed by a concurrent request",
+      );
+      return res.status(409).json({
+        success: false,
+        error: "OTP has already been used. Request a new code.",
+      });
     }
 
     await clearAuthOtpFailures(phone);

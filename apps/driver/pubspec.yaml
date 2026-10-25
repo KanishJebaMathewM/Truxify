@@ -27,11 +27,11 @@ dependencies:
   web_socket_channel: ^3.0.0
   flutter_secure_storage: ^10.3.1
   flutter_webrtc: ">=0.11.7 <2.0.0"
-  audioplayers: ^5.2.1
+  audioplayers: ^6.8.1
 
   google_fonts: ^8.1.0
   fl_chart: ^1.2.0
-  flutter_riverpod: ^2.5.1
+  flutter_riverpod: ^3.4.3
   provider: ^6.1.2
   flutter_map: ^8.1.1
   latlong2: ^0.10.1
@@ -41,14 +41,14 @@ dependencies:
   path_provider: ^2.1.2
   connectivity_plus: ^7.2.0
   record: ^5.0.5
-  workmanager: ^0.9.0
+  workmanager: ^0.10.10
   intl: ^0.20.2
   url_launcher: ^6.3.2
   geolocator: ^14.0.2
-  socket_io_client: ^2.0.3+1
+  socket_io_client: ^3.1.6
   shimmer: ^3.0.0
   permission_handler: ^13.0.2
-  share_plus: ^10.1.4
+  share_plus: ^12.0.2
   pdf: ^3.11.2
   printing: ^5.13.4
   qr_flutter: ^4.1.0

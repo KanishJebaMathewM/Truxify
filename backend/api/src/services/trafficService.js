@@ -1,6 +1,51 @@
 import logger from '../middleware/logger.js';
+// backend/api/src/services/trafficService.js
 import { redisClient } from '../config/db.js';
 
+import logger from '../middleware/logger.js';
+
+const DEFAULT_TRAFFIC_MULTIPLIER = 1.0;
+
+/**
+ * Validates whether a coordinate value is a finite number.
+ * @param {any} val - Coordinate value.
+ * @returns {boolean} True if valid number.
+ */
+const isValidCoordinate = (val) => typeof val === 'number' && Number.isFinite(val);
+
+/**
+ * Retrieves live traffic multiplier based on pickup and dropoff coordinates.
+ * @param {number} pickupLat - Pickup latitude.
+ * @param {number} pickupLng - Pickup longitude.
+ * @param {number} dropoffLat - Dropoff latitude.
+ * @param {number} dropoffLng - Dropoff longitude.
+ * @returns {Promise<number>} Traffic multiplier factor.
+ */
+export async function getLiveTrafficMultiplier(pickupLat, pickupLng, dropoffLat, dropoffLng) {
+  // Use strict validation so coordinates at 0.0 (Equator/Prime Meridian) are not rejected
+  if (
+    !isValidCoordinate(pickupLat) || 
+    !isValidCoordinate(pickupLng) || 
+    !isValidCoordinate(dropoffLat) || 
+    !isValidCoordinate(dropoffLng)
+  ) {
+    logger.warn('Invalid or missing coordinate provided to traffic service, falling back to default', {
+      pickupLat, pickupLng, dropoffLat, dropoffLng
+    });
+    return DEFAULT_TRAFFIC_MULTIPLIER;
+  }
+
+  try {
+    // Proceed with live traffic calculation for valid coordinates (including 0,0)
+    const trafficMultiplier = await fetchTrafficDataFromProvider(
+      pickupLat, pickupLng, dropoffLat, dropoffLng
+    );
+    return trafficMultiplier;
+  } catch (err) {
+    logger.error('Failed to fetch live traffic multiplier', { error: err.message });
+    return DEFAULT_TRAFFIC_MULTIPLIER;
+  }
+}
 const RUSH_HOUR_START_AM = 7;
 const RUSH_HOUR_END_AM = 10;
 const RUSH_HOUR_START_PM = 16;

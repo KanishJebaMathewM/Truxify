@@ -15,6 +15,7 @@ jobs:
   check-conflicts:
     name: Check Open PR Conflicts
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
       - name: Scan open PRs for merge conflicts

@@ -2,14 +2,48 @@ import logger from '../../middleware/logger.js';
 import * as Sentry from '@sentry/node';
 import { supabase, supabaseAdmin } from '../../config/db.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
+// backend/api/src/services/security/anomalyDetectionService.js
 
+import { ValidationError } from '../../errors/index.js'; // Adjust path per module structure
+
+/**
+ * Tracks user behavior for security anomaly detection.
+ * @param {string} userId - Unique identifier of the user.
+ * @param {string} action - Action being performed.
+ * @param {Object} [metadata={}] - Additional context or telemetry.
+ */
+export function trackBehavior(userId, action, metadata = {}) {
+  // Guard against null, undefined, non-string, or empty whitespace user IDs
+  if (!userId || typeof userId !== 'string' || userId.trim() === '') {
+    throw new ValidationError('userId must be a non-empty string');
+  }
+
+  // Proceed with anomaly tracking and behavioral profiling
+  // ...
+}
 const ANOMALY_THRESHOLDS = {
   LARGE_WITHDRAWAL: 1000, // Threshold in MATIC
   UNUSUAL_TIME: { startHour: 0, endHour: 6 }, // Unusual hours (UTC)
   MULTIPLE_TRANSFERS: 5, // Number of transfers in 10 minutes
   UNUSUAL_DESTINATION: true, // New wallet destination
 };
+// backend/api/src/services/security/anomalyDetectionService.js (Excerpt)
 
+export function detectUnusualTime(transactionTimestamp) {
+  const txTime = new Date(transactionTimestamp);
+  
+  // FIX: Use getUTCHours() instead of getHours() per issue #6175
+  const hour = txTime.getUTCHours();
+
+  // Define normal operating window (e.g., 06:00 to 22:00 UTC)
+  const isUnusual = hour < 6 || hour > 22;
+
+  return {
+    isUnusual,
+    evaluatedHourUTC: hour,
+    message: isUnusual ? `Transaction occurred during unusual off-hours (${hour}:00 UTC)` : 'Normal operating hours',
+  };
+}
 /**
  * Defensive row cap on the 30-day withdrawal statistic pulls. PostgREST
  * silently caps a single response at 1000 rows, so without an explicit

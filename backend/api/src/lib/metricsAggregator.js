@@ -6,6 +6,24 @@
 import { supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 
+export const MAX_ANALYTICS_ROWS = 5000;
+
+export class AnalyticsRangeTooLargeError extends Error {
+    constructor(maxRows = MAX_ANALYTICS_ROWS) {
+        super(`Analytics range exceeds the maximum of ${maxRows} rows; narrow the date range.`);
+        this.name = 'AnalyticsRangeTooLargeError';
+        this.code = 'ANALYTICS_RANGE_TOO_LARGE';
+        this.maxRows = maxRows;
+    }
+}
+
+function assertWithinRowLimit(rows) {
+    if ((rows?.length || 0) > MAX_ANALYTICS_ROWS) {
+        throw new AnalyticsRangeTooLargeError();
+    }
+    return rows || [];
+}
+
 /**
  * Aggregates driver utilization metrics for a given time range.
  * @param {string} fleetManagerId 
@@ -29,14 +47,17 @@ export async function aggregateDriverUtilization(fleetManagerId, startDate, endD
       `)
             .gte('date', startDate)
             .lte('date', endDate)
-            .eq('fleet_manager_id', fleetManagerId);
+            .eq('fleet_manager_id', fleetManagerId)
+            .limit(MAX_ANALYTICS_ROWS + 1);
 
         if (error) throw error;
+
+        const boundedData = assertWithinRowLimit(data);
 
         // Group by driver
         const driverMap = new Map();
 
-        for (const row of (data || [])) {
+        for (const row of boundedData) {
             if (!driverMap.has(row.driver_id)) {
                 driverMap.set(row.driver_id, {
                     driverId: row.driver_id,
@@ -67,6 +88,7 @@ export async function aggregateDriverUtilization(fleetManagerId, startDate, endD
                 : 0
         }));
     } catch (err) {
+        if (err instanceof AnalyticsRangeTooLargeError) throw err;
         logger.error({ err, fleetManagerId }, 'Failed to aggregate driver utilization');
         return [];
     }
@@ -98,11 +120,12 @@ export async function aggregateRouteEfficiency(fleetManagerId, startDate, endDat
             .eq('fleet_manager_id', fleetManagerId)
             .eq('status', 'completed')
             .gte('completed_at', startDate)
-            .lte('completed_at', endDate);
+            .lte('completed_at', endDate)
+            .limit(MAX_ANALYTICS_ROWS + 1);
 
         if (error) throw error;
 
-        const routes = (data || []).map(order => {
+        const routes = assertWithinRowLimit(data).map(order => {
             const planned = order.planned_distance_km || 0;
             const actual = order.actual_distance_km || 0;
             const deviation = planned > 0 ? ((actual - planned) / planned) * 100 : 0;
@@ -121,6 +144,7 @@ export async function aggregateRouteEfficiency(fleetManagerId, startDate, endDat
 
         return routes;
     } catch (err) {
+        if (err instanceof AnalyticsRangeTooLargeError) throw err;
         logger.error({ err, fleetManagerId }, 'Failed to aggregate route efficiency');
         return [];
     }
@@ -143,16 +167,19 @@ export async function aggregateDeliveryPerformance(fleetManagerId, startDate, en
             .eq('fleet_manager_id', fleetManagerId)
             .eq('status', 'completed')
             .gte('completed_at', startDate)
-            .lte('completed_at', endDate);
+            .lte('completed_at', endDate)
+            .limit(MAX_ANALYTICS_ROWS + 1);
 
         if (error) throw error;
+
+        const boundedData = assertWithinRowLimit(data);
 
         let onTime = 0;
         let delayed = 0;
         let totalRating = 0;
         let ratedCount = 0;
 
-        for (const order of (data || [])) {
+        for (const order of boundedData) {
             if (order.estimated_delivery_at && order.completed_at) {
                 const est = new Date(order.estimated_delivery_at).getTime();
                 const actual = new Date(order.completed_at).getTime();
@@ -181,6 +208,7 @@ export async function aggregateDeliveryPerformance(fleetManagerId, startDate, en
             averageRating: ratedCount > 0 ? Math.round((totalRating / ratedCount) * 10) / 10 : null
         };
     } catch (err) {
+        if (err instanceof AnalyticsRangeTooLargeError) throw err;
         logger.error({ err, fleetManagerId }, 'Failed to aggregate delivery performance');
         return { onTime: 0, delayed: 0, total: 0, onTimePct: 0 };
     }

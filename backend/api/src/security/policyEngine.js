@@ -108,6 +108,7 @@ const POLICIES = {
   'ticket:admin-view-all':     { roles: [ROLES.ADMIN] },
 
   'admin:view-dashboard':      { roles: [ROLES.ADMIN] },
+  'admin:view-analytics':      { roles: [ROLES.ADMIN] },
   'admin:invalidate-cache':    { roles: [ROLES.ADMIN] },
   'admin:view-audit-logs':     { roles: [ROLES.ADMIN] },
   'admin:view-metrics':        { roles: [ROLES.ADMIN] },

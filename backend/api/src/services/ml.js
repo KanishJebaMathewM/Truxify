@@ -1,4 +1,5 @@
 import logger from '../middleware/logger.js';
+import { getCorrelationId } from '../middleware/correlationId.js';
 import { mlMatchingGateway } from './mlMatchingGateway.js';
 import { validatePricePrediction, convertToPaisa } from '../lib/predictionValidator.js';
 import { LRUCache } from '../utils/cache.js';
@@ -6,15 +7,17 @@ const demandCache = new LRUCache(100, 15 * 60 * 1000);
 const priceCache = new LRUCache(100, 15 * 60 * 1000);
 // backend/api/src/services/ml.js
 import axios from 'axios';
-import logger from '../middleware/logger.js';
 
 const ML_BASE_URL = process.env.ML_SERVICE_URL || 'http://localhost:8000';
 const ML_API_KEY = process.env.ML_API_KEY || '';
 
-function getHeaders() {
+function getHeaders(extraHeaders = {}) {
+  const correlationId = getCorrelationId();
   return {
     'Content-Type': 'application/json',
-    ...(ML_API_KEY ? { 'X-API-Key': ML_API_KEY } : {})
+    ...(ML_API_KEY ? { 'X-API-Key': ML_API_KEY } : {}),
+    ...(correlationId ? { 'X-Correlation-ID': correlationId } : {}),
+    ...extraHeaders
   };
 }
 

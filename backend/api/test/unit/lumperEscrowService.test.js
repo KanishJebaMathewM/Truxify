@@ -21,7 +21,7 @@ const mockLogger = vi.hoisted(() => ({
 vi.mock('../../src/middleware/logger.js', () => ({ default: mockLogger }));
 
 const { lumperEscrowService } = await import('../../src/services/lumperEscrowService.js');
-const { ValidationError } = await import('../../src/utils/errors.js');
+const { ForbiddenError, ValidationError } = await import('../../src/utils/errors.js');
 
 async function deposit(estimatedFeeAmount = 500) {
   return lumperEscrowService.depositLumperFee({
@@ -176,5 +176,77 @@ describe('lumperEscrowService.processReceiptAndRelease', () => {
 describe('lumperEscrowService.getEscrowStatus', () => {
   it('returns null for an unknown escrow', async () => {
     expect(await lumperEscrowService.getEscrowStatus('nope')).toBeNull();
+  });
+});
+
+describe('lumperEscrowService authorization', () => {
+  it('allows the assigned driver to release', async () => {
+    const escrow = await lumperEscrowService.depositLumperFee({
+      bookingId: 'BK-AUTH-1',
+      brokerAddress: '0xBroker',
+      estimatedFeeAmount: 500,
+      brokerUserId: 'broker-1',
+      driverId: 'driver-1',
+    });
+
+    const released = await lumperEscrowService.processReceiptAndRelease({
+      escrowId: escrow.escrowId,
+      driverWallet: '0xDriver',
+      receiptImageUrl: 'https://example.test/receipt.jpg',
+      callerId: 'driver-1',
+      callerRole: 'driver',
+    });
+
+    expect(released.status).toBe('RELEASED');
+  });
+
+  it('rejects an unrelated driver', async () => {
+    const escrow = await lumperEscrowService.depositLumperFee({
+      bookingId: 'BK-AUTH-2',
+      brokerAddress: '0xBroker',
+      estimatedFeeAmount: 500,
+      brokerUserId: 'broker-1',
+      driverId: 'driver-1',
+    });
+
+    await expect(lumperEscrowService.processReceiptAndRelease({
+      escrowId: escrow.escrowId,
+      driverWallet: '0xDriver',
+      receiptImageUrl: 'https://example.test/receipt.jpg',
+      callerId: 'driver-2',
+      callerRole: 'driver',
+    })).rejects.toThrow(ForbiddenError);
+  });
+
+  it('fails closed when an assigned escrow is released without caller identity', async () => {
+    const escrow = await lumperEscrowService.depositLumperFee({
+      bookingId: 'BK-AUTH-3',
+      brokerAddress: '0xBroker',
+      estimatedFeeAmount: 500,
+      driverId: 'driver-1',
+    });
+
+    await expect(lumperEscrowService.processReceiptAndRelease({
+      escrowId: escrow.escrowId,
+      driverWallet: '0xDriver',
+      receiptImageUrl: 'https://example.test/receipt.jpg',
+    })).rejects.toThrow(ForbiddenError);
+  });
+
+  it('allows an admin to release an assigned escrow', async () => {
+    const escrow = await lumperEscrowService.depositLumperFee({
+      bookingId: 'BK-AUTH-4',
+      brokerAddress: '0xBroker',
+      estimatedFeeAmount: 500,
+      driverId: 'driver-1',
+    });
+
+    await expect(lumperEscrowService.processReceiptAndRelease({
+      escrowId: escrow.escrowId,
+      driverWallet: '0xDriver',
+      receiptImageUrl: 'https://example.test/receipt.jpg',
+      callerId: 'admin-1',
+      callerRole: 'admin',
+    })).resolves.toMatchObject({ status: 'RELEASED' });
   });
 });

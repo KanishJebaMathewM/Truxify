@@ -3,7 +3,51 @@ import http from 'http';
 import https from 'https';
 import path from 'path';
 import logger from '../backend/api/src/middleware/logger.js';
+// wasi/wasi-runtime.js
 
+import logger from '../backend/api/src/middleware/logger.js'; // Adjust per module structure
+
+/**
+ * Executes a WASM binary under the WASI runtime environment.
+ * @param {string} wasmModulePath - Path to the compiled WASM binary.
+ * @param {Object} executionPayload - Input parameters for the WASM module.
+ * @returns {Promise<Object>} Execution result envelope { exitCode, data }
+ */
+export async function executeWasiModule(wasmModulePath, executionPayload) {
+  try {
+    const { exitCode, stdout } = await runWasmProcess(wasmModulePath, executionPayload);
+    
+    const stdoutStr = Buffer.isBuffer(stdout) ? stdout.toString('utf8') : String(stdout || '');
+
+    let parsedOutput;
+    try {
+      // Attempt to parse stdout as structured JSON
+      parsedOutput = JSON.parse(stdoutStr);
+    } catch (parseErr) {
+      // Gracefully handle plain text logs or non-JSON streams from the WASM sandbox
+      logger.warn('WASM module emitted non-JSON stdout', { 
+        module: wasmModulePath, 
+        error: parseErr.message, 
+        rawOutput: stdoutStr 
+      });
+      parsedOutput = { 
+        raw: stdoutStr, 
+        isJson: false 
+      };
+    }
+
+    return {
+      exitCode,
+      data: parsedOutput
+    };
+  } catch (err) {
+    logger.error('WASI runtime execution failed', { 
+      module: wasmModulePath, 
+      error: err.message 
+    });
+    throw new Error(`WASI execution failed: ${err.message}`, { cause: err });
+  }
+}
 // @wasmer/wasi is a dependency of this wasi/ package only. The API image
 // (Dockerfile.api) installs backend/api/package.json, so a static import made
 // the whole API fail to start. Load it on first use instead; a missing package

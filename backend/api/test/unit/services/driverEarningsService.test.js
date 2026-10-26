@@ -90,7 +90,7 @@ describe('services/driverEarningsService.js Unit Tests', () => {
         { total_earnings: 1000, net_earnings: 800, status: 'completed' },
         { total_earnings: 2000, net_earnings: 1600, status: 'completed' },
         { total_earnings: 500, net_earnings: 400, status: 'cancelled' },
-        { total_earnings: 1500, net_earnings: 1200 }, // undefined status counts as completed
+        { total_earnings: 1500, net_earnings: 1200 }, // unknown status is not a completed trip
       ];
 
       const result = aggregateTripEarnings(trips);
@@ -100,7 +100,7 @@ describe('services/driverEarningsService.js Unit Tests', () => {
         netEarnings: 4000,
         tripCount: 4,
         averageEarnings: 1250, // 5000 / 4
-        completionRate: 0.75, // 3 / 4
+        completionRate: 0.5, // 2 / 4
       });
     });
 

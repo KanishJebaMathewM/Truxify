@@ -50,7 +50,20 @@ export function formatValidationIssues(error) {
     message: issue.message,
   }));
 }
+// backend/api/src/middleware/validate.js (Excerpt)
 
+/**
+ * Formats Zod validation issues into a clean, structured array.
+ * Exported per issue #6967 for consistent error formatting across handlers and tests.
+ */
+export function formatValidationIssues(errors) {
+  return errors.map((err) => ({
+    field: err.path.join('.'),
+    message: err.message,
+  }));
+}
+
+// ... existing validate middleware using formatValidationIssues ...
 export function validateArray(schema) {
   return (req, res, next) => {
     if (!Array.isArray(req.body)) {

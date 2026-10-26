@@ -118,7 +118,8 @@ router.post(
       });
     } catch (err) {
       logger.error({ err, requestId: req.requestId }, '[Deadhead] Failed to insert mid-trip waypoint');
-      return res.status(500).json({ error: err.message || 'Failed to insert mid-trip waypoint.' });
+      const status = Number.isInteger(err?.status) ? err.status : 500;
+      return res.status(status).json({ error: err.message || 'Failed to insert mid-trip waypoint.' });
     }
   },
 );

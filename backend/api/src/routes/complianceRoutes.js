@@ -16,7 +16,52 @@ import { DOCUMENT_RULES } from '../lib/documentValidator.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage() });
+
+export const MAX_COMPLIANCE_FILE_BYTES = 10 * 1024 * 1024;
+export const COMPLIANCE_FILE_EXTENSIONS = new Map([
+    ['image/jpeg', 'jpg'],
+    ['image/jpg', 'jpg'],
+    ['image/png', 'png'],
+    ['image/webp', 'webp'],
+    ['application/pdf', 'pdf']
+]);
+
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+        fileSize: MAX_COMPLIANCE_FILE_BYTES,
+        files: 1
+    },
+    fileFilter: (_req, file, cb) => {
+        if (!COMPLIANCE_FILE_EXTENSIONS.has(file.mimetype)) {
+            const error = new Error(`Unsupported document file type: ${file.mimetype}`);
+            error.statusCode = 415;
+            return cb(error);
+        }
+        return cb(null, true);
+    }
+});
+
+function uploadSingleDocument(req, res, next) {
+    upload.single('document')(req, res, (err) => {
+        if (!err) return next();
+
+        if (err instanceof multer.MulterError) {
+            if (err.code === 'LIMIT_FILE_SIZE') {
+                return res.status(413).json({
+                    error: `Document file exceeds the ${MAX_COMPLIANCE_FILE_BYTES / (1024 * 1024)}MB limit`
+                });
+            }
+            return res.status(400).json({ error: `Document upload rejected: ${err.code}` });
+        }
+
+        if (err.statusCode === 415) {
+            return res.status(415).json({ error: err.message });
+        }
+
+        return next(err);
+    });
+}
 
 /**
  * GET /api/compliance/documents
@@ -50,7 +95,7 @@ router.get('/status', authenticate, requireRole(['driver']), async (req, res) =>
  * POST /api/compliance/documents/upload
  * Uploads and verifies a compliance document.
  */
-router.post('/documents/upload', authenticate, requireRole(['driver']), upload.single('document'), async (req, res) => {
+router.post('/documents/upload', authenticate, requireRole(['driver']), uploadSingleDocument, async (req, res) => {
     try {
         const { docType } = req.body;
 
@@ -62,8 +107,12 @@ router.post('/documents/upload', authenticate, requireRole(['driver']), upload.s
             return res.status(400).json({ error: 'No document file provided' });
         }
 
-        // Upload to storage first
-        const ext = req.file.originalname.split('.').pop() || 'jpg';
+        // Upload to storage first. The extension comes from the validated MIME
+        // type, never from the client-controlled original filename.
+        const ext = COMPLIANCE_FILE_EXTENSIONS.get(req.file.mimetype);
+        if (!ext) {
+            return res.status(415).json({ error: 'Unsupported document file type' });
+        }
         const storagePath = `compliance/${req.user.id}/${docType}_${Date.now()}.${ext}`;
 
         const { error: uploadError } = await supabaseAdmin.storage

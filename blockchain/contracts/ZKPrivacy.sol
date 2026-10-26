@@ -312,9 +312,12 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
         require(amount > 0, "Amount must be > 0");
         require(msg.value == amount, "Funding amount must equal transaction amount");
 
-        // Generate commitment and nullifier from the transaction context used
-        // to identify the private transfer, then bind it to the supplied funds.
-        bytes32 commitment = keccak256(abi.encodePacked(block.timestamp, msg.sender, amount));
+        // Bind the encrypted payload to the transaction commitment without
+        // persisting the plaintext/ciphertext on-chain.
+        bytes32 encryptedDataHash = keccak256(encryptedData);
+        bytes32 commitment = keccak256(
+            abi.encodePacked(block.timestamp, msg.sender, amount, encryptedDataHash)
+        );
         bytes32 nullifier = keccak256(abi.encodePacked(commitment, block.timestamp));
         require(!commitments[commitment], "Commitment already exists");
 

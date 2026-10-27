@@ -1,109 +1,146 @@
 import express from 'express';
 import crypto from 'crypto';
+import axios from 'axios';
 import { cacheMiddleware } from '../middleware/cacheMiddleware.js';
 // Verified single import for predictEta to prevent SyntaxError (#14873)
 import { predictDemand, predictPrice, predictEta, matchEnRouteLoads, getAbTestingStatus, rollbackAbTest } from '../services/ml.js';
-import { supabase } from '../config/db.js';
+import { supabase, supabaseAdmin, createUserClient } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
 import { haversineKm } from '../lib/pricing.js';
-// backend/api/src/routes/mlRoutes.js
-
-import express from 'express';
-import { authenticate } from '../middleware/auth.js';
-import { userLimiter } from '../middleware/rateLimiter.js';
-import logger from '../middleware/logger.js';
-import { createUserClient } from '../config/supabase.js';
 
 const router = express.Router();
 
+// Sanitize a trip identifier before interpolating it into a PostgREST `.or()`
+// filter. The filter grammar treats `)`, `,`, quotes and whitespace as syntax,
+// so an unsanitized value could break out of the intended predicate
+// (injection / malformed query / DoS). Rejects any such characters.
+function sanitizeTripId(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (trimmed === '') return null;
+  if (/[,)(\s'"]/.test(trimmed)) return null;
+  return trimmed;
+}
+
 /**
- * GET /api/ml/eta
+ * GET /api/ml/eta?tripId=...&lat=...&lng=...
  * Retrieves route ETA and distance for a specific trip with strict ownership validation.
- * Fixed per issue #9893 to prevent IDOR and unauthorized coordinate enumeration.
  */
 router.get('/eta', authenticate, userLimiter, async (req, res) => {
   try {
     const { tripId, lat, lng } = req.query;
-    const userId = req.user?.id;
-    const userRole = req.user?.role;
-
-    if (!tripId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required tripId parameter'
-      });
+    if (!tripId || typeof tripId !== 'string' || tripId.trim() === '') {
+      return res.status(400).json({ error: 'tripId is required.' });
     }
 
-    logger.info('Evaluating ML ETA request with ownership enforcement', { userId, tripId });
+    // Sanitize before interpolating into the PostgREST filter (see sanitizeTripId).
+    const safeTripId = sanitizeTripId(tripId);
+    if (!safeTripId) {
+      return res.status(400).json({ error: 'tripId contains invalid characters.' });
+    }
 
-    // FIX: Use user-scoped client so RLS enforces ownership / participation
-    const userSupabase = createUserClient(req.token);
-
-    // 1. Fetch trip ensuring the user has access (via RLS or explicit ownership check)
-    const { data: trip, error: tripErr } = await userSupabase
+    // Resolve the trip by primary key or display id, then its linked order for
+    // the drop coordinates that define the remaining route.
+    const dbClient = supabaseAdmin || (typeof createUserClient === 'function' ? createUserClient(req.token) : supabase);
+    const { data: trip, error: tripErr } = await dbClient
       .from('trips')
-      .select('id, trip_display_id, order_id, customer_id, driver_id')
-      .or(`id.eq.${tripId},trip_display_id.eq.${tripId}`)
+      .select('id, trip_display_id, order_id')
+      .or(`id.eq.${safeTripId},trip_display_id.eq.${safeTripId}`)
       .maybeSingle();
 
-    if (tripErr || !trip) {
-      return res.status(404).json({
-        success: false,
-        error: 'Trip not found or access denied'
-      });
+    if (tripErr) {
+      logger.error('[MlEta] Failed to resolve trip:', tripErr);
+      return res.status(500).json({ error: 'Failed to resolve trip.' });
+    }
+    if (!trip) {
+      return res.status(404).json({ error: 'Trip not found.' });
     }
 
-    // Additional explicit guard for non-admin roles
-    if (userRole !== 'admin' && trip.customer_id !== userId && trip.driver_id !== userId) {
-      logger.warn('Unauthorized attempt to access trip ETA', { userId, tripId });
-      return res.status(403).json({
-        success: false,
-        error: 'Forbidden: You do not have permission to view ETA for this trip'
-      });
+    let order = null;
+    if (trip.order_id) {
+      const { data: orderRes, error: orderErr } = await dbClient
+        .from('orders')
+        .select('pickup_lat, pickup_lng, drop_lat, drop_lng, customer_id, driver_id')
+        .eq('id', trip.order_id)
+        .maybeSingle();
+
+      if (orderErr) {
+        logger.error('[MlEta] Failed to resolve order for trip:', orderErr);
+        return res.status(500).json({ error: 'Failed to resolve order.' });
+      }
+      order = orderRes;
     }
 
-    // 2. Fetch linked order coordinates securely
-    const { data: orderRes, error: orderErr } = await userSupabase
-      .from('orders')
-      .select('pickup_lat, pickup_lng, drop_lat, drop_lng')
-      .eq('id', trip.order_id)
-      .maybeSingle();
-
-    if (orderErr || !orderRes) {
-      return res.status(404).json({
-        success: false,
-        error: 'Linked order details not found'
-      });
+    if (!order || !order.drop_lat || !order.drop_lng) {
+      return res.status(422).json({ error: 'Trip has no destination coordinates for ETA.' });
     }
 
-    // Calculation logic for ETA, distance, and route type...
-    const etaData = {
-      tripId: trip.id,
-      trip_display_id: trip.trip_display_id,
-      eta_minutes: 25, // Mock / ML engine result
-      confidence_interval: '±3 min',
-      distance_km: 14.5,
-      route_type: 'fastest',
-      source: 'ml'
-    };
+    if (req.user && req.user.role !== 'admin') {
+      const isOwner =
+        order.customer_id === req.user.id || order.driver_id === req.user.id;
+      if (!isOwner) {
+        return res.status(404).json({ error: 'Trip not found.' });
+      }
+    }
 
-    return res.status(200).json({
-      success: true,
-      data: etaData
-    });
+    const currentLat = parseCoord(lat, -90, 90);
+    const currentLng = parseCoord(lng, -180, 180);
+
+    const latProvided = lat !== undefined && lat !== null && lat !== '';
+    const lngProvided = lng !== undefined && lng !== null && lng !== '';
+
+    if (latProvided !== lngProvided) {
+      return res.status(400).json({ error: 'Both lat and lng must be provided together.' });
+    }
+
+    let positionSource = 'pickup';
+    let distanceKm;
+    if (latProvided) {
+      if (currentLat === null || currentLng === null) {
+        return res.status(400).json({ error: 'Invalid lat/lng: lat must be within [-90, 90] and lng within [-180, 180].' });
+      }
+      if (currentLat === 0 && currentLng === 0) {
+        return res.status(422).json({ error: 'lat/lng at (0,0) is not a valid live position.' });
+      }
+      positionSource = 'live';
+      distanceKm = haversineKm(currentLat, currentLng, Number(order.drop_lat), Number(order.drop_lng));
+    } else {
+      distanceKm = haversineKm(Number(order.pickup_lat), Number(order.pickup_lng), Number(order.drop_lat), Number(order.drop_lng));
+    }
+
+    const now = new Date();
+    const routeType = distanceKm > 20 ? 'highway' : 'city';
+
+    try {
+      const prediction = await predictEta({
+        routeDistance: distanceKm,
+        timeOfDay: now.getHours(),
+        dayOfWeek: now.getDay(),
+        routeType,
+        historicalSpeed: routeType === 'highway' ? 55 : 40,
+      });
+
+      return res.json({
+        tripId: trip.trip_display_id || trip.id,
+        eta_minutes: prediction.eta_minutes,
+        confidence_interval: prediction.confidence_interval,
+        distance_km: Math.round(distanceKm * 100) / 100,
+        route_type: routeType,
+        source: 'ml',
+        position_source: positionSource,
+      });
+    } catch (mlErr) {
+      logger.warn('[MlEta] ML ETA prediction failed:', mlErr.message);
+      return res.status(503).json({ error: mlErr.message });
+    }
   } catch (err) {
-    logger.error('Failed to compute ML ETA', { error: err.message, stack: err.stack });
-    return res.status(500).json({
-      success: false,
-      error: 'Internal server error while computing ETA'
-    });
+    logger.error('Internal Server Error in GET /api/ml/eta:', err);
+    return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
-export default router;
-const router = express.Router();
 
 /**
  * @swagger
@@ -498,5 +535,156 @@ router.post(
     }
   }
 );
+// ============================================================================
+// ML PROXY LAYER & FAILURE PATH HANDLING
+// ============================================================================
+const ML_BASE_URL = process.env.ML_SERVICE_URL || process.env.ML_ENGINE_URL || 'http://localhost:8000';
+const ML_API_KEY = process.env.ML_API_KEY || '';
+const ML_REQUEST_TIMEOUT_MS = Number(process.env.ML_REQUEST_TIMEOUT_MS) || 5000;
+
+function getMlHeaders() {
+  return {
+    'Content-Type': 'application/json',
+    ...(ML_API_KEY ? { 'X-API-Key': ML_API_KEY } : {}),
+  };
+}
+
+/**
+ * Proxy helper with strict failure path handling:
+ * - 503 { error: 'ML_SERVICE_UNAVAILABLE' } when FastAPI is down/unreachable or returns 503
+ * - 400 with error detail when FastAPI returns 422 validation error
+ * - 502 { error: 'ML_INVALID_SCHEMA' } when FastAPI returns an unexpected schema
+ * - 200 on success
+ */
+async function proxyMlRequest(req, res, { path, body, validateSchema, transformResponse }) {
+  try {
+    const targetUrl = `${ML_BASE_URL}${path}`;
+    const response = await axios.post(targetUrl, body || req.body, {
+      headers: getMlHeaders(),
+      timeout: ML_REQUEST_TIMEOUT_MS,
+    });
+
+    const data = response.data;
+
+    if (validateSchema && !validateSchema(data)) {
+      logger.warn({ path, data }, '[ML Proxy] FastAPI returned unexpected schema');
+      return res.status(502).json({
+        error: 'ML_INVALID_SCHEMA',
+        message: 'FastAPI returned an unexpected response schema',
+      });
+    }
+
+    const payload = transformResponse ? transformResponse(data) : data;
+    return res.status(200).json(payload);
+  } catch (err) {
+    if (err.response) {
+      const status = err.response.status;
+      if (status === 422) {
+        logger.warn({ path, detail: err.response.data }, '[ML Proxy] FastAPI 422 validation error');
+        return res.status(400).json({
+          error: 'Validation failed',
+          detail: err.response.data?.detail || err.response.data,
+        });
+      }
+      if (status === 503) {
+        logger.error({ path }, '[ML Proxy] FastAPI 503 Service Unavailable');
+        return res.status(503).json({
+          error: 'ML_SERVICE_UNAVAILABLE',
+          message: 'ML prediction service is unavailable',
+        });
+      }
+      logger.error({ path, status, data: err.response.data }, '[ML Proxy] FastAPI response error');
+      return res.status(status).json(err.response.data || { error: 'ML_SERVICE_ERROR' });
+    }
+
+    // Network / unreachable error (ECONNREFUSED, ENOTFOUND, timeout, etc.)
+    logger.error({ path, message: err.message }, '[ML Proxy] FastAPI service unreachable');
+    return res.status(503).json({
+      error: 'ML_SERVICE_UNAVAILABLE',
+      message: 'ML prediction service is currently unreachable',
+    });
+  }
+}
+
+/**
+ * POST /api/ml/eta
+ * Proxies ETA prediction to FastAPI /predict/eta.
+ * Validates schema, returns { eta_minutes, confidence }
+ */
+router.post('/eta', authenticate, userLimiter, async (req, res) => {
+  return proxyMlRequest(req, res, {
+    path: '/predict/eta',
+    validateSchema: (data) => {
+      if (!data || typeof data !== 'object') return false;
+      return typeof data.eta_minutes === 'number';
+    },
+    transformResponse: (data) => {
+      return {
+        eta_minutes: data.eta_minutes,
+        confidence: data.confidence !== undefined
+          ? data.confidence
+          : (data.confidence_interval?.lower !== undefined ? 0.9 : 0.85),
+        ...data,
+      };
+    },
+  });
+});
+
+/**
+ * POST /api/ml/pricing
+ * Proxies price prediction to FastAPI /predict/price.
+ * Validates OpenAPI schema (PricePredictOutput: estimated_price, min_price, max_price, currency).
+ */
+router.post('/pricing', authenticate, userLimiter, async (req, res) => {
+  return proxyMlRequest(req, res, {
+    path: '/predict/price',
+    validateSchema: (data) => {
+      if (!data || typeof data !== 'object') return false;
+      return typeof data.estimated_price === 'number';
+    },
+    transformResponse: (data) => {
+      return {
+        currency: 'INR',
+        min_price: data.min_price !== undefined ? data.min_price : Number((data.estimated_price * 0.9).toFixed(2)),
+        max_price: data.max_price !== undefined ? data.max_price : Number((data.estimated_price * 1.1).toFixed(2)),
+        ...data,
+      };
+    },
+  });
+});
+
+const MAX_VRP_PAYLOAD_BYTES = 64 * 1024; // 64 KB
+const MAX_VRP_STOPS = 50;
+
+/**
+ * POST /api/ml/vrp
+ * Proxies VRP route optimization to FastAPI /optimise/packing.
+ * Enforces payload size limit before forwarding.
+ */
+router.post('/vrp', authenticate, userLimiter, async (req, res) => {
+  const rawContentLength = req.headers['content-length'];
+  const payloadBytes = rawContentLength
+    ? parseInt(rawContentLength, 10)
+    : Buffer.byteLength(JSON.stringify(req.body || {}));
+
+  const stops = req.body?.stops || req.body?.delivery_addresses || req.body?.packages;
+  const stopCount = Array.isArray(stops) ? stops.length : 0;
+
+  if (payloadBytes > MAX_VRP_PAYLOAD_BYTES || stopCount > MAX_VRP_STOPS) {
+    logger.warn({ payloadBytes, stopCount }, '[ML Proxy] VRP payload too large');
+    return res.status(413).json({
+      error: 'PAYLOAD_TOO_LARGE',
+      message: 'VRP payload exceeds allowed limit',
+    });
+  }
+
+  return proxyMlRequest(req, res, {
+    path: '/optimise/packing',
+    validateSchema: (data) => {
+      if (!data || typeof data !== 'object') return false;
+      return true;
+    },
+  });
+});
 
 export default router;

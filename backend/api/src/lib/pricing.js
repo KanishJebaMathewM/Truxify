@@ -46,33 +46,7 @@ export function sanitizePrice(value) {
   if (!Number.isFinite(num) || num < 0) return MIN_FREIGHT_PAISa;
   return Math.round(Math.min(MAX_FREIGHT_PAISa, num));
 }
-// backend/api/src/lib/pricing.js (Excerpt)
 
-const DEFAULTS = {
-  BASE_FREIGHT: 50.0,
-  TOLL_ESTIMATE: 15.0,
-  PLATFORM_FEE: 5.0
-};
-
-/**
- * Helper to safely parse numeric environment variables,
- * treating empty or whitespace-only strings as unset (falling back to default).
- */
-function parseEnvNumber(envValue, defaultValue) {
-  if (envValue === undefined || envValue === null || String(envValue).trim() === '') {
-    return defaultValue;
-  }
-  const parsed = Number(envValue);
-  return Number.isNaN(parsed) ? defaultValue : parsed;
-}
-
-export function readRateCard() {
-  return {
-    baseFreight: parseEnvNumber(process.env.BASE_FREIGHT, DEFAULTS.BASE_FREIGHT),
-    tollEstimate: parseEnvNumber(process.env.TOLL_ESTIMATE, DEFAULTS.TOLL_ESTIMATE),
-    platformFee: parseEnvNumber(process.env.PLATFORM_FEE, DEFAULTS.PLATFORM_FEE)
-  };
-}
 const EARTH_RADIUS_KM = 6371.0088;
 
 // Pricing constants (all amounts in paisa unless noted)

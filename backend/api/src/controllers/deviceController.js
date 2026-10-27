@@ -5,37 +5,6 @@ import { AppError, UnauthorizedError, ValidationError } from '../utils/errors.js
 import notificationService from '../services/notificationService.js';
 
 const VALID_PLATFORMS = ['android', 'ios', 'web'];
-// backend/api/src/controllers/deviceController.js (Excerpt)
-
-async function registerDevice(req, res, next) {
-  try {
-    const { userId, fcmToken, deviceInfo } = req.body;
-
-    if (!userId || !fcmToken) {
-      return res.status(400).json({
-        success: false,
-        error: 'INVALID_REQUEST',
-        message: 'userId and fcmToken are required.'
-      });
-    }
-
-    // 1. Save or update device in user_devices table
-    await deviceService.saveUserDevice(userId, fcmToken, deviceInfo);
-
-    // 2. Synchronize fcm_token in profiles table BEFORE sending response
-    await profileService.updateProfileFcmToken(userId, fcmToken);
-
-    // 3. Return success response only after both operations succeed
-    return res.status(200).json({
-      success: true,
-      message: 'Device registered and profile synchronized successfully.'
-    });
-  } catch (error) {
-    next(error);
-  }
-}
-
-export { registerDevice };
 function validateFcmToken(token) {
   if (!token || typeof token !== 'string') return 'fcmToken must be a non-empty string';
   if (token.length < 10 || token.length > 4096) return 'fcmToken length must be between 10 and 4096';

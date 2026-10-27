@@ -164,6 +164,13 @@ import { setupSwagger } from './config/swagger.js';
 import { correlationIdMiddleware } from './middleware/correlationId.js';
 import { requestCacheMiddleware } from './middleware/requestCacheMiddleware.js';
 import { requireJsonContent } from './middleware/contentType.js';
+import {
+  timeoutMiddleware,
+  vrpTimeoutMiddleware,
+  demandHeatmapTimeoutMiddleware,
+  slowRequestLoggerMiddleware,
+  timeoutErrorHandler,
+} from './middleware/timeout.js';
 import { initSentry, flushSentry, sentryErrorHandler, sentryRequestHandler, captureException } from './middleware/sentry.js';
 import {
   startEscrowRefundReconciliation,
@@ -431,6 +438,12 @@ app.use(requireJsonContent);
 
 app.use(localeMiddleware());
 
+// Request timeout & slow request monitoring
+app.use(slowRequestLoggerMiddleware);
+app.use('/api/ml/vrp', vrpTimeoutMiddleware);
+app.use('/api/ml/demand-heatmap', demandHeatmapTimeoutMiddleware);
+app.use(timeoutMiddleware);
+
 // Rate Limiting
 app.use('/api', verifyJWT);
 app.use('/api/health', healthLimiter);
@@ -630,6 +643,7 @@ app.use((err, req, res, next) => {
   next(err);
 });
 
+app.use(timeoutErrorHandler);
 app.use(notFound);
 app.use(sentryErrorHandler());
 app.use(errorHandler);

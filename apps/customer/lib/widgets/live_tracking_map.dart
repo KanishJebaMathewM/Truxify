@@ -67,6 +67,15 @@ class _LiveTrackingMapState extends State<LiveTrackingMap> {
           urlTemplate: AppTheme.getMapTileUrl(context),
           userAgentPackageName: 'com.truxify.customer',
         ),
+        RichAttributionWidget(
+          attributions: [
+            TextSourceAttribution(
+              Theme.of(context).brightness == Brightness.dark
+                  ? '© OpenStreetMap contributors, © CARTO'
+                  : '© OpenStreetMap contributors',
+            ),
+          ],
+        ),
         MarkerLayer(
           markers: [
             Marker(

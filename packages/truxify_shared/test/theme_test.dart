@@ -45,6 +45,9 @@ void main() {
       expect(dark.scaffoldBackgroundColor, AppTheme.darkBackground);
       expect(dark.colorScheme.surface, AppTheme.darkSurface);
       expect(dark.colorScheme.primary, AppTheme.primaryAccent);
+
+      expect(light.segmentedButtonTheme.style, isNotNull);
+      expect(dark.segmentedButtonTheme.style, isNotNull);
     });
   });
 
@@ -84,6 +87,19 @@ void main() {
 
       expect(provider.themeMode, ThemeMode.light);
       expect(provider.isInitialized, isTrue);
+    });
+
+    test('loadThemeMode does not overwrite user choice made while loading', () async {
+      SharedPreferences.setMockInitialValues({'app_theme_mode': 'light'});
+
+      final provider = ThemeProvider(autoLoad: false);
+      await provider.setThemeMode(ThemeMode.dark);
+
+      // Now late load happens
+      await provider.loadThemeMode();
+
+      // Should retain the user's explicit choice (dark)
+      expect(provider.themeMode, ThemeMode.dark);
     });
 
     test('toggleTheme cycles through ThemeMode states when context is null', () async {

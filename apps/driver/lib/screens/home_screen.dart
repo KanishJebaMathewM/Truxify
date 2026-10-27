@@ -1433,6 +1433,15 @@ class _HomeScreenState extends State<HomeScreen> {
             urlTemplate: AppTheme.getMapTileUrl(context),
             userAgentPackageName: 'com.truxify.driver',
           ),
+          RichAttributionWidget(
+            attributions: [
+              TextSourceAttribution(
+                Theme.of(context).brightness == Brightness.dark
+                    ? '© OpenStreetMap contributors, © CARTO'
+                    : '© OpenStreetMap contributors',
+              ),
+            ],
+          ),
           if (_buildHeatmapLayer() != null) _buildHeatmapLayer()!,
         ],
       );
@@ -1470,6 +1479,15 @@ class _HomeScreenState extends State<HomeScreen> {
             TileLayer(
               urlTemplate: AppTheme.getMapTileUrl(context),
               userAgentPackageName: 'com.truxify.driver',
+            ),
+            RichAttributionWidget(
+              attributions: [
+                TextSourceAttribution(
+                  Theme.of(context).brightness == Brightness.dark
+                      ? '© OpenStreetMap contributors, © CARTO'
+                      : '© OpenStreetMap contributors',
+                ),
+              ],
             ),
             if (_buildHeatmapLayer() != null) _buildHeatmapLayer()!,
             PolylineLayer(

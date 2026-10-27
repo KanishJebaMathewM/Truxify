@@ -16,8 +16,6 @@ import 'screens/past_trips_screen.dart';
 import 'package:provider/provider.dart';
 import 'providers/text_scale_provider.dart';
 import 'models/app_models.dart';
-import 'controllers/app_controller.dart';
-import 'theme/app_theme.dart';
 import 'widgets/app_page_route.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 

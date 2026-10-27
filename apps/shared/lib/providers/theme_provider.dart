@@ -9,6 +9,7 @@ class ThemeProvider extends ChangeNotifier {
 
   ThemeMode _themeMode = ThemeMode.system;
   bool _isInitialized = false;
+  bool _userSelected = false;
 
   ThemeProvider({bool autoLoad = true}) {
     if (autoLoad) {
@@ -36,8 +37,9 @@ class ThemeProvider extends ChangeNotifier {
 
   /// Sets the theme mode, notifies listeners, and persists to SharedPreferences.
   Future<void> setThemeMode(ThemeMode mode) async {
-    if (_themeMode == mode) return;
+    if (_themeMode == mode && (_isInitialized || _userSelected)) return;
 
+    _userSelected = true;
     _themeMode = mode;
     notifyListeners();
 
@@ -76,14 +78,18 @@ class ThemeProvider extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       final savedModeStr = prefs.getString(_prefKey);
-      if (savedModeStr != null) {
+      if (_userSelected) {
+        // Keep the mode the user selected while loading.
+      } else if (savedModeStr != null) {
         _themeMode = _modeFromString(savedModeStr);
       } else {
         _themeMode = ThemeMode.system;
       }
     } catch (e) {
       debugPrint('[ThemeProvider] Error loading theme mode: $e');
-      _themeMode = ThemeMode.system;
+      if (!_userSelected) {
+        _themeMode = ThemeMode.system;
+      }
     } finally {
       _isInitialized = true;
       notifyListeners();

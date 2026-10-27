@@ -144,14 +144,12 @@ class AppTheme {
         unselectedItemColor: lightTextSecondary,
       ),
       segmentedButtonTheme: SegmentedButtonThemeData(
-        style: ButtonStyle(
-          selectedBackgroundColor: WidgetStateProperty.all(primaryAccent),
-          selectedForegroundColor: WidgetStateProperty.all(Colors.white),
-          foregroundColor: WidgetStateProperty.all(lightTextPrimary),
-          backgroundColor: WidgetStateProperty.all(lightSurface),
-          side: WidgetStateProperty.all(
-            const BorderSide(color: lightBorder, width: 1),
-          ),
+        style: SegmentedButton.styleFrom(
+          selectedBackgroundColor: primaryAccent,
+          selectedForegroundColor: Colors.white,
+          foregroundColor: lightTextPrimary,
+          backgroundColor: lightSurface,
+          side: const BorderSide(color: lightBorder, width: 1),
         ),
       ),
     );
@@ -246,14 +244,12 @@ class AppTheme {
         unselectedItemColor: darkTextSecondary,
       ),
       segmentedButtonTheme: SegmentedButtonThemeData(
-        style: ButtonStyle(
-          selectedBackgroundColor: WidgetStateProperty.all(primaryAccent),
-          selectedForegroundColor: WidgetStateProperty.all(Colors.white),
-          foregroundColor: WidgetStateProperty.all(darkTextPrimary),
-          backgroundColor: WidgetStateProperty.all(darkSurface),
-          side: WidgetStateProperty.all(
-            const BorderSide(color: darkBorder, width: 1),
-          ),
+        style: SegmentedButton.styleFrom(
+          selectedBackgroundColor: primaryAccent,
+          selectedForegroundColor: Colors.white,
+          foregroundColor: darkTextPrimary,
+          backgroundColor: darkSurface,
+          side: const BorderSide(color: darkBorder, width: 1),
         ),
       ),
     );

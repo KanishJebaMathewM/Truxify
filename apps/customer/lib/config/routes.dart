@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:truxify_shared/truxify_shared.dart';
+import '../controllers/app_controller.dart';
 
 // Mock Screens for Navigation Hierarchy
 class HomeScreen extends StatelessWidget {
@@ -47,23 +49,19 @@ class ProfileScreen extends StatelessWidget {
   Widget build(BuildContext context) => const Scaffold(body: Center(child: Text('Customer Profile')));
 }
 
-class SettingsScreen extends StatefulWidget {
+class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
   @override
-  State<SettingsScreen> createState() => _SettingsScreenState();
-}
-
-class _SettingsScreenState extends State<SettingsScreen> {
-  final ThemeProvider _themeProvider = ThemeProvider();
-
-  @override
   Widget build(BuildContext context) {
+    final controller = TruxifyScope.of(context);
+    final themeProvider = controller.themeProvider;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Settings & Preferences'),
         actions: [
-          ThemeToggle(provider: _themeProvider),
+          ThemeToggle(provider: themeProvider),
           const SizedBox(width: 8),
         ],
       ),
@@ -90,7 +88,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 16),
                   Center(
-                    child: ThemeSegmentedControl(provider: _themeProvider),
+                    child: ThemeSegmentedControl(provider: themeProvider),
                   ),
                 ],
               ),

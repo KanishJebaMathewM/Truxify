@@ -10,115 +10,45 @@ import { supabaseAdmin } from '../config/db.js';
  * @param {Object|number} [options] - Safe fallback value or options object ({ fallback, throwOnError })
  * @returns {number} Safe fuel efficiency value
  */
+// backend/api/src/services/fuelAdvisorService.js (Cleaned Excerpt)
+
+/**
+ * Calculates fuel efficiency based on distance and fuel amount.
+ * @param {number} distance - Distance traveled in kilometers or miles.
+ * @param {number} fuelAmount - Fuel consumed in liters or gallons.
+ * @param {Object} [options={}] - Additional calculation options (e.g., metric units).
+ * @returns {number} Calculated efficiency rating.
+ */
+export function calculateFuelEfficiency(distance, fuelAmount, options = {}) {
+  if (typeof distance !== 'number' || typeof fuelAmount !== 'number') {
+    throw new TypeError('Distance and fuel amount must be valid numbers.');
+  }
+
+  if (fuelAmount <= 0) {
+    if (options.strict) {
+      throw new Error('Fuel amount must be greater than zero.');
+    }
+    return 0.0;
+  }
+
+  if (distance < 0) {
+    throw new Error('Distance cannot be negative.');
+  }
+
+  const efficiency = distance / fuelAmount;
+  return Number(efficiency.toFixed(2));
+}
+
+export default {
+  calculateFuelEfficiency
+};
 export function calculateFuelEfficiency(distance, fuelAmount, options = {}) {
   const fallback = typeof options === 'number' ? options : (options?.fallback ?? 0);
   const throwOnError = typeof options === 'object' && options?.throwOnError === true;
 
   const numDistance = Number(distance);
   const numFuel = Number(fuelAmount);
-// backend/api/src/services/fuelAdvisorService.js (around lines 89-95)
 
-// Before:
-// const { data, error } = await db
-//   .from('trip_events')
-//   .select('payload, occurred_at')
-//   .in('status', ['active', 'in_progress'])
-//   ...
-
-// After:
-const { data, error } = await db
-  .from('trip_events')
-  .select('metadata, event_timestamp, event_type')
-  .eq('trip_id', tripId)
-  .eq('event_type', 'gpsUpdate')
-  .order('event_timestamp', { ascending: false })
-  .limit(50);
-  const { supabaseAdmin } = require('../config/db');
-
-class FuelAdvisorService {
-  /**
-   * Retrieves fuel recommendation and computes average engine load from trip events telemetry.
-   * @param {string} truckId 
-   * @returns {Object} Fuel recommendation and average engine load percentage
-   */
-  async getFuelRecommendation(truckId) {
-    try {
-      const avgEngineLoad = await this._getAverageEngineLoad(truckId);
-      
-      // Calculate fuel optimization recommendation based on real engine load telemetry
-      let recommendation = 'Optimal fuel efficiency maintained.';
-      if (avgEngineLoad > 75) {
-        recommendation = 'High engine load detected. Consider reducing acceleration and checking tire pressure.';
-      } else if (avgEngineLoad < 30) {
-        recommendation = 'Low engine load efficiency profile. Monitor idling times.';
-      }
-
-      return {
-        success: true,
-        truck_id: truckId,
-        average_engine_load_percent: avgEngineLoad,
-        recommendation,
-        timestamp: new Date().toISOString(),
-      };
-    } catch (error) {
-      logger.error({ err: error, truckId }, 'Error in FuelAdvisorService');
-      // Fallback response with default load on critical failure
-      return {
-        success: false,
-        truck_id: truckId,
-        average_engine_load_percent: 50,
-        recommendation: 'Unable to compute telemetry at this time. Using default baseline.',
-        error: error.message,
-      };
-    }
-  }
-
-  /**
-   * Internal helper to query trip_events and compute average engine load.
-   * Fixed #9914: queries 'metadata' and orders by 'event_timestamp'.
-   */
-  async _getAverageEngineLoad(truckId) {
-    try {
-      // Fetch recent trip events for the truck
-      const { data: events, error: eventsErr } = await supabaseAdmin
-        .from('trip_events')
-        .select('metadata, event_timestamp')
-        .eq('truck_id', truckId)
-        .eq('event_type', 'gpsUpdate')
-        .order('event_timestamp', { ascending: false })
-        .limit(50);
-
-      if (eventsErr || !events || events.length === 0) {
-        return 50; // Default baseline load if no telemetry exists
-      }
-
-      let totalLoad = 0;
-      let validCount = 0;
-
-      for (const event of events) {
-        // Read engine load safely from jsonb metadata column
-        const metadata = event.metadata || {};
-        const engineLoad = metadata.engineLoad ?? metadata.engine_load;
-
-        if (typeof engineLoad === 'number' && !isNaN(engineLoad)) {
-          totalLoad += engineLoad;
-          validCount++;
-        }
-      }
-
-      if (validCount === 0) {
-        return 50; // Default baseline load if telemetry lacks engine load metrics
-      }
-
-      return Math.round((totalLoad / validCount) * 100) / 100;
-    } catch (err) {
-      logger.error({ err, truckId }, 'Failed to calculate average engine load from trip_events');
-      return 50; // Fallback default load
-    }
-  }
-}
-
-module.exports = new FuelAdvisorService();
   if (
     distance == null ||
     fuelAmount == null ||

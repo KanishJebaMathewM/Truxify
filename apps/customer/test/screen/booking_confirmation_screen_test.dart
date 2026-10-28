@@ -215,5 +215,57 @@ void main() {
       expect(find.textContaining('could not verify'), findsOneWidget);
       expect(find.text('Check payment status'), findsOneWidget);
     });
+
+    testWidgets(
+        'hardware back button pops the booking confirmation screen instead of exiting app',
+        (tester) async {
+      await tester.pumpWidget(
+        TruxifyScope(
+          controller: TruxifyController(),
+          child: MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => BookingConfirmationScreen(
+                          draft: _draft,
+                          truck: _truck,
+                          orderService: mockOrderService,
+                          paymentRepository: mockPaymentRepository,
+                          addressRepository: mockAddressRepository,
+                          apiClient: mockApiClient,
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Open Booking Screen'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      // Open screen
+      await tester.tap(find.text('Open Booking Screen'));
+      await tester.pumpAndSettle();
+      expect(find.byType(BookingConfirmationScreen), findsOneWidget);
+      expect(find.byType(PopScope), findsOneWidget);
+
+      // Simulate Android hardware back button press
+      final dynamic widgetsBinding = tester.binding;
+      final bool handled = await widgetsBinding.handlePopRoute();
+      await tester.pumpAndSettle();
+
+      // Screen should pop back to the previous screen in the stack
+      expect(handled, isTrue);
+      expect(find.byType(BookingConfirmationScreen), findsNothing);
+      expect(find.text('Open Booking Screen'), findsOneWidget);
+    });
   });
 }
+

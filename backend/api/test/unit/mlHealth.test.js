@@ -55,4 +55,28 @@ describe('mlHealth', () => {
     const result = await mlHealth({ timeoutMs: 5000 });
     expect(result.status).toBe(HealthStatus.UNHEALTHY);
   });
+
+  it('aborts the request and reports unhealthy when the body read exceeds the deadline', async () => {
+    let capturedSignal;
+    global.fetch = vi.fn().mockImplementation((_url, options) => {
+      capturedSignal = options.signal;
+      return Promise.resolve({
+        ok: true,
+        json: () => new Promise((_resolve, reject) => {
+          options.signal.addEventListener('abort', () => {
+            const err = new Error('body aborted');
+            err.name = 'AbortError';
+            reject(err);
+          });
+        }),
+      });
+    });
+    process.env.ML_ENGINE_URL = 'http://ml:8001';
+
+    const result = await mlHealth({ timeoutMs: 25 });
+
+    expect(result.status).toBe(HealthStatus.UNHEALTHY);
+    expect(result.message).toContain('timeout');
+    expect(capturedSignal.aborted).toBe(true);
+  });
 });

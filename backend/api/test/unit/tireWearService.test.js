@@ -133,3 +133,66 @@ describe('tireWearService', () => {
     expect(result.needsReplacement).toBe(false);
   });
 });
+
+// ── calculateTripTireDegradation (added by the tire-wear suite PR) ──────────
+const {
+  calculateTripTireDegradation,
+  TIRE_LIFESPAN_KM,
+  INITIAL_TREAD_DEPTH_MM,
+  LEGAL_MIN_TREAD_STEER_MM,
+  LEGAL_MIN_TREAD_OTHER_MM,
+} = await import('../../src/services/tireWearService.js');
+
+describe('calculateTripTireDegradation', () => {
+  const base = { distanceKm: 1000, loadWeightKg: 5000, roadCondition: 'good', weather: 'clear', axleType: 'drive' };
+
+  it('rejects invalid distance/load', () => {
+    expect(() => calculateTripTireDegradation({ ...base, distanceKm: -5 })).toThrow(RangeError);
+    expect(() => calculateTripTireDegradation({ ...base, distanceKm: 'far' })).toThrow(RangeError);
+    expect(() => calculateTripTireDegradation({ ...base, loadWeightKg: -1 })).toThrow(RangeError);
+  });
+
+  it('a baseline trip wears proportionally to distance (80k km lifespan)', () => {
+    const res = calculateTripTireDegradation({ ...base, loadWeightKg: 0 }); // zero load isolates the distance factor
+    expect(res).toHaveProperty('endingTreadDepthMm');
+    expect(res.treadLossMm).toBeCloseTo(0.2, 1);
+    expect(res.endingTreadDepthMm).toBeLessThan(INITIAL_TREAD_DEPTH_MM);
+  });
+
+  it('rough roads and extreme heat increase wear/hazard multiplicatively', () => {
+    const good = calculateTripTireDegradation(base);
+    const rough = calculateTripTireDegradation({ ...base, roadCondition: 'poor' });
+    const worn = { ...base, currentTreadDepthMm: 5.0 };
+    const hot = calculateTripTireDegradation({ ...worn, weather: 'extreme_heat' });
+    const wornClear = calculateTripTireDegradation(worn);
+    expect(rough.endingTreadDepthMm).toBeLessThan(good.endingTreadDepthMm);
+    expect(hot.blowoutHazardProbability).toBeGreaterThan(wornClear.blowoutHazardProbability);
+  });
+
+  it('unknown road/weather/axle fall back to the baseline factors', () => {
+    const unknown = calculateTripTireDegradation({ ...base, roadCondition: 'lunar', weather: 'meteor', axleType: 'hover' });
+    const good = calculateTripTireDegradation(base);
+    expect(unknown.endingTreadDepthMm).toBeCloseTo(good.endingTreadDepthMm, 6);
+  });
+
+  it('steer axle uses the stricter legal minimum', () => {
+    expect(LEGAL_MIN_TREAD_STEER_MM).toBeGreaterThan(LEGAL_MIN_TREAD_OTHER_MM);
+    const nearBald = { ...base, currentTreadDepthMm: 2.0 };
+    const steer = calculateTripTireDegradation({ ...nearBald, axleType: 'steer' });
+    const drive = calculateTripTireDegradation({ ...nearBald, axleType: 'drive' });
+    expect(steer.isBelowLegalLimit).toBe(true);
+    expect(drive.isBelowLegalLimit).toBe(false);
+  });
+
+  it('overloaded trucks (>20t) carry a higher blowout hazard', () => {
+    const normal = calculateTripTireDegradation({ ...base, currentTreadDepthMm: 6.0 });
+    const overloaded = calculateTripTireDegradation({ ...base, loadWeightKg: 25000, currentTreadDepthMm: 6.0 });
+    expect(overloaded.blowoutHazardProbability).toBeGreaterThan(normal.blowoutHazardProbability);
+  });
+
+  it('tread never goes negative and hazard probability is capped at 1', () => {
+    const res = calculateTripTireDegradation({ ...base, distanceKm: 200000, currentTreadDepthMm: 1.0, loadWeightKg: 30000, weather: 'extreme_heat' });
+    expect(res.endingTreadDepthMm).toBe(0);
+    expect(res.blowoutHazardProbability).toBeLessThanOrEqual(1.0);
+  });
+});

@@ -290,14 +290,22 @@ router.get('/', authenticate, userLimiter, requirePolicy('demand:view-heatmap'),
     }
 
     // Generate intelligent route recommendations and earnings potential based on ML predictions
-    const baseEarningRate = demandConfig.baseEarningRate; // per km estimate
-    const multiplier = mlPrediction.predicted_demand ?? 0.5;
-    const estimatedEarningPotential = Number((baseEarningRate * (1 + multiplier)).toFixed(2));
+    const baseEarningRate = Number(demandConfig.baseEarningRate);
+    const rawPrediction = mlPrediction?.predicted_demand;
+    const rawMultiplier = rawPrediction === null || rawPrediction === undefined ? NaN : Number(rawPrediction);
+    // The ML gateway is a remote dependency. A null, NaN, string, or
+    // out-of-range prediction must not turn the earning estimate and demand
+    // forecast into null/NaN values in the API response.
+    const multiplier = Number.isFinite(rawMultiplier) && rawMultiplier >= 0 && rawMultiplier <= 1
+      ? rawMultiplier
+      : 0.5;
+    const safeBaseRate = Number.isFinite(baseEarningRate) && baseEarningRate >= 0 ? baseEarningRate : 0;
+    const estimatedEarningPotential = Number((safeBaseRate * (1 + multiplier)).toFixed(2));
 
     const routeSuggestions = (filteredLoads || []).slice(0, 3).map((l, idx) => ({
       id: idx + 1,
       recommendedRoute: `${l.pickup_address || 'Current Location'} -> ${l.drop_address || 'High Demand Zone'}`,
-      estimatedEarnings: estimatedEarningPotential * (demandConfig.routeMultiplierBase + idx * demandConfig.routeMultiplierStep),
+      estimatedEarnings: Number((estimatedEarningPotential * (demandConfig.routeMultiplierBase + idx * demandConfig.routeMultiplierStep)).toFixed(2)),
       confidenceScore: Number((multiplier * 100).toFixed(1))
     }));
 

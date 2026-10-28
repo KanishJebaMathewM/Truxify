@@ -65,6 +65,51 @@ import { checkEscrowHealth } from '../services/escrow.js';
 import logger from '../middleware/logger.js';
 import { createDefaultAggregator } from '../core/health/index.js';
 import { captureDebugException } from '../middleware/sentry.js';
+<<<<<<< HEAD
+=======
+// backend/api/src/routes/healthRoutes.js
+
+import { Router } from 'express';
+import logger from '../lib/logger.js'; // Adjust relative path per module structure
+
+const router = Router();
+
+router.get('/health', (req, res) => {
+  try {
+    const healthStatus = {
+      status: 'UP',
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString()
+    };
+
+    // Replace console.log with structured logger call
+    logger.info('Health check executed successfully', {
+      route: '/health',
+      uptime: healthStatus.uptime,
+      status: healthStatus.status
+    });
+
+    res.status(200).json(healthStatus);
+  } catch (err) {
+    // Replace console.error with structured error logger call
+    logger.error('Health check probe failed', {
+      route: '/health',
+      error: err,
+      message: err.message,
+      stack: err.stack
+    });
+
+    res.status(500).json({
+      status: 'DOWN',
+      error: 'Internal health check failure'
+    });
+  }
+});
+
+import express from 'express';
+import * as Sentry from '@sentry/node';
+import logger from '../middleware/logger.js';
+>>>>>>> upstream/main
 
 const router = express.Router();
 
@@ -82,6 +127,71 @@ function withTimeout(promise) {
     }),
   ]).finally(() => clearTimeout(timer));
 }
+// backend/api/src/routes/healthRoutes.js
+
+import express from 'express';
+import logger from '../middleware/logger.js';
+import db from '../config/database.js';
+import redisClient from '../config/redis.js';
+
+const router = express.Router();
+
+/**
+ * GET /api/health
+ * Comprehensive health check endpoint verifying database and Redis connectivity.
+ * Updated per issue #12878 to use structured logger instead of console.log.
+ */
+router.get('/health', async (req, res) => {
+  const healthStatus = {
+    status: 'UP',
+    timestamp: new Date().toISOString(),
+    services: {
+      database: 'UNKNOWN',
+      redis: 'UNKNOWN'
+    }
+  };
+
+  try {
+    // Check Database connectivity
+    await db.raw('SELECT 1');
+    healthStatus.services.database = 'UP';
+  } catch (dbErr) {
+    healthStatus.services.database = 'DOWN';
+    healthStatus.status = 'DEGRADED';
+    
+    // FIX: Replaced console.error with structured logger.error
+    logger.error('Health check database connectivity failure', {
+      error: dbErr.message,
+      stack: dbErr.stack
+    });
+  }
+
+  try {
+    // Check Redis connectivity
+    await redisClient.ping();
+    healthStatus.services.redis = 'UP';
+  } catch (redisErr) {
+    healthStatus.services.redis = 'DOWN';
+    healthStatus.status = 'DEGRADED';
+    
+    // FIX: Replaced console.error with structured logger.error
+    logger.error('Health check Redis connectivity failure', {
+      error: redisErr.message,
+      stack: redisErr.stack
+    });
+  }
+
+  // FIX: Replaced console.log with structured logger.info
+  logger.info('Health check endpoint executed', {
+    status: healthStatus.status,
+    services: healthStatus.services
+  });
+
+  const statusCode = healthStatus.status === 'UP' ? 200 : 503;
+  return res.status(statusCode).json(healthStatus);
+});
+
+export default router;
 
 async function checkSupabase() {
   // Probe through the service-role client: anon privileges on profiles are

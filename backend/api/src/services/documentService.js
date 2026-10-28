@@ -19,26 +19,34 @@ export const VALID_STATUS_TRANSITIONS = {
     expired: ['pending']
 };
 
+export class DocumentStorageUnavailableError extends Error {
+    constructor(cause) {
+        super('Document storage is unavailable. Please retry later.', { cause });
+        this.name = 'DocumentStorageUnavailableError';
+        this.status = 503;
+    }
+}
+
 /**
- * Resolves R2 storage client with dynamic fallback.
+ * Resolves the R2 storage client. A failed module load is a hard error: the
+ * upload must not be recorded in the database with a fabricated URL.
+ *
+ * @param {() => Promise<object>} [loader] - test seam for the dynamic import
+ * @returns {Promise<object>}
  */
-export const getR2Storage = async () => {
+export const getR2Storage = async (loader = () => import('./r2StorageService.js')) => {
     if (activeR2Storage) {
         return activeR2Storage;
     }
     try {
-        const mod = await import('./r2StorageService.js');
-        return mod.default || mod;
-    } catch {
-        return {
-            uploadToR2: async (file, key) => ({
-                success: true,
-                publicUrl: `https://r2.truxify.com/${key}`,
-                fileHash: 'mock-file-hash',
-                objectKey: key
-            }),
-            deleteDocument: async () => ({ success: true })
-        };
+        const mod = await loader();
+        const storage = mod?.default || mod;
+        if (!storage || typeof storage.uploadToR2 !== 'function') {
+            throw new Error('Storage module did not expose uploadToR2');
+        }
+        return storage;
+    } catch (err) {
+        throw new DocumentStorageUnavailableError(err);
     }
 };
 
@@ -278,5 +286,6 @@ export default {
     setSupabaseClientForTesting,
     setR2StorageServiceForTesting,
     resetClients,
-    getR2Storage
+    getR2Storage,
+    DocumentStorageUnavailableError
 };

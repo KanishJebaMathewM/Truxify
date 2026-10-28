@@ -110,7 +110,18 @@ router.post('/dispatch-action', authenticate, userLimiter, upload.single('file')
     let safeFilename = 'voice-dispatch.wav';
 
     if (file) {
-      validateAudioBuffer(file.buffer);
+      try {
+        validateAudioBuffer(file.buffer);
+      } catch (validationErr) {
+        if (validationErr instanceof AudioValidationError) {
+          logger.warn(
+            { userId: req.user?.id, declaredType: file.mimetype },
+            `[voice] Rejected dispatch upload: ${validationErr.message}`
+          );
+          return res.status(400).json({ error: validationErr.message });
+        }
+        throw validationErr;
+      }
       audioBuffer = file.buffer;
       safeFilename = sanitizeUploadFilename(file.originalname, 'voice-dispatch.wav');
     }

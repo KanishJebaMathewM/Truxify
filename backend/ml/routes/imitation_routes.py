@@ -20,9 +20,9 @@ hidden_dim = 256
 model = ImitationLearningModel(state_dim, action_dim, hidden_dim)
 
 class TrainRequest(BaseModel):
-    epochs: int = 100
-    batch_size: int = 32
-    data_size: int = 1000
+    epochs: int = Field(default=100, ge=1, le=200)
+    batch_size: int = Field(default=32, ge=1, le=1024)
+    data_size: int = Field(default=1000, ge=1, le=10000)
 
 @router.post("/train/bc")
 async def train_behavioral_cloning(request: TrainRequest):

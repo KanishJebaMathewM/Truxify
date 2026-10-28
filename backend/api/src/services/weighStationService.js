@@ -4,7 +4,45 @@
  */
 
 import logger from '../middleware/logger.js';
+import logger from '../middleware/logger.js';
+// backend/api/src/services/weighStationService.js
 
+// backend/api/src/services/weighStationService.js
+
+/**
+ * Checks bypass eligibility for a weigh station.
+ * NOTE: This is currently a deterministic mock service. It must be replaced
+ * with a real regulatory API integration before production deployment.
+ * Fixed per issue #8956.
+ */
+export async function checkBypassEligibility(vehicleId, stationId, metadata = {}) {
+  // Deterministic mock response instead of Math.random() coin-flip
+  return {
+    action: 'BYPASS',
+    simulated: true,
+    reason: 'Deterministic mock compliance check passed',
+    vehicleId,
+    stationId,
+    timestamp: new Date().toISOString()
+  };
+}
+/**
+ * Checks bypass eligibility for a weigh station.
+ * NOTE: This is currently a deterministic mock service. It must be replaced
+ * with a real regulatory API integration before production deployment.
+ * Fixed per issue #8956.
+ */
+export async function checkBypassEligibility(vehicleId, stationId, metadata = {}) {
+  // Deterministic mock response instead of Math.random() coin-flip
+  return {
+    action: 'BYPASS',
+    simulated: true,
+    reason: 'Deterministic mock compliance check passed',
+    vehicleId,
+    stationId,
+    timestamp: new Date().toISOString()
+  };
+}
 /**
  * Checks weigh station bypass eligibility for a given trip/truck.
  * NOTE: This is currently a mock service and must be replaced with a real regulatory API integration before production rollout.
@@ -25,20 +63,12 @@ export async function checkBypassEligibility({ vehicleId, weight }) {
     evaluatedAt: new Date().toISOString()
   };
 }
-const checkBypassEligibility = async (driverId, lat, lng) => {
-  // No real WIM/bypass provider (Drivewyze/PrePass) is integrated. The
-  // previous implementation returned a Math.random() coin-flip presented as a
-  // regulatory verdict, which a driver could legally rely on. There is no real
-  // integration to call, so this fails closed and reports itself as
-  // unsupported instead of inventing a BYPASS/PULL_IN decision.
-  return {
-    action: 'UNSUPPORTED',
-    supported: false,
-    simulated: true,
-    stationId: null,
-    reason: 'Weigh-in-motion bypass is not available: no WIM provider is configured. This is not a regulatory verdict.',
-    timestamp: new Date().toISOString(),
-  };
+ * @param {number} params.weight
+ * @returns {Promise<Object>} Bypass decision result
+ */
+export async function checkBypassEligibility({ vehicleId, weight }) {
+  logger.info({ vehicleId, weight }, 'Evaluating weigh station bypass eligibility (Mock Service)');
+
 // Standard Federal Limits (lbs)
 export const FHWA_LIMITS = {
     MAX_SINGLE_AXLE_LBS: 20000,

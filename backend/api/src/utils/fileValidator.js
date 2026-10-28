@@ -94,8 +94,17 @@ export const computeSHA256Hash = (buffer) => {
 export const sanitizeFileName = (originalName) => {
     const timestamp = Date.now();
     const randomString = crypto.randomBytes(4).toString('hex');
-    const extension = originalName.substring(originalName.lastIndexOf('.')).toLowerCase();
-    return `${timestamp}-${randomString}${extension}`;
+    if (!originalName || typeof originalName !== 'string') {
+        return `${timestamp}-${randomString}`;
+    }
+    const lastDot = originalName.lastIndexOf('.');
+    if (lastDot === -1 || lastDot === originalName.length - 1) {
+        return `${timestamp}-${randomString}`;
+    }
+    const rawExt = originalName.substring(lastDot).toLowerCase();
+    const cleanExt = rawExt.replace(/[^a-z0-9.]/g, '');
+    const validExt = /^\.[a-z0-9]+$/.test(cleanExt) ? cleanExt : '';
+    return `${timestamp}-${randomString}${validExt}`;
 };
 
 export default {

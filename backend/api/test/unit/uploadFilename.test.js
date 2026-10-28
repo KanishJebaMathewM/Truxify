@@ -1,6 +1,38 @@
 ﻿import { describe, it, expect, vi } from 'vitest'
 import { sanitizeUploadFilename, checkContentLength } from '../../src/lib/uploadFilename.js'
+// backend/api/test/unit/uploadFilename.test.js
 
+import { describe, expect, it, beforeEach } from 'vitest';
+import { sanitizeUploadFilename } from '../../src/utils/uploadFilename.js';
+
+describe('UploadFilename Sanitization Tests', () => {
+  it('should remove path traversal sequences and unsafe characters', () => {
+    const rawName = '../../etc/passwd_malicious#file!.jpg';
+    const sanitized = sanitizeUploadFilename(rawName);
+    
+    expect(sanitized).not.toContain('..');
+    expect(sanitized).not.toContain('/');
+    expect(sanitized).toMatch(/^[a-zA-Z0-9_\-\.]+$/);
+  });
+
+  it('should handle empty or whitespace filenames safely', () => {
+    expect(sanitizeUploadFilename('')).toBeDefined();
+    expect(sanitizeUploadFilename('   ')).toBeDefined();
+  });
+
+  // ==========================================
+  // Spec 18 test block (Duplicate import removed here)
+  // ==========================================
+  describe('Spec 18: Extension retention and length truncation', () => {
+    it('should preserve valid file extensions while truncating long names', () => {
+      const longName = 'a'.repeat(250) + '.png';
+      const sanitized = sanitizeUploadFilename(longName);
+
+      expect(sanitized.endsWith('.png')).toBe(true);
+      expect(sanitized.length).toBeLessThanOrEqual(100);
+    });
+  });
+});
 describe('uploadFilename utilities', () => {
   describe('sanitizeUploadFilename', () => {
     it('should return fallback for null, undefined, or empty input', () => {

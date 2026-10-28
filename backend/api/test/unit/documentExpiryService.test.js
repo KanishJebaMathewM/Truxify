@@ -11,7 +11,86 @@
  * - Background worker timer intervals, deduplication, and cleanup
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+// backend/api/test/unit/documentExpiryService.test.js
 
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { checkAndExpireDocuments } from '../../src/services/documentExpiryService.js';
+import supabaseAdmin from '../../src/config/supabase.js';
+
+// Mock Supabase admin client
+vi.mock('../../src/config/supabase.js', () => ({
+  default: {
+    from: vi.fn(),
+  },
+}));
+
+describe('documentExpiryService - checkAndExpireDocuments', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should successfully expire documents that have passed their expiry date', async () => {
+    const mockExpiredDocs = [
+      { id: 'doc-1', expiry_date: '2026-01-01', status: 'active' },
+      { id: 'doc-2', expiry_date: '2025-12-31', status: 'active' },
+    ];
+
+    // Mock Supabase query chain for select and update
+    const updateMock = vi.fn().mockResolvedValue({ data: mockExpiredDocs, error: null });
+    const inMock = vi.fn().mockReturnValue({ update: updateMock });
+    const lteMock = vi.fn().mockReturnValue({ in: inMock });
+    const selectMock = vi.fn().mockReturnValue({ lte: lteMock });
+
+    supabaseAdmin.from.mockReturnValue({
+      select: selectMock,
+    });
+
+    const result = await checkAndExpireDocuments();
+
+    expect(supabaseAdmin.from).toHaveBeenCalledWith('documents');
+    expect(selectMock).toHaveBeenCalledWith('id, expiry_date, status');
+    expect(result).toHaveProperty('success', true);
+    expect(result.expiredCount).toBe(2);
+  });
+
+  it('should handle cases where no documents are expired', async () => {
+    const selectMock = vi.fn().mockReturnValue({
+      lte: vi.fn().mockReturnValue({
+        in: vi.fn().mockReturnValue({
+          update: vi.fn().mockResolvedValue({ data: [], error: null }),
+        }),
+      }),
+    });
+
+    supabaseAdmin.from.mockReturnValue({
+      select: selectMock,
+    });
+
+    const result = await checkAndExpireDocuments();
+
+    expect(result).toHaveProperty('success', true);
+    expect(result.expiredCount).toBe(0);
+  });
+
+  it('should handle and return error if database query fails', async () => {
+    const selectMock = vi.fn().mockReturnValue({
+      lte: vi.fn().mockReturnValue({
+        in: vi.fn().mockReturnValue({
+          update: vi.fn().mockResolvedValue({ data: null, error: { message: 'Database connection failed' } }),
+        }),
+      }),
+    });
+
+    supabaseAdmin.from.mockReturnValue({
+      select: selectMock,
+    });
+
+    const result = await checkAndExpireDocuments();
+
+    expect(result).toHaveProperty('success', false);
+    expect(result.error).toBe('Database connection failed');
+  });
+});
 const mocks = vi.hoisted(() => ({
   supabaseAdmin: {
     from: vi.fn(),

@@ -25,7 +25,19 @@ import '../services/trip_service.dart';
 import '../services/sync_service.dart';
 import '../services/truck_repository.dart';
 import 'pod_screen.dart';
+// apps/driver/lib/screens/trips_screen.dart
 
+final tripItems = rawItems.map((item) {
+  // FIX: Place debugPrint before return so it executes correctly per item
+  debugPrint('Processing raw trip item: ${item.toString()}');
+
+  return TripItem(
+    customerName: item['customer_name']?.toString() ?? 'Unknown',
+    pickupLocation: item['pickup_location']?.toString() ?? '',
+    dropLocation: item['drop_location']?.toString() ?? '',
+    status: item['status']?.toString() ?? 'pending',
+  );
+}).toList();
 class TripsScreen extends StatefulWidget {
   const TripsScreen({super.key});
 

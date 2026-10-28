@@ -1,3 +1,70 @@
+// backend/api/src/services/escrow.js
+
+import logger from '../middleware/logger.js';
+
+/**
+ * Verifies an escrow deposit transaction.
+ * Restructured per issue #13485 to ensure all guards run in full sequence.
+ * 
+ * @param {Object} depositPayload - Transaction payload containing driver, amount, booking, and value data.
+ * @returns {Object} Verification result with success status and validation messages.
+ */
+export async function verifyEscrowDepositTransaction(depositPayload) {
+  if (!depositPayload) {
+    return { success: false, error: 'Missing deposit transaction payload' };
+  }
+
+  const { driverId, amount, bookingId, depositValue } = depositPayload;
+  const validationErrors = [];
+
+  // 1. Validate Driver Identity Guard
+  if (!driverId || typeof driverId !== 'string' || driverId.trim() === '') {
+    validationErrors.push('Invalid or missing driver identifier');
+  }
+
+  // 2. Validate Amount Guard
+  const parsedAmount = Number(amount);
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+    validationErrors.push('Invalid deposit amount: must be a positive finite number');
+  }
+
+  // 3. Validate Booking Association Guard
+  if (!bookingId || typeof bookingId !== 'string' || bookingId.trim() === '') {
+    validationErrors.push('Invalid or missing booking reference identifier');
+  }
+
+  // 4. Validate Transaction Value & Threshold Guard
+  const parsedValue = Number(depositValue);
+  if (!Number.isFinite(parsedValue) || parsedValue < parsedAmount) {
+    validationErrors.push('Deposit value guard failed: transaction value mismatch or below threshold');
+  }
+
+  // If any guard failed, reject the transaction and log validation failure
+  if (validationErrors.length > 0) {
+    logger.warn('Escrow deposit transaction verification failed validation guards', {
+      driverId,
+      bookingId,
+      errors: validationErrors
+    });
+
+    return {
+      success: false,
+      error: 'Deposit transaction failed safety validations',
+      details: validationErrors
+    };
+  }
+
+  logger.info('Escrow deposit transaction passed all verification guards successfully', {
+    driverId,
+    bookingId,
+    amount: parsedAmount
+  });
+
+  return {
+    success: true,
+    verifiedAmount: parsedAmount
+  };
+}
 class EscrowAmountMismatchError extends Error {
   constructor(expectedWei, actualWei) {
     super(`Escrow deposit amount mismatch: expected ${expectedWei} Wei, received ${actualWei} Wei.`);
@@ -5,7 +72,41 @@ class EscrowAmountMismatchError extends Error {
     this.code = 'ESCROW_AMOUNT_MISMATCH';
   }
 }
+// backend/api/src/services/escrow.js
 
+import { ethers } from 'ethers';
+import logger from '../middleware/logger.js';
+
+/**
+ * Updates the on-chain booking amount when a drop location is modified.
+ * Added per issue #11240.
+ */
+export async function escrowUpdateAmount(bookingId, newAmountWei) {
+  try {
+    logger.info('Initiating on-chain escrow booking amount update', { bookingId, newAmountWei });
+
+    const contract = getEscrowContractInstance();
+    const tx = await contract.updateBookingAmount(bookingId, newAmountWei);
+    const receipt = await tx.wait();
+
+    logger.info('Successfully updated on-chain escrow booking amount', {
+      bookingId,
+      txHash: receipt.transactionHash
+    });
+
+    return {
+      success: true,
+      txHash: receipt.transactionHash
+    };
+  } catch (err) {
+    logger.error('Failed to update on-chain escrow amount', {
+      error: err.message,
+      bookingId,
+      newAmountWei
+    });
+    throw err;
+  }
+}
 /**
  * Polygon Blockchain — Escrow Payment Service
  *
@@ -44,7 +145,68 @@ import logger from '../middleware/logger.js'
 import { measureExecution } from '../core/performanceMetrics.js'
 import { isEscrowPaused, escrowPausedResult } from './escrowCircuitBreaker.js'
 import { supabaseAdmin } from '../config/db.js'
+// backend/api/src/services/escrow.js (Excerpt)
 
+import { ethers } from 'ethers';
+import logger from '../middleware/logger.js';
+
+const ESCROW_ABI = [
+  'function createBooking(bytes32 bookingId, address payable driver) external payable',
+  'function releasePayment(bytes32 bookingId) external',
+  'function cancelBooking(bytes32 bookingId, uint256 penaltyAmount) external',
+  'function bookings(bytes32 bookingId) external view returns (address customer, address driver, uint256 amount, bool active)'
+];
+
+export async function createEscrowDeposit(bookingId, customerWallet, driverWallet, amountWei) {
+  try {
+    const escrowContract = getEscrowContractInstance();
+    
+    // ✅ Fixed: Updated from deprecated .deposit() to ABI-correct .createBooking()
+    // Note: customer address is msg.sender in TruxifyEscrow.sol, so only bookingId, driver, and value are passed.
+    const txData = await escrowContract.createBooking.populateTransaction(
+      bookingId, 
+      driverWallet, 
+      { value: amountWei }
+    );
+    
+    return { success: true, txData };
+  } catch (err) {
+    logger.error({ err, bookingId }, 'Failed to populate escrow deposit transaction');
+    throw new Error(`Escrow deposit creation failed: ${err.message}`);
+  }
+}
+
+export async function releaseEscrowPayment(bookingId) {
+  try {
+    const escrowContract = getEscrowContractInstance();
+    
+    // ✅ Fixed: Updated from .releaseFunds() to .releasePayment()
+    const tx = await escrowContract.releasePayment(bookingId);
+    await tx.wait();
+    
+    logger.info({ bookingId, txHash: tx.hash }, 'Escrow payment released successfully on-chain');
+    return { success: true, txHash: tx.hash };
+  } catch (err) {
+    logger.error({ err, bookingId }, 'Failed to release escrow payment on-chain');
+    throw new Error(`Escrow release failed: ${err.message}`);
+  }
+}
+
+export async function cancelEscrowBooking(bookingId, penaltyAmount = 0) {
+  try {
+    const escrowContract = getEscrowContractInstance();
+    
+    // ✅ Fixed: Updated from .refundFunds() to .cancelBooking() with penalty parameter
+    const tx = await escrowContract.cancelBooking(bookingId, penaltyAmount);
+    await tx.wait();
+    
+    logger.info({ bookingId, penaltyAmount, txHash: tx.hash }, 'Escrow cancelled and refunded successfully on-chain');
+    return { success: true, txHash: tx.hash };
+  } catch (err) {
+    logger.error({ err, bookingId }, 'Failed to cancel escrow booking on-chain');
+    throw new Error(`Escrow cancellation failed: ${err.message}`);
+  }
+}
 const RPC_TIMEOUT_MS = 30_000;
 
 function withTimeout(promise, ms = RPC_TIMEOUT_MS) {

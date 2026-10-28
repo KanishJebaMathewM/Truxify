@@ -3,7 +3,30 @@ const DEFAULTS = {
   limit: 20,
   maxLimit: 100,
 };
+// backend/api/src/utils/pagination.js
 
+/**
+ * Builds safe pagination parameters for database queries.
+ * @param {number|string} page - Current page number.
+ * @param {number|string} limit - Items per page limit.
+ * @returns {Object} Sanitized page, limit, and calculated SQL offset.
+ */
+export function buildPagination(page, limit) {
+  // Clamp page to a minimum of 1, defaulting to 1 on NaN/null
+  const safePage = Math.max(1, parseInt(page, 10) || 1);
+  
+  // Clamp limit between 1 and 100, defaulting to 20
+  const safeLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+  
+  // Calculate non-negative SQL offset
+  const offset = (safePage - 1) * safeLimit;
+
+  return {
+    page: safePage,
+    limit: safeLimit,
+    offset
+  };
+}
 function normalizeNumber(value) {
   if (Number.isFinite(value)) {
     return value;

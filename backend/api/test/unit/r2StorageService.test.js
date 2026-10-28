@@ -162,6 +162,48 @@ describe('r2StorageService - Cloudflare R2 Cloud Storage Layer', () => {
                 .toThrow('Cloudflare R2 is not configured');
         });
 
+        it('fails closed instead of fabricating a client when the S3 SDK is missing', async () => {
+            const saved = {
+                endpoint: process.env.CLOUDFLARE_R2_ENDPOINT,
+                keyId: process.env.R2_ACCESS_KEY_ID,
+                secret: process.env.R2_SECRET_ACCESS_KEY,
+            };
+            process.env.CLOUDFLARE_R2_ENDPOINT = 'https://example.r2.cloudflarestorage.com';
+            process.env.R2_ACCESS_KEY_ID = 'test-key-id';
+            process.env.R2_SECRET_ACCESS_KEY = 'test-secret';
+
+            vi.resetModules();
+            vi.doMock('@aws-sdk/client-s3', () => {
+                throw new Error('not installed');
+            });
+
+            try {
+                const mod = await import('../../src/services/r2StorageService.js');
+                expect(mod.isR2SdkAvailable()).toBe(false);
+                expect(mod.getR2Client()).toBeNull();
+                expect(mod.isR2Configured()).toBe(false);
+
+                await expect(mod.uploadToR2({
+                    buffer: Buffer.from('%PDF-1.7\n', 'ascii'),
+                    mimetype: 'application/pdf',
+                }, 'documents/test.pdf')).rejects.toThrow('is not available');
+
+                await expect(mod.deleteDocument('documents/test.pdf'))
+                    .rejects.toThrow('is not available');
+            } finally {
+                vi.doUnmock('@aws-sdk/client-s3');
+                vi.resetModules();
+                for (const [key, value] of Object.entries({
+                    CLOUDFLARE_R2_ENDPOINT: saved.endpoint,
+                    R2_ACCESS_KEY_ID: saved.keyId,
+                    R2_SECRET_ACCESS_KEY: saved.secret,
+                })) {
+                    if (value === undefined) delete process.env[key];
+                    else process.env[key] = value;
+                }
+            }
+        });
+
         it('should reject deletion with invalid object key', async () => {
             await expect(deleteDocument('../../root/file.pdf'))
                 .rejects

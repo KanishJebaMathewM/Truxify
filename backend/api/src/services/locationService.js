@@ -1,8 +1,42 @@
+const { createClient } = require('redis');
+const { createClient: createSupabaseClient } = require('@supabase/supabase-js');
+// backend/api/src/services/locationService.js (Excerpt)
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import logger from '../middleware/logger.js';
 
+import { logger } from '../utils/logger.js';
+
+/**
+ * Verifies latitude, longitude, and accuracy parameters for location tracking.
+ */
+export function verifyLocation({ lat, lng, accuracy }) {
+  try {
+    if (lat === undefined || lng === undefined) {
+      return { valid: false, error: 'Latitude and longitude are required' };
+    }
+
+    const latitude = Number(lat);
+    const longitude = Number(lng);
+
+    // Validate geographical boundaries
+    if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+      return { valid: false, error: 'Coordinates are out of valid geographical bounds' };
+    }
+
+    // Optional accuracy check (e.g., reject readings with > 100m error radius if provided)
+    if (accuracy !== undefined && Number(accuracy) > 100) {
+      return { valid: false, error: 'Location accuracy is insufficient for trusted tracking' };
+    }
+
+    return { valid: true };
+  } catch (err) {
+    logger.error({ err, lat, lng }, '[locationService] Error during location verification');
+    return { valid: false, error: `Verification exception: ${err.message}` };
+  }
+}
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-const supabaseUrl = process.env.SUPABASE_URL || 'https://mock.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || 'mock-key';
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 export const GEO_KEY = 'truxify:driver_locations';
 export const MAX_COMMERCIAL_SPEED_KMH = 160; // Max plausible highway speed before flagging spoofing
@@ -11,7 +45,22 @@ export const MAX_COMMERCIAL_SPEED_KMH = 160; // Max plausible highway speed befo
 const driverPositionCache = new Map();
 
 let redisClientInstance = null;
-let supabaseClientInstance = createSupabaseClient(supabaseUrl, supabaseKey);
+let supabaseClientInstance = supabaseUrl && supabaseServiceRoleKey
+    ? createSupabaseClient(supabaseUrl, supabaseServiceRoleKey)
+    : null;
+
+/**
+ * Location writes require the service-role client; the anon role is blocked
+ * by RLS on driver_locations. Fail closed instead of using a fake fallback.
+ */
+const requireSupabaseClient = () => {
+    if (!supabaseClientInstance) {
+        throw new Error(
+            'Location persistence is not configured: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required'
+        );
+    }
+    return supabaseClientInstance;
+};
 
 /**
  * Injects a mock Redis client for automated testing.
@@ -34,7 +83,9 @@ export const setSupabaseClientForTesting = (mockSupabase) => {
  */
 export const resetClients = () => {
     redisClientInstance = null;
-    supabaseClientInstance = createSupabaseClient(supabaseUrl, supabaseKey);
+    supabaseClientInstance = supabaseUrl && supabaseServiceRoleKey
+        ? createSupabaseClient(supabaseUrl, supabaseServiceRoleKey)
+        : null;
     driverPositionCache.clear();
 };
 
@@ -159,7 +210,16 @@ export const checkSpeedAnomaly = (driverId, newLon, newLat, currentTimestamp = D
     driverPositionCache.set(driverId, { lon: newLon, lat: newLat, timestamp: currentTimestamp });
     return { anomaly: false, calculatedSpeedKmh: Math.round(speedKmh) };
 };
+// backend/api/src/services/locationService.js (Excerpt)
 
+export function calculateRemainingEta(estimatedArrivalTime, currentTime = Date.now()) {
+  const remainingMilliseconds = new Date(estimatedArrivalTime).getTime() - currentTime;
+  const remainingMinutes = Math.ceil(remainingMilliseconds / (1000 * 60));
+
+  // ✅ Clamp ETA to a minimum of 0 to prevent negative values
+  return Math.max(0, remainingMinutes);
+}
+const ensureIndexes = async () => {
 /**
  * Verifies or creates PostGIS geospatial indexes.
  */
@@ -197,6 +257,8 @@ export const updateDriverLocation = async (driverId, longitude, latitude, option
         }
     }
 
+    const supabase = requireSupabaseClient();
+
     let redisSuccess = false;
     try {
         const client = await connectRedis();
@@ -213,19 +275,17 @@ export const updateDriverLocation = async (driverId, longitude, latitude, option
     }
 
     try {
-        if (supabaseClientInstance?.from) {
-            const { error } = await supabaseClientInstance
-                .from('driver_locations')
-                .upsert({
-                    driver_id: driverId,
-                    longitude: lon,
-                    latitude: lat,
-                    updated_at: new Date().toISOString(),
-                }, { onConflict: 'driver_id' });
+        const { error } = await supabase
+            .from('driver_locations')
+            .upsert({
+                driver_id: driverId,
+                longitude: lon,
+                latitude: lat,
+                updated_at: new Date().toISOString(),
+            }, { onConflict: 'driver_id' });
 
-            if (error && !redisSuccess) {
-                throw error;
-            }
+        if (error && !redisSuccess) {
+            throw error;
         }
         return true;
     } catch (dbErr) {
@@ -276,17 +336,16 @@ export const findNearbyTrucks = async (longitude, latitude, radiusKm = 50, limit
     }
 
     try {
-        if (supabaseClientInstance?.rpc) {
-            const { data, error } = await supabaseClientInstance.rpc('find_nearby_drivers', {
-                lon,
-                lat,
-                radius_meters: Math.round(boundedRadius * 1000),
-                max_results: boundedLimit,
-            });
+        const supabase = requireSupabaseClient();
+        const { data, error } = await supabase.rpc('find_nearby_drivers', {
+            lon,
+            lat,
+            radius_meters: Math.round(boundedRadius * 1000),
+            max_results: boundedLimit,
+        });
 
-            if (error) throw error;
-            return Array.isArray(data) ? data : [];
-        }
+        if (error) throw error;
+        return Array.isArray(data) ? data : [];
     } catch (err) {
         throw new Error(`Failed to find nearby trucks: ${err.message}`);
     }

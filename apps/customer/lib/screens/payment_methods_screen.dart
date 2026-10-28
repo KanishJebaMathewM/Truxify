@@ -122,7 +122,12 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) {
+        if (!didPop) Navigator.of(context).pop();
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: const Text('Payment Methods'),
         centerTitle: true,
@@ -170,6 +175,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
                     ],
                   ),
                 ),
+      ),
     );
   }
 }

@@ -176,7 +176,7 @@ export const isValidMissionId = (missionId) => {
  *             schema:
  *               $ref: '#/components/schemas/DroneLaunchErrorResponse'
  *       '429':
- *         description: User rate limit exceeded.
+ *         description: User rate limit exceeded or active drone mission capacity exhausted.
  *       '500':
  *         description: Drone launch failed.
  *         content:
@@ -234,7 +234,9 @@ router.post('/launch', authenticate, userLimiter, async (req, res) => {
       mission
     });
   } catch (err) {
-    return res.status(500).json({ error: err.message || 'Failed to launch drone delivery handoff' });
+    return res.status(err.statusCode === 429 ? 429 : 500).json({
+      error: err.message || 'Failed to launch drone delivery handoff'
+    });
   }
 });
 
@@ -277,22 +279,18 @@ router.post('/abort/:missionId', authenticate, userLimiter, async (req, res) => 
       return res.status(400).json({ error: 'Invalid missionId format' });
     }
 
-    const telemetry = await droneService.getDroneTelemetry(
+    const mission = await droneService.abortMission(
       missionId.trim(),
       req.user.role === 'admin' ? null : req.user.id
     );
 
-    if (!telemetry) {
+    if (!mission) {
       return res.status(404).json({ error: 'Drone mission not found or not owned by user' });
     }
 
-    // Mark mission as aborted
-    telemetry.status = 'ABORTED_RETURNING_TO_BASE';
-    telemetry.abortedAt = new Date().toISOString();
-
     return res.json({
       message: 'Drone mission aborted. Aircraft returning to safe zone base.',
-      mission: telemetry
+      mission
     });
   } catch (err) {
     return res.status(500).json({ error: 'Failed to abort drone mission' });

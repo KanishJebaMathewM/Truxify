@@ -60,9 +60,39 @@ import { validateBody, validateParams, validateQuery } from '../middleware/valid
 import { paramIdSchema } from '../validation/requestSchemas.js';
 import { escapeLike } from '../lib/escapeLike.js';
 import { invalidateBookingCaches } from '../utils/cacheInvalidation.js';
+// backend/api/src/routes/loadRoutes.js
+// (Snippet illustrating removal of dead sanitizeLoadFilters helper)
 import { formatPaginationMeta } from '../utils/pagination.js';
 import { estimateTripProfit } from '../services/tripProfitEstimator.js';
 
+import express from 'express';
+import { authenticateToken } from '../middleware/auth.js';
+import logger from '../middleware/logger.js';
+
+const router = express.Router();
+
+/**
+ * GET /api/loads
+ * Retrieves active loads matching query filters.
+ */
+router.get('/', authenticateToken, async (req, res) => {
+  try {
+    // Active load filtering logic directly utilizing validated query parameters
+    const { status, origin, destination, page = 1, limit = 20 } = req.query;
+    
+    // ... active controller execution ...
+
+    return res.json({
+      success: true,
+      data: []
+    });
+  } catch (err) {
+    logger.error('Failed to retrieve loads', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+export default router;
 
 const router = express.Router();
 

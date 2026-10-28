@@ -6,6 +6,7 @@ const supabaseMock = createSupabaseMock();
 const redisClientMock = {
   set: vi.fn().mockResolvedValue('OK'),
   del: vi.fn().mockResolvedValue(1),
+  eval: vi.fn().mockResolvedValue(1),
 };
 
 vi.mock('../../src/config/db.js', () => ({
@@ -51,6 +52,7 @@ describe('pruneStaleDevices', () => {
     supabaseMock.reset();
     redisClientMock.set.mockClear();
     redisClientMock.del.mockClear();
+    redisClientMock.eval.mockClear();
     redisClientMock.set.mockResolvedValue('OK');
     supabaseMock.store.user_devices = [];
   });
@@ -99,6 +101,7 @@ describe('pruneStaleDevices', () => {
     await pruneStaleDevices();
 
     expect(redisClientMock.set).toHaveBeenCalled();
-    expect(redisClientMock.del).toHaveBeenCalled();
+    expect(redisClientMock.eval).toHaveBeenCalledWith(expect.stringContaining("'del'"), 1, 'device:pruning:lock', expect.any(String));
+    expect(redisClientMock.del).not.toHaveBeenCalled();
   });
 });

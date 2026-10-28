@@ -17,6 +17,12 @@ const MAX_LATITUDE = 90;
 const MIN_LONGITUDE = -180;
 const MAX_LONGITUDE = 180;
 
+// A quarterly filing can contain a lot of telemetry, but the report is built
+// synchronously on the event loop. These caps keep one request from turning
+// into an unbounded CPU and memory commitment.
+export const MAX_IFTA_WAYPOINTS = 10000;
+export const MAX_IFTA_FUEL_PURCHASES = 1000;
+
 /**
  * Coerces a coordinate, rejecting values that are not usable numbers.
  * `Number(null)` and `Number('')` are both `0`, so nullish and blank values are
@@ -139,6 +145,16 @@ export function generateIftaReport(params) {
   }
   if (!Array.isArray(fuelPurchases)) {
     throw new ValidationError('fuelPurchases must be an array');
+  }
+  if (waypoints.length > MAX_IFTA_WAYPOINTS) {
+    throw new ValidationError(
+      `waypoints must contain at most ${MAX_IFTA_WAYPOINTS} entries`
+    );
+  }
+  if (fuelPurchases.length > MAX_IFTA_FUEL_PURCHASES) {
+    throw new ValidationError(
+      `fuelPurchases must contain at most ${MAX_IFTA_FUEL_PURCHASES} entries`
+    );
   }
 
   // A Map is used instead of a plain object because the jurisdiction key comes

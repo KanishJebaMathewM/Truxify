@@ -1,0 +1,29 @@
+name: Fraud stats database aggregate
+on:
+  pull_request:
+    paths:
+      - backend/api/src/services/fraud/FraudDetectionService.js
+      - backend/api/test/unit/fraudStatsAggregate.test.js
+      - backend/api/test/unit/fraudDetectionServiceGuard.test.js
+      - backend/api/test/unit/fraudDetectionServiceCore.test.js
+      - backend/api/test/unit/services/fraud/FraudDetectionService.test.js
+      - supabase/migrations/20261002153802_fraud_stats_aggregate.sql
+      - supabase/migrations/20260804101500_create_fraud_tables.sql
+      - supabase/migrations/20260805000040_create_fraud_tables.sql
+      - tools/fraud-aggregate-tests/**
+      - .github/workflows/fraud-stats-aggregate.yml
+permissions:
+  contents: read
+jobs:
+  fraud-aggregate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tools/fraud-aggregate-tests/package-lock.json
+      - run: npm ci --prefix tools/fraud-aggregate-tests --ignore-scripts
+      - run: bash tools/fraud-aggregate-tests/run.sh

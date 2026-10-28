@@ -8,7 +8,9 @@ import {
     ALLOWED_DOC_TYPES,
     setSupabaseClientForTesting,
     setR2StorageServiceForTesting,
-    resetClients
+    resetClients,
+    getR2Storage,
+    DocumentStorageUnavailableError
 } from '../../src/services/documentService.js';
 
 describe('documentService - Driver Credentials & Verification State Machine', () => {
@@ -41,10 +43,10 @@ describe('documentService - Driver Credentials & Verification State Machine', ()
 
     describe('processDocumentUpload', () => {
         const validFile = {
-            buffer: Buffer.from('Commercial Driver License Mock'),
+            buffer: Buffer.from('%PDF-1.7\nCommercial Driver License Mock\n', 'ascii'),
             originalname: 'license.pdf',
             mimetype: 'application/pdf',
-            size: 1024
+            size: Buffer.byteLength('%PDF-1.7\nCommercial Driver License Mock\n', 'ascii')
         };
 
         it('should successfully upload document and register DB row', async () => {
@@ -89,6 +91,34 @@ describe('documentService - Driver Credentials & Verification State Machine', ()
                 .toThrow('Database insert failure: Database constraint violation');
 
             expect(mockR2.deleteDocument).toHaveBeenCalledWith('documents/u1/license/test.pdf');
+        });
+    });
+
+    describe('getR2Storage', () => {
+        it('rejects with a 503 error when the storage module cannot be loaded', async () => {
+            setR2StorageServiceForTesting(null);
+
+            await expect(getR2Storage(async () => {
+                throw new Error('syntax error in storage module');
+            })).rejects.toBeInstanceOf(DocumentStorageUnavailableError);
+        });
+
+        it('returns the storage module default export when it loads', async () => {
+            setR2StorageServiceForTesting(null);
+            const fakeStorage = {
+                uploadToR2: vi.fn(),
+                deleteDocument: vi.fn(),
+            };
+
+            await expect(getR2Storage(async () => ({ default: fakeStorage })))
+                .resolves.toBe(fakeStorage);
+        });
+
+        it('rejects when the loaded module does not expose uploadToR2', async () => {
+            setR2StorageServiceForTesting(null);
+
+            await expect(getR2Storage(async () => ({ default: {} })))
+                .rejects.toBeInstanceOf(DocumentStorageUnavailableError);
         });
     });
 

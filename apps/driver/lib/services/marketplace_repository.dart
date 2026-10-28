@@ -11,7 +11,23 @@ import '../models/marketplace_models.dart';
 import 'api_client.dart';
 import 'driver_insights_service.dart';
 import 'secure_storage.dart';
+// apps/driver/lib/services/marketplace_repository.dart (Excerpt)
 
+Future<List<DriverBid>> fetchDriverBids() async {
+  final response = await http.get(Uri.parse('$_baseUrl/api/driver/bids'));
+  
+  if (response.statusCode != 200) {
+    throw ApiException('Failed to fetch driver bids: ${response.statusCode}');
+  }
+
+  final decoded = jsonDecode(response.body);
+  final body = decoded is Map<String, dynamic>
+      ? decoded['bids'] as List? ?? const []
+      : decoded as List;
+
+  // ✅ Fixed: Calling .cast() on 'body' (the List) instead of 'decoded' (which could be a Map)
+  return body.cast<Map<String, dynamic>>().map(DriverBid.fromJson).toList(growable: false);
+}
 class MarketplaceRepository {
   MarketplaceRepository({
     SupabaseClient? client,

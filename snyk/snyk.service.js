@@ -4,7 +4,61 @@ import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import logger from '../backend/api/src/middleware/logger.js';
+// snyk/snyk.service.js
 
+import logger from '../backend/api/src/middleware/logger.js'; // Adjust per module structure
+
+/**
+ * Safely parses a JSON string with a fallback default.
+ * @param {string} data - Raw string to parse.
+ * @param {any} fallback - Fallback value if parsing fails.
+ * @returns {any} Parsed object or fallback.
+ */
+function safeJsonParse(data, fallback = null) {
+  try {
+    return JSON.parse(data);
+  } catch (err) {
+    return fallback;
+  }
+}
+
+/**
+ * Executes a Snyk vulnerability scan and parses its JSON output.
+ * @param {string} targetPath - Path or target to scan.
+ * @returns {Promise<Object>} Scan result envelope.
+ */
+export async function runSnykScan(targetPath) {
+  try {
+    const stdout = await executeSnykCliScan(targetPath);
+    const stdoutStr = Buffer.isBuffer(stdout) ? stdout.toString('utf8') : String(stdout || '');
+
+    // Safely parse CLI stdout
+    const parsedResult = safeJsonParse(stdoutStr, null);
+
+    if (!parsedResult) {
+      logger.warn('Snyk CLI emitted malformed or non-JSON output', { 
+        targetPath, 
+        rawOutput: stdoutStr 
+      });
+      return { 
+        success: false, 
+        error: 'Malformed CLI JSON output', 
+        raw: stdoutStr 
+      };
+    }
+
+    return {
+      success: true,
+      data: parsedResult
+    };
+  } catch (err) {
+    logger.error('Snyk CLI execution process failed', { 
+      targetPath, 
+      error: err.message 
+    });
+    throw new Error(`Snyk scan failed: ${err.message}`, { cause: err });
+  }
+}
 const execAsync = promisify(exec);
 
 const REQUEST_TIMEOUT_MS = 15000;

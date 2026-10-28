@@ -145,7 +145,15 @@ export function filterCoordinatesByRadius(candidates, center, radiusKm, opts = {
     return opts.includeStats ? { matches: [], stats: { total: 0, passedBox: 0, matches: 0 } } : [];
   }
 
-  const box = getBoundingBox(center.lat, center.lng, radiusKm);
+  const centerLat = center?.lat ?? center?.latitude;
+  const centerLng = center?.lng ?? center?.longitude;
+  if (!Number.isFinite(centerLat) || !Number.isFinite(centerLng) || !Number.isFinite(radiusKm) || radiusKm <= 0) {
+    return opts.includeStats
+      ? { matches: [], stats: { total: candidates.length, passedBox: 0, matches: 0, eliminatedByBox: candidates.length, efficiencyPercent: 0 } }
+      : [];
+  }
+
+  const box = getBoundingBox(centerLat, centerLng, radiusKm);
   let passedBoxCount = 0;
   const matches = [];
 
@@ -164,7 +172,7 @@ export function filterCoordinatesByRadius(candidates, center, radiusKm, opts = {
     passedBoxCount++;
 
     // 2. Exact Haversine distance evaluation
-    const distance = haversineDistance(center.lat, center.lng, itemLat, itemLng, 'km');
+    const distance = haversineDistance(centerLat, centerLng, itemLat, itemLng, 'km');
     if (distance <= radiusKm) {
       matches.push({
         ...item,

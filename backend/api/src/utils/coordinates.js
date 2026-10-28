@@ -193,6 +193,56 @@ export function filterCoordinatesByRadius(candidates, center, radiusKm, opts = {
   return matches;
 }
 
+/**
+ * Calculates initial compass bearing in degrees (0 - 360) from point 1 to point 2.
+ *
+ * @param {number} lat1 - Latitude of starting point
+ * @param {number} lon1 - Longitude of starting point
+ * @param {number} lat2 - Latitude of destination point
+ * @param {number} lon2 - Longitude of destination point
+ * @returns {number|null} Bearing in degrees clockwise from true north [0, 360), or null if invalid
+ */
+export function calculateBearing(lat1, lon1, lat2, lon2) {
+  if (
+    !Number.isFinite(lat1) ||
+    !Number.isFinite(lon1) ||
+    !Number.isFinite(lat2) ||
+    !Number.isFinite(lon2)
+  ) {
+    return null;
+  }
+
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
+
+  const y = Math.sin(deltaLambda) * Math.cos(phi2);
+  const x =
+    Math.cos(phi1) * Math.sin(phi2) -
+    Math.sin(phi1) * Math.cos(phi2) * Math.cos(deltaLambda);
+
+  const theta = Math.atan2(y, x);
+  const bearing = ((theta * 180) / Math.PI + 360) % 360;
+
+  return Math.round(bearing * 100) / 100;
+}
+
+/**
+ * Maps a compass bearing in degrees to an 8-point cardinal direction.
+ *
+ * @param {number} bearingDegrees - Compass bearing [0, 360)
+ * @returns {string|null} Cardinal direction ('N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW') or null
+ */
+export function getCardinalDirection(bearingDegrees) {
+  if (!Number.isFinite(bearingDegrees)) {
+    return null;
+  }
+  const normalized = ((bearingDegrees % 360) + 360) % 360;
+  const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  const index = Math.round(normalized / 45) % 8;
+  return directions[index];
+}
+
 export default {
   validateCoordinate,
   validateCoordinateRange,
@@ -200,4 +250,6 @@ export default {
   getBoundingBox,
   isWithinBoundingBox,
   filterCoordinatesByRadius,
+  calculateBearing,
+  getCardinalDirection,
 };

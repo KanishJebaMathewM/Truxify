@@ -9,66 +9,6 @@ import logger from '../middleware/logger.js';
 
 // backend/api/src/services/weighStationService.js
 
-/**
- * Checks bypass eligibility for a weigh station.
- * NOTE: This is currently a deterministic mock service. It must be replaced
- * with a real regulatory API integration before production deployment.
- * Fixed per issue #8956.
- */
-export async function checkBypassEligibility(vehicleId, stationId, metadata = {}) {
-  // Deterministic mock response instead of Math.random() coin-flip
-  return {
-    action: 'BYPASS',
-    simulated: true,
-    reason: 'Deterministic mock compliance check passed',
-    vehicleId,
-    stationId,
-    timestamp: new Date().toISOString()
-  };
-}
-/**
- * Checks bypass eligibility for a weigh station.
- * NOTE: This is currently a deterministic mock service. It must be replaced
- * with a real regulatory API integration before production deployment.
- * Fixed per issue #8956.
- */
-export async function checkBypassEligibility(vehicleId, stationId, metadata = {}) {
-  // Deterministic mock response instead of Math.random() coin-flip
-  return {
-    action: 'BYPASS',
-    simulated: true,
-    reason: 'Deterministic mock compliance check passed',
-    vehicleId,
-    stationId,
-    timestamp: new Date().toISOString()
-  };
-}
-/**
- * Checks weigh station bypass eligibility for a given trip/truck.
- * NOTE: This is currently a mock service and must be replaced with a real regulatory API integration before production rollout.
- * 
- * @param {Object} params
- * @param {string} params.vehicleId
- * @param {number} params.weight
- * @returns {Promise<Object>} Bypass decision result
- */
-export async function checkBypassEligibility({ vehicleId, weight }) {
-  logger.info({ vehicleId, weight }, 'Evaluating weigh station bypass eligibility (Mock Service)');
-
-  // Deterministic mock response (replaces Math.random coin-flip)
-  return {
-    action: 'BYPASS',
-    simulated: true,
-    reason: 'Mock regulatory evaluation: vehicle within compliant weight threshold.',
-    evaluatedAt: new Date().toISOString()
-  };
-}
- * @param {number} params.weight
- * @returns {Promise<Object>} Bypass decision result
- */
-export async function checkBypassEligibility({ vehicleId, weight }) {
-  logger.info({ vehicleId, weight }, 'Evaluating weigh station bypass eligibility (Mock Service)');
-
 // Standard Federal Limits (lbs)
 export const FHWA_LIMITS = {
     MAX_SINGLE_AXLE_LBS: 20000,

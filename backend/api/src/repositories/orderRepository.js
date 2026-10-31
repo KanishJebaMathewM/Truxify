@@ -168,16 +168,43 @@ export class OrderRepository {
       .single(), 'updateOrder');
   }
 
-  async updateDeliveryEtaState(id, updates, previousEta, previousState) {
+  async updateDeliveryEtaState(id, updates, previousEta, previousState, ownership) {
+    if (!ownership?.driverId || !ownership?.expectedStatus || !ownership?.generation) {
+      return { data: null, error: null };
+    }
     return this._retryableQuery(() => {
       let query = this.supabase
         .from('orders')
         .update(updates)
         .eq('id', id)
+        .eq('driver_id', ownership.driverId)
+        .eq('status', ownership.expectedStatus)
+        .eq('eta_calculation_generation', ownership.generation)
         .eq('delivery_delay_state', previousState);
       query = previousEta == null ? query.is('eta', null) : query.eq('eta', previousEta);
       return query.select('id, eta, delivery_delay_state').maybeSingle();
     }, 'updateDeliveryEtaState');
+  }
+
+  async claimEtaGeneration(orderId, driverId, expectedStatus) {
+    return this._retryableQuery(() => this.supabase.rpc('claim_order_eta_generation', {
+      p_order_id: orderId, p_driver_id: driverId, p_expected_status: expectedStatus,
+    }), 'claimEtaGeneration');
+  }
+
+  async commitEtaGeneration({ orderId, driverId, expectedStatus, generation, etaText, arrivalEpochMs, thresholdSeconds }) {
+    return this._retryableQuery(() => this.supabase.rpc('commit_order_eta_generation', {
+      p_order_id: orderId, p_driver_id: driverId, p_expected_status: expectedStatus,
+      p_generation: generation, p_eta: etaText, p_arrival_epoch_ms: arrivalEpochMs,
+      p_change_threshold_seconds: thresholdSeconds,
+    }), 'commitEtaGeneration');
+  }
+
+  // Fresh read for best-effort continuation suppression; not an external-delivery transaction.
+  async findEtaGeneration(orderId) {
+    return this._retryableQuery(() => this.supabase.from('orders')
+      .select('eta_calculation_generation, driver_id, status')
+      .eq('id', orderId).maybeSingle(), 'findEtaGeneration');
   }
 
   async updateOrderWithFilter(id, updates, filters, selectColumns) {

@@ -396,3 +396,13 @@ flowchart TB
 | Blockchain (Polygon) | ✅ Contracts deployed | Escrow, document hash, and reputation Solidity contracts |
 | Automation (n8n) | ✅ 4 Workflows live | Dispute resolution, ML retraining, doc integrity, rollback |
 | Voice AI | 🔧 Integrated in stack | WebRTC + Whisper + ElevenLabs voice interface |
+
+---
+
+## 🏛️ Architecture Decision Records (ADRs)
+
+For in-depth rationale, alternatives considered, and trade-offs behind our technology choices, consult our Architecture Decision Records:
+
+- 📖 **[Architecture Decision Records (Tech Stack)](./ARCHITECTURE_DECISIONS.md)**: Deep dive on Polygon PoS, FastAPI, OSRM, n8n, Supabase+PostGIS/MongoDB hybrid, and Hardhat, including contributor FAQs.
+- 📂 **[Domain ADRs (Backend Architecture)](./architecture/adr/)**: Design decisions on service layer decomposition, repository pattern, order lifecycle, and validation workflows.
+- 📚 **[Documentation Index](./README.md)**: Comprehensive guide to all service documentation, schemas, and operational runbooks.

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:truxify_shared/truxify_shared.dart';
 
 class LiveTrackingMap extends StatefulWidget {
   final LatLng initialPosition;
@@ -63,8 +64,17 @@ class _LiveTrackingMapState extends State<LiveTrackingMap> {
       ),
       children: [
         TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          urlTemplate: AppTheme.getMapTileUrl(context),
           userAgentPackageName: 'com.truxify.customer',
+        ),
+        RichAttributionWidget(
+          attributions: [
+            TextSourceAttribution(
+              Theme.of(context).brightness == Brightness.dark
+                  ? '© OpenStreetMap contributors, © CARTO'
+                  : '© OpenStreetMap contributors',
+            ),
+          ],
         ),
         MarkerLayer(
           markers: [

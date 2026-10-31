@@ -21,16 +21,15 @@ class TruxifyColors {
   // Dark mode — reworked for proper contrast
   // Scaffold: #0F0F0F  →  Card: #1C1C1E  →  Elevated card: #242426
   // This gives clear visual layering without being too light
-  static const darkBackground = Color(0xFF0F0F0F);
-  static const darkSecondaryBackground = Color(0xFF1C1C1E);
-  static const darkCardBackground = Color(0xFF242426);
-  // Text: near-white primary, warm light-grey secondary (not pure grey)
-  static const darkPrimaryText = Color(0xFFF2F2F2);
-  static const darkSecondaryText = Color(0xFFB8B8C0); // slightly blue-tinted, more readable
-  // Borders: visible but subtle on dark cards
-  static const darkBorder = Color(0xFF3A3A3E);
-  // Accent tint bg for icons — visible teal tint on dark card
-  static const darkAccentLight = Color(0xFF0D3330);
+  // Dark mode tokens per spec (#121212, #1E1E1E, #FF6B35, #FFFFFF, #B0B0B0)
+  static const darkBackground = Color(0xFF121212);
+  static const darkSecondaryBackground = Color(0xFF1E1E1E);
+  static const darkCardBackground = Color(0xFF1E1E1E);
+  static const darkPrimaryText = Color(0xFFFFFFFF);
+  static const darkSecondaryText = Color(0xFFB0B0B0);
+  static const darkBorder = Color(0xFF2C2C2C);
+  static const darkAccentLight = Color(0xFF3A1C0E);
+  static const primaryAccent = Color(0xFFFF6B35); // Truxify Orange
 
   /// Returns the correct secondary text color for the current theme brightness.
   static Color adaptiveSecondaryText(BuildContext context) {

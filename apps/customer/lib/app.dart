@@ -7,7 +7,7 @@ import 'providers/language_provider.dart';
 import 'screens/public_tracking_screen.dart';
 import 'screens/splash_screen.dart';
 import 'theme/app_theme.dart';
-import 'package:flutter/material.dart';
+import 'package:truxify_shared/truxify_shared.dart';
 import 'config/routes.dart';
 
 class TruxifyCustomerApp extends StatelessWidget {
@@ -90,8 +90,8 @@ class _TruxifyAppState extends State<TruxifyApp> {
             return MaterialApp(
               debugShowCheckedModeBanner: false,
               onGenerateTitle: (context) => AppLocalizations.of(context)!.appTitle,
-              theme: TruxifyTheme.light(),
-              darkTheme: TruxifyTheme.dark(),
+              theme: AppTheme.lightTheme,
+              darkTheme: AppTheme.darkTheme,
               themeMode: _controller.themeMode,
               locale: _languageProvider.currentLocale,
               onGenerateRoute: _onGenerateRoute,

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:truxify_shared/truxify_shared.dart';
+import '../controllers/app_controller.dart';
 
 // Mock Screens for Navigation Hierarchy
 class HomeScreen extends StatelessWidget {
@@ -49,8 +51,53 @@ class ProfileScreen extends StatelessWidget {
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
+
   @override
-  Widget build(BuildContext context) => const Scaffold(body: Center(child: Text('Settings & Preferences')));
+  Widget build(BuildContext context) {
+    final controller = TruxifyScope.of(context);
+    final themeProvider = controller.themeProvider;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Settings & Preferences'),
+        actions: [
+          ThemeToggle(provider: themeProvider),
+          const SizedBox(width: 8),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16.0),
+        children: [
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Theme — Light / Dark / System',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Select light, dark, or system default appearance.',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                  const SizedBox(height: 16),
+                  Center(
+                    child: ThemeSegmentedControl(provider: themeProvider),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // Global App Router Configuration

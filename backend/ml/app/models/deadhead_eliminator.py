@@ -6,6 +6,35 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
+# backend/ml/app/models/deadhead_eliminator.py (Excerpt)
+
+from datetime import datetime, timedelta  # ✅ Moved to top of module (PEP 8 compliant)
+import numpy as np
+import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
+
+class DeadheadEliminator:
+    def __init__(self):
+        pass
+
+    def optimize_routes(self, routes_data):
+        optimized_routes = []
+        
+        for route in routes_data:
+            # ❌ Removed inline import: from datetime import timedelta
+            deadline = route.get('timestamp') + timedelta(hours=2)
+            
+            # Route optimization logic...
+            optimized_routes.append({
+                'route_id': route.get('id'),
+                'optimized_deadline': deadline,
+            })
+            
+        return optimized_routes
+def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate the great-circle distance between two points in kilometres.
 import requests
 
 logger = logging.getLogger(__name__)

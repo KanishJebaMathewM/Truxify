@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:http/http.dart' as http;
 
@@ -140,16 +139,20 @@ class LocationService {
     if (_isTracking) return;
 
     // Check location permission before starting tracking (fixes #1491)
-    final permission = await Permission.location.request();
+    // Use geolocator instead of permission_handler — geolocator works on web too.
+    LocationPermission geoPermission = await Geolocator.checkPermission();
+    if (geoPermission == LocationPermission.denied) {
+      geoPermission = await Geolocator.requestPermission();
+    }
 
-    if (permission.isDenied) {
+    if (geoPermission == LocationPermission.denied) {
       debugPrint('[LocationService] Location permission denied');
       throw Exception('Location permission is required to start tracking');
     }
 
-    if (permission.isPermanentlyDenied) {
+    if (geoPermission == LocationPermission.deniedForever) {
       debugPrint('[LocationService] Location permission permanently denied');
-      openAppSettings();
+      if (!kIsWeb) await Geolocator.openAppSettings();
       throw Exception('Location permissions are permanently denied. Please open app settings.');
     }
 

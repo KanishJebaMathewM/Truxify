@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
@@ -64,6 +65,9 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _checkExistingSessionAndBiometrics() async {
+    // Biometrics are not supported on web
+    if (kIsWeb) return;
+
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
     final bool hasSession = prefs.getBool('is_authenticated') ?? false;
@@ -79,6 +83,16 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _authenticateWithBiometrics() async {
+    // Biometrics are not supported on web
+    if (kIsWeb) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Biometric login is not available on web. Please use OTP.')),
+        );
+      }
+      return;
+    }
+
     try {
       final authenticated = await _localAuth.authenticate(
         localizedReason: 'Authenticate to log in',
@@ -265,15 +279,16 @@ class _LoginScreenState extends State<LoginScreen> {
         const SizedBox(height: 18),
         PrimaryButton(label: 'Send OTP', onPressed: _sendOtp),
         const SizedBox(height: 12),
-        OutlinedButton.icon(
-          onPressed: _authenticateWithBiometrics,
-          icon: const Icon(Icons.fingerprint),
-          label: const Text('Login with Biometrics'),
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size.fromHeight(48),
+        if (!kIsWeb)
+          OutlinedButton.icon(
+            onPressed: _authenticateWithBiometrics,
+            icon: const Icon(Icons.fingerprint),
+            label: const Text('Login with Biometrics'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+            ),
           ),
-        ),
-        const SizedBox(height: 18),
+        if (!kIsWeb) const SizedBox(height: 18),
         InfoCard(
           child: Row(
             children: [

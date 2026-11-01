@@ -37,7 +37,7 @@
     "circuit-breaker-js": "0.0.1",
     "compression": "^1.8.2",
     "cors": "^2.8.5",
-    "dompurify": "^3.4.16",
+    "dompurify": "^3.4.17",
     "dotenv": "^17.4.2",
     "ethers": "6.17.0",
     "express": "^5.2.1",
@@ -50,7 +50,7 @@
     "jsonwebtoken": "^9.0.0",
     "mongodb": "^7.4.0",
     "mongoose": "^9.9.5",
-    "multer": "^2.4.0",
+    "multer": "^2.5.0",
     "ngeohash": "^0.6.3",
     "node-cron": "^4.6.0",
     "openai": "^7.27.0",
@@ -65,7 +65,7 @@
     "swagger-ui-express": "^5.0.1",
     "twilio": "^5.13.1",
     "ws": "^8.21.3",
-    "zod": "^4.4.3"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8",

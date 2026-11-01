@@ -82,8 +82,7 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final authenticated = await _localAuth.authenticate(
         localizedReason: 'Authenticate to log in',
-        biometricOnly: true,
-        persistAcrossBackgrounding: true,
+        options: const AuthenticationOptions(biometricOnly: true),
       );
 
       if (!authenticated || !mounted) return;

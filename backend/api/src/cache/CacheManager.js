@@ -14,7 +14,6 @@ import {
 import logger from '../middleware/logger.js';
 // backend/api/src/cache/CacheManager.js
 
-import logger from '../middleware/logger.js';
 
 export async function getCacheItem(key) {
   try {

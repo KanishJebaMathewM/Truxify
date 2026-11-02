@@ -62,15 +62,19 @@ class ZKPService {
   }
 
   hashDocument(driverData) {
-    const documentString = JSON.stringify({
-      name: driverData.name,
-      licenseNumber: driverData.licenseNumber,
-      rcNumber: driverData.rcNumber,
-      insuranceNumber: driverData.insuranceNumber,
-      issueDate: driverData.issueDate,
-      expiryDate: driverData.expiryDate
-    });
-    return crypto.createHash('sha256').update(documentString).digest('hex');
+    // Hash each field as bounded bytes to prevent BN254 field-modulus encoding collisions
+    const hashField = (value, maxLen) => {
+      const str = String(value || '').slice(0, maxLen);
+      return crypto.createHash('sha256').update(str, 'utf8').digest('hex');
+    };
+    const nameHash = hashField(driverData.name, 100);
+    const licenseHash = hashField(driverData.licenseNumber, 50);
+    const rcHash = hashField(driverData.rcNumber, 50);
+    const insuranceHash = hashField(driverData.insuranceNumber, 50);
+    // Combine the four field hashes into a single document hash
+    return crypto.createHash('sha256')
+      .update(nameHash + licenseHash + rcHash + insuranceHash, 'utf8')
+      .digest('hex');
   }
 
   async callSnarkJS(driverData, documentHash, authorityCommitment) {
@@ -86,6 +90,9 @@ class ZKPService {
     const userAddress = driverData.userAddress || (driverData.userId ? ethers.getAddress('0x' + crypto.createHash('sha256').update(driverData.userId).digest('hex').slice(0, 40)) : '0x0000000000000000000000000000000000000001');
     const merkleRoot = authorityCommitment || driverData.merkleRoot || ('0x' + crypto.createHash('sha256').update('trustedRoot').digest('hex'));
 
+    const merklePathElements = Array(10).fill('0');
+    const merklePathIndices = Array(10).fill('0');
+
     if (isMock) {
       logger.warn('[ZKPService] Generating mock ZK proof (ZKP_MOCK or test mode active) — not persisted');
       return {
@@ -96,7 +103,12 @@ class ZKPService {
           c: ['0xjkl...', '0xmno...'],
           input: [userAddress, documentHash, merkleRoot]
         },
-        publicSignals: [userAddress, documentHash, merkleRoot]
+        publicSignals: [userAddress, documentHash, merkleRoot],
+        witness: {
+          merkleRoot,
+          merklePathElements,
+          merklePathIndices,
+        },
       };
     }
 
@@ -262,7 +274,7 @@ class ZKPService {
     const client = supabaseAdmin ?? supabase;
     const { data, error } = await client
       .from('driver_details')
-      .select('kyc_status, kyc_doc_number, authority_commitment, authority_status')
+      .select('authority_commitment, authority_status')
       .eq('user_id', userId)
       .maybeSingle();
 
@@ -274,14 +286,9 @@ class ZKPService {
       return { ok: false, error: 'KYC record has not been approved by regulatory authority.' };
     }
 
-    let commitment = data.authority_commitment;
-    if (!commitment && data.kyc_status === 'Verified') {
-      // Derive authority Merkle root commitment from server-verified document record
-      commitment = '0x' + crypto.createHash('sha256').update(`authority:approved:${userId}:${data.kyc_doc_number}`).digest('hex');
-    }
-
+    const commitment = data.authority_commitment;
     if (!commitment) {
-      return { ok: false, error: 'KYC record is not approved by authority.' };
+      return { ok: false, error: 'KYC record is not approved by authority. An authority-issued commitment is required.' };
     }
 
     return { ok: true, commitment: String(commitment) };

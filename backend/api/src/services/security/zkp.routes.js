@@ -55,7 +55,7 @@ router.post('/verify', zkpVerifyLimiter, async (req, res) => {
       expiryDate,
     } = req.body;
 
-    if (!userId) {
+    if (!userId || typeof userId !== 'string' || !userId.trim()) {
       return res.status(400).json({ success: false, error: 'userId is required' });
     }
 
@@ -91,7 +91,8 @@ router.post('/verify', zkpVerifyLimiter, async (req, res) => {
     }
 
     if (result.success === false) {
-      return res.status(400).json({ success: false, error: result.error });
+      // Generic operational failure (no specific error code)
+      return res.status(500).json({ success: false, error: result.error });
     }
 
     return res.status(200).json(result);

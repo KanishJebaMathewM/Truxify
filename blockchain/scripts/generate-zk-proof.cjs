@@ -89,16 +89,16 @@ class ZKProofGenerator {
         this.vkPath = path.join(__dirname, '../circuits/verification_key.json');
     }
 
-    generateProof(driverData, userAddress) {
+    generateProof(driverData, userAddress, merkleRoot, merklePathElements, merklePathIndices) {
         const documentHash = hashDocument(driverData);
-        return this._generateProof(driverData, documentHash, userAddress);
+        return this._generateProof(driverData, documentHash, userAddress, merkleRoot, merklePathElements, merklePathIndices);
     }
 
-    async _generateProof(driverData, documentHash, userAddress) {
+    async _generateProof(driverData, documentHash, userAddress, merkleRoot, merklePathElements, merklePathIndices) {
         try {
             console.log('🔐 Generating ZK-SNARK proof for driver KYC...');
-            console.log(`📄 Document hash: ${documentHash}`);
-            const witness = this.generateWitness(driverData, documentHash, userAddress);
+            console.log(`📄 Document hash: `);
+            const witness = this.generateWitness(driverData, documentHash, userAddress, merkleRoot, merklePathElements, merklePathIndices);
             console.log('✅ Witness generated');
 
             const { proof, publicSignals } = await snarkjs.groth16.fullProve(
@@ -128,14 +128,17 @@ class ZKProofGenerator {
         return hashDocument(driverData);
     }
 
-    generateWitness(driverData, documentHash, userAddress) {
+    generateWitness(driverData, documentHash, userAddress, merkleRoot, merklePathElements, merklePathIndices) {
         return {
             userAddress: userAddress ? BigInt(userAddress).toString() : '0',
-            documentHash,
+            documentHash: documentHash ? BigInt(documentHash).toString() : '0',
+            merkleRoot: merkleRoot ? BigInt(merkleRoot).toString() : '0',
             name: stringToBytes(driverData.name, 100),
             licenseNumber: stringToBytes(driverData.licenseNumber, 50),
             rcNumber: stringToBytes(driverData.rcNumber, 50),
-            insuranceNumber: stringToBytes(driverData.insuranceNumber, 50)
+            insuranceNumber: stringToBytes(driverData.insuranceNumber, 50),
+            merklePathElements: merklePathElements || new Array(10).fill('0'),
+            merklePathIndices: merklePathIndices || new Array(10).fill(0)
         };
     }
 
@@ -151,7 +154,7 @@ class ZKProofGenerator {
                 [proof.pi_b[1][1], proof.pi_b[1][0]]
             ],
             c: [proof.pi_c[0], proof.pi_c[1]],
-            input: proof.publicSignals.slice(0, 2)
+            input: proof.publicSignals.slice(0, 5)
         };
     }
 

@@ -324,4 +324,88 @@ describe("KYCVerifier Security & ZK-SNARK Hardening (#11247)", function () {
     await kycVerifier.connect(regulator).revokeVerification(user1.address);
     expect(await kycVerifier.isVerified(user1.address)).to.be.false;
   });
+
+  // Scenario 10: Circom 5-signal public signal ordering and validation
+  it("10. Circom 5-signal public signal ordering and validation", async function () {
+    await kycVerifier.connect(admin).updateTrustedRoot(validRoot);
+    const validCommitment = ethers.keccak256(ethers.toUtf8Bytes("commitment-user1"));
+
+    // 10a: Valid 5-signal proof [isValid, userCommitment, userAddress, documentHash, merkleRoot]
+    const valid5Signals = [
+      1n,
+      BigInt(validCommitment),
+      BigInt(user1.address),
+      BigInt(sampleDocHash),
+      BigInt(validRoot),
+    ];
+
+    const tx = await kycVerifier
+      .connect(admin)
+      .verifyKYC(validProof.a, validProof.b, validProof.c, valid5Signals, user1.address);
+    const receipt = await tx.wait();
+
+    expect(await kycVerifier.isVerified(user1.address)).to.be.true;
+    expect(await kycVerifier.connect(regulator).getDocumentHash(user1.address)).to.equal(sampleDocHash);
+
+    // 10b: Invalid circuit isValid signal (e.g. 0) fails
+    const invalidIsValidSignals = [
+      0n,
+      BigInt(validCommitment),
+      BigInt(user2.address),
+      BigInt(sampleDocHash),
+      BigInt(validRoot),
+    ];
+    const invalidValidSuccess = await kycVerifier
+      .connect(admin)
+      .verifyKYC.staticCall(validProof.a, validProof.b, validProof.c, invalidIsValidSignals, user2.address);
+    expect(invalidValidSuccess).to.be.false;
+
+    const invalidValidTx = await kycVerifier
+      .connect(admin)
+      .verifyKYC(validProof.a, validProof.b, validProof.c, invalidIsValidSignals, user2.address);
+    const invalidValidReceipt = await invalidValidTx.wait();
+    const event10b = invalidValidReceipt.logs.find(
+      (log) => log.fragment && log.fragment.name === "VerificationFailed"
+    );
+    expect(event10b.args[1]).to.equal("Circuit isValid signal is not 1");
+
+    // 10c: Zero user commitment fails
+    const zeroCommitmentSignals = [
+      1n,
+      0n,
+      BigInt(user2.address),
+      BigInt(sampleDocHash),
+      BigInt(validRoot),
+    ];
+    const zeroCommitSuccess = await kycVerifier
+      .connect(admin)
+      .verifyKYC.staticCall(validProof.a, validProof.b, validProof.c, zeroCommitmentSignals, user2.address);
+    expect(zeroCommitSuccess).to.be.false;
+
+    // 10d: User address mismatch at signal index 2 fails
+    const wrongUserSignals = [
+      1n,
+      BigInt(validCommitment),
+      BigInt(user1.address), // wrong user
+      BigInt(sampleDocHash),
+      BigInt(validRoot),
+    ];
+    const wrongUserSuccess = await kycVerifier
+      .connect(admin)
+      .verifyKYC.staticCall(validProof.a, validProof.b, validProof.c, wrongUserSignals, user2.address);
+    expect(wrongUserSuccess).to.be.false;
+
+    // 10e: Untrusted Merkle root at signal index 4 fails
+    const badRootSignals = [
+      1n,
+      BigInt(validCommitment),
+      BigInt(user2.address),
+      BigInt(sampleDocHash),
+      BigInt(ethers.keccak256(ethers.toUtf8Bytes("bad-merkle-root"))),
+    ];
+    const badRootSuccess = await kycVerifier
+      .connect(admin)
+      .verifyKYC.staticCall(validProof.a, validProof.b, validProof.c, badRootSignals, user2.address);
+    expect(badRootSuccess).to.be.false;
+  });
 });

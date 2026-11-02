@@ -82,7 +82,12 @@ import { acquireLock, releaseLock } from '../../src/lib/redisLock.js';
 import zkpService from '../../src/services/zkp/zkp.service.js';
 
 const VERIFIED_DETAILS = {
-  data: { kyc_status: 'Verified', kyc_doc_number: 'DL-1420110012345' },
+  data: {
+    kyc_status: 'Verified',
+    kyc_doc_number: 'DL-1420110012345',
+    authority_commitment: '0x' + 'c'.repeat(64),
+    authority_status: 'APPROVED',
+  },
   error: null,
 };
 const UNVERIFIED_DETAILS = {
@@ -216,6 +221,36 @@ describe('ZKPService self-attestation guard (issue #8887)', () => {
     await expect(zkpService.generateZKProof(validDriverData())).rejects.toThrow(
       /disallowed in production/i
     );
+  });
+});
+
+describe('ZKPService authority commitment no-fallback (issue #11247)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.keys(dbMock.tableResults).forEach((k) => delete dbMock.tableResults[k]);
+    dbMock.writes.length = 0;
+    delete process.env.ZKP_MOCK;
+    process.env.NODE_ENV = 'test';
+    vi.mocked(acquireLock).mockResolvedValue('lock-1');
+    vi.mocked(releaseLock).mockResolvedValue(undefined);
+  });
+
+  it('blocks proof generation when authority_commitment is null even if kyc_status is Verified (no fallback)', async () => {
+    dbMock.tableResults['driver_details'] = {
+      data: {
+        kyc_status: 'Verified',
+        kyc_doc_number: 'DL-1420110012345',
+        authority_commitment: null,
+        authority_status: null,
+      },
+      error: null,
+    };
+
+    const result = await zkpService.verifyDriver(validDriverData());
+
+    expect(result.success).toBe(false);
+    expect(result.code).toBe('KYC_NOT_AUTHORITY_APPROVED');
+    expect(result.error).toMatch(/authority/i);
   });
 });
 

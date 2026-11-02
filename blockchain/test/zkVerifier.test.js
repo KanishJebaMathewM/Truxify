@@ -70,7 +70,7 @@ describe("ZK proof verification", function () {
   it("rejects a withdrawal with an all-zero proof", async function () {
     const { zkEVM, user } = await deployZkEVM();
     await zkEVM.connect(user)["depositToL2()"]({ value: ethers.parseEther("1") });
-    const zeroProof = encodeProof([0, 0], [[0, 0], [0, 0]], [0, 0], [1, 1]);
+    const zeroProof = encodeProof([0, 0], [[0, 0], [0, 0]], [0, 0], [BigInt(user.address), ethers.parseEther('0.5')]);
     await assertRejectsWith(
       zkEVM.connect(user).withdrawFromL2(ethers.parseEther("0.5"), zeroProof),
       "Invalid"
@@ -78,9 +78,10 @@ describe("ZK proof verification", function () {
   });
 
   it("rejects an empty batch proof", async function () {
-    const { zkEVM, owner } = await deployZkEVM();
+    const { zkEVM, owner, user } = await deployZkEVM();
+    const validTxData = ethers.AbiCoder.defaultAbiCoder().encode(['address', 'address', 'uint256', 'bytes', 'uint256', 'uint256', 'uint256', 'bytes'], [user.address, user.address, 0n, '0x', 0n, 0n, 0n, '0x' + '00'.repeat(65)]);
     await assertRejectsWith(
-      zkEVM.connect(owner).executeBatch(["0x1234"], "0x"),
+      zkEVM.connect(owner).executeBatch([validTxData], "0x"),
       "Empty proof"
     );
   });

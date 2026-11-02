@@ -66,6 +66,14 @@ describe('zkp.routes', () => {
       const response = await request(app).post('/zkp/verify').send({ userId: 'user-123' });
       expect(response.status).toBe(503);
     });
+
+    it('returns 400 when result has MOCK_PROOF_NOT_RECORDED', async () => {
+      zkpService.verifyDriver.mockResolvedValue({ success: false, code: 'MOCK_PROOF_NOT_RECORDED', error: 'Mock not recorded' });
+      const app = makeApp();
+      const response = await request(app).post('/zkp/verify').send({ userId: 'user-123' });
+      expect(response.status).toBe(400);
+      expect(response.body.code).toBe('MOCK_PROOF_NOT_RECORDED');
+    });
   });
 
   describe('GET /status/:userId', () => {

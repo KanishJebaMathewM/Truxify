@@ -83,29 +83,59 @@ contract KYCVerifier is Verifier {
             return false;
         }
 
-        // Bind the proof to the user: the circuit's first public input must
-        // commit to the address being verified so one proof cannot be replayed
-        // to mark arbitrary accounts as KYC-verified.
-        if (uint256(input[0]) != uint256(uint160(user))) {
+        uint256 inputUserAddress;
+        uint256 inputDocHash;
+        uint256 inputMerkleRoot;
+
+        if (input.length >= 5) {
+            // Circom Groth16 public signal ordering:
+            // input[0] = isValid (output)
+            // input[1] = userCommitment (output)
+            // input[2] = userAddress (public input)
+            // input[3] = documentHash (public input)
+            // input[4] = merkleRoot (public input)
+            if (input[0] != 1) {
+                emit VerificationFailed(user, "Circuit isValid signal is not 1");
+                return false;
+            }
+            if (input[1] == 0) {
+                emit VerificationFailed(user, "Invalid user commitment");
+                return false;
+            }
+            inputUserAddress = input[2];
+            inputDocHash = input[3];
+            inputMerkleRoot = input[4];
+        } else {
+            // Legacy / test input format without output signals:
+            // input[0] = userAddress
+            // input[1] = documentHash
+            // input[2] = merkleRoot (optional)
+            inputUserAddress = input[0];
+            inputDocHash = input[1];
+            inputMerkleRoot = input.length >= 3 ? input[2] : 0;
+        }
+
+        // Bind the proof to the user: userAddress must match
+        if (inputUserAddress != uint256(uint160(user))) {
             emit VerificationFailed(user, "Proof not bound to user");
             return false;
         }
 
         // Validate document hash is non-zero
-        if (input[1] == 0) {
+        if (inputDocHash == 0) {
             emit VerificationFailed(user, "Invalid document hash");
             return false;
         }
 
         // If regulator pre-registered a document hash, must match
-        if (userDocumentHash[user] != bytes32(0) && bytes32(input[1]) != userDocumentHash[user]) {
+        if (userDocumentHash[user] != bytes32(0) && bytes32(inputDocHash) != userDocumentHash[user]) {
             emit VerificationFailed(user, "Mismatched document hash");
             return false;
         }
 
         // Validate authority-controlled Merkle root
-        if (input.length >= 3) {
-            bytes32 root = bytes32(input[2]);
+        if (input.length >= 5 || input.length >= 3) {
+            bytes32 root = bytes32(inputMerkleRoot);
             if (root == bytes32(0) || (root != trustedRoot && !isTrustedRoot[root])) {
                 emit VerificationFailed(user, "Untrusted authority root");
                 return false;
@@ -135,7 +165,7 @@ contract KYCVerifier is Verifier {
         
         if (isValid) {
             verifiedUsers[user] = true;
-            userDocumentHash[user] = bytes32(input[1]);
+            userDocumentHash[user] = bytes32(inputDocHash);
             verificationTimestamp[user] = block.timestamp;
             emit UserVerified(user, block.timestamp);
             return true;

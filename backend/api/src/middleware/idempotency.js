@@ -10,8 +10,6 @@ const MAX_IN_MEMORY_ENTRIES = 10000;
 const EVICTION_BATCH_SIZE = Math.floor(MAX_IN_MEMORY_ENTRIES * 0.1); // evict 10% at a time
 // backend/api/src/middleware/idempotency.js (Excerpt)
 
-const inMemoryStore = new Map();
-const MAX_IN_MEMORY_ENTRIES = 10000;
 
 export function storeIdempotencyResponse(key, responseData, ttlMs) {
   // FIX: Enforce max size limit with eviction per issue #6683

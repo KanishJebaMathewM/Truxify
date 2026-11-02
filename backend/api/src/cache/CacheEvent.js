@@ -17,7 +17,6 @@ import crypto from "crypto";
 import logger from "../middleware/logger.js";
 // backend/api/src/cache/CacheEvent.js
 
-import logger from '../middleware/logger.js'; // Adjust path per module structure
 
 export function handleCacheEvent(eventName, payload) {
   try {

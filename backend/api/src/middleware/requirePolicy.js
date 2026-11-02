@@ -16,6 +16,7 @@
  */
 
 import { policy, PolicyError } from '../security/policyEngine.js';
+import logger from './logger.js';
 
 /**
  * Maps a thrown authorization error to the correct HTTP response.

@@ -10,7 +10,17 @@ export class LoadOfferCacheService {
     const parsedLat = Number(lat);
     const parsedLng = Number(lng);
 
-    if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLng)) {
+    // ngeohash happily encodes out-of-range values, so a bad GPS sample would
+    // land in a bucket that no real invalidation ever touches. Fall back to
+    // the global generation instead of caching under an impossible location.
+    if (
+      !Number.isFinite(parsedLat) ||
+      !Number.isFinite(parsedLng) ||
+      parsedLat < -90 ||
+      parsedLat > 90 ||
+      parsedLng < -180 ||
+      parsedLng > 180
+    ) {
       return 'global';
     }
 

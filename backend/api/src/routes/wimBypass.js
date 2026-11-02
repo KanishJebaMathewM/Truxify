@@ -19,7 +19,51 @@ import {
   consumeWimCredential,
 } from '../services/wimBypass.js';
 import logger from '../middleware/logger.js';
+// backend/api/src/routes/wimBypass.js (Refactored Solution)
 
+import { buildTrustedMeasurement } from '../services/trustedMeasurement.js';
+import { logger } from '../utils/logger.js';
+
+const LBS_PER_TONNE = 2204.62; // Ensure constant is defined locally or imported
+
+export async function handleWimBypass(req, res) {
+  try {
+    const { orderId, reportedWeightTonnes, govtDocRef } = req.body;
+
+    if (!reportedWeightTonnes) {
+      logger.warn({ orderId }, '[wimBypass] Missing weight data; failing closed to PULL_IN');
+      return res.status(400).json({
+        success: false,
+        action: 'PULL_IN',
+        error: 'Missing required weight data for WIM bypass evaluation',
+      });
+    }
+
+    // Derive verification status with government-document fallback
+    const isVerified = Boolean(govtDocRef || req.user?.isDigiLockerVerified);
+
+    const weightLbs = reportedWeightTonnes * LBS_PER_TONNE;
+
+    // Use canonical service-side trusted measurement builder
+    const measurementResult = await buildTrustedMeasurement({
+      orderId,
+      weightLbs,
+      isVerified,
+    });
+
+    return res.status(200).json({
+      success: true,
+      bypassGranted: measurementResult.isAllowed,
+      measurement: measurementResult,
+    });
+  } catch (err) {
+    logger.error({ err }, '[wimBypass] Unexpected error during WIM bypass evaluation');
+    return res.status(500).json({
+      success: false,
+      error: `WIM bypass processing failed: ${err.message}`,
+    });
+  }
+}
 const router = express.Router();
 
 router.use(authenticate, userLimiter);

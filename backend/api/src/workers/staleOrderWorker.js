@@ -1,4 +1,6 @@
 import cron from 'node-cron';
+import { randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import logger from '../middleware/logger.js';
 import { supabase, supabaseAdmin, redisClient } from '../config/db.js';
 import { sendPushNotification } from '../services/notificationService.js';
@@ -12,10 +14,23 @@ let staleOrderRunning = false;
 
 const STALE_ORDER_CANCELLATION_REASON = 'Stale order: no accepted bid within 24 hours.';
 
-// Distributed batch lock: only ONE replica may run the hourly stale sweep at a
-// time. Same pattern as escrowFundingReconciliation / escrowRefundReconciliation.
+// Owner-aware batch admission lease. Loss stops new work; already-started
+// operations may overlap a successor and remain protected by the database CAS.
 const LOCK_KEY = 'stale:order:cancellation:lock';
 const LOCK_TTL_SECONDS = 120;
+const RENEW_LOCK_SCRIPT = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('EXPIRE', KEYS[1], ARGV[2])
+end
+return 0
+`;
+const RELEASE_LOCK_SCRIPT = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+`;
+const MAX_BATCH_SIZE = 1000;
 
 const DEFAULT_BATCH_SIZE = 100;
 const DEFAULT_STALE_ORDER_AGE_MS = 24 * 60 * 60 * 1000;
@@ -48,8 +63,9 @@ export const startStaleOrderWorker = (orderRepository) => {
 /**
  * Run one stale-order sweep.
  *
- * Replica safety: a Redis NX lock (plus an in-memory re-entrancy guard) ensures
- * only one replica executes the batch. Per-order safety is enforced by the
+ * Replica admission: a Redis owner-token lease plus a local guard stops new
+ * work after observed ownership loss. Already-started operations cannot be
+ * fenced by this lease. Per-order safety is enforced by the
  * atomic `cancel_stale_order_tx` RPC: it locks the order row FOR UPDATE and
  * only cancels an order that is still 'pending' and older than the cutoff, so
  * a concurrent bid acceptance (which also locks the row) produces exactly one
@@ -62,11 +78,43 @@ export async function reconcileStaleOrders(repository) {
   if (staleOrderRunning) return;
   staleOrderRunning = true;
   let globalLockAcquired = false;
+  const leaseClient = redisClient;
+  const ownerToken = randomUUID();
+  let leaseLost = false;
+  let leaseDeadline = 0;
+  let renewal = null;
+  let heartbeat = null;
+
+  // Loss is irreversible for this run. A slow positive renewal response cannot
+  // revive locally expired admission; Redis alone cannot fence an in-flight CAS.
+  function retainLease() {
+    if (!leaseClient) return Promise.resolve(!leaseLost);
+    if (leaseLost || performance.now() >= leaseDeadline) {
+      leaseLost = true;
+      return Promise.resolve(false);
+    }
+    if (renewal) return renewal;
+    const started = performance.now();
+    const previousDeadline = leaseDeadline;
+    renewal = (async () => {
+      try {
+        const retained = await leaseClient.eval(RENEW_LOCK_SCRIPT, 1, LOCK_KEY, ownerToken, LOCK_TTL_SECONDS);
+        if (retained !== 1 || performance.now() >= previousDeadline) leaseLost = true;
+        if (!leaseLost) leaseDeadline = started + LOCK_TTL_SECONDS * 1000;
+      } catch (err) {
+        leaseLost = true;
+        logger.warn('[StaleOrderWorker] Failed to refresh lock; stopping further admission:', err.message);
+      }
+      return !leaseLost;
+    })().finally(() => { renewal = null; });
+    return renewal;
+  }
 
   try {
-    if (redisClient) {
+    if (leaseClient) {
+      const started = performance.now();
       try {
-        globalLockAcquired = await redisClient.set(LOCK_KEY, process.pid.toString(), 'NX', 'EX', LOCK_TTL_SECONDS);
+        globalLockAcquired = await leaseClient.set(LOCK_KEY, ownerToken, 'NX', 'EX', LOCK_TTL_SECONDS) === 'OK';
       } catch (err) {
         logger.error('[StaleOrderWorker] Failed to acquire Redis global lock, skipping batch:', err.message);
         return;
@@ -75,10 +123,19 @@ export async function reconcileStaleOrders(repository) {
         logger.info('[StaleOrderWorker] Global lock held by another replica, skipping batch.');
         return;
       }
+      leaseDeadline = started + LOCK_TTL_SECONDS * 1000;
+      if (performance.now() >= leaseDeadline) {
+        leaseLost = true;
+        return;
+      }
+      heartbeat = setInterval(() => { void retainLease(); }, LOCK_TTL_SECONDS * 1000 / 3);
+      heartbeat.unref?.();
     }
 
     const staleSince = new Date(Date.now() - DEFAULT_STALE_ORDER_AGE_MS).toISOString();
-    const batchSize = Number(process.env.STALE_ORDER_WORKER_BATCH_SIZE) || DEFAULT_BATCH_SIZE;
+    const configuredBatch = Number(process.env.STALE_ORDER_WORKER_BATCH_SIZE);
+    const batchSize = Number.isFinite(configuredBatch) && configuredBatch >= 1
+      ? Math.min(MAX_BATCH_SIZE, Math.floor(configuredBatch)) : DEFAULT_BATCH_SIZE;
 
     // The SELECT is only a hint of candidates; cancel_stale_order_tx is the
     // atomic gate. Bounded batch avoids scanning the whole table per sweep.
@@ -89,7 +146,7 @@ export async function reconcileStaleOrders(repository) {
       return;
     }
 
-    const staleOrders = staleOrderIds ?? [];
+    const staleOrders = (staleOrderIds ?? []).slice(0, batchSize);
     if (staleOrders.length === 0) {
       logger.info('[StaleOrderWorker] No stale orders found.');
       return;
@@ -101,17 +158,11 @@ export async function reconcileStaleOrders(repository) {
 
     let index = 0;
     async function workerPool() {
-      while (index < staleOrders.length) {
+      while (!leaseLost && index < staleOrders.length) {
         const currentIndex = index++;
         const order = staleOrders[currentIndex];
         if (order && order.id) {
-          if (globalLockAcquired && redisClient) {
-            try {
-              await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
-            } catch (err) {
-              logger.warn('[StaleOrderWorker] Failed to refresh lock:', err.message);
-            }
-          }
+          if (!await retainLease() || leaseLost) return;
           await cancelStaleOrder(order, staleSince, repository, metrics);
         }
       }
@@ -133,9 +184,12 @@ export async function reconcileStaleOrders(repository) {
   } catch (err) {
     logger.error(`[StaleOrderWorker] Unexpected error during cleanup: ${err.message}`);
   } finally {
-    if (globalLockAcquired && redisClient) {
+    if (heartbeat) clearInterval(heartbeat);
+    // Pool work has settled before this finally block; drain any renewal too.
+    if (renewal) await renewal;
+    if (globalLockAcquired && leaseClient) {
       try {
-        await redisClient.del(LOCK_KEY);
+        await leaseClient.eval(RELEASE_LOCK_SCRIPT, 1, LOCK_KEY, ownerToken);
       } catch (err) {
         logger.warn('[StaleOrderWorker] Failed to release global lock:', err.message);
       }

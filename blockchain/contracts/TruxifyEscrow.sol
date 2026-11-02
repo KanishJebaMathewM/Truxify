@@ -1,5 +1,44 @@
+﻿// SPDX-License-Identifier: MIT
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+contract TruxifyEscrow is ReentrancyGuard {
+    struct EscrowDetails {
+        address payee;
+        uint256 amount;
+        bool released;
+        bool refunded;
+    }
+
+    mapping(bytes32 => EscrowDetails) public escrows;
+
+    event FundsWithdrawn(bytes32 indexed bookingId, address indexed payee, uint256 amount);
+
+    // Apply nonReentrant modifier and enforce CEI pattern
+    function withdrawFunds(bytes32 bookingId) external nonReentrant {
+        EscrowDetails storage escrow = escrows[bookingId];
+        
+        // 1. CHECKS
+        require(msg.sender == escrow.payee, "Unauthorized: Only designated payee can withdraw");
+        require(!escrow.released, "Escrow already released");
+        require(!escrow.refunded, "Escrow was refunded");
+        require(escrow.amount > 0, "No funds available in escrow");
+
+        uint256 payoutAmount = escrow.amount;
+
+        // 2. EFFECTS (Update state BEFORE external interaction)
+        escrow.released = true;
+        escrow.amount = 0;
+
+        // 3. INTERACTIONS (External ETH transfer)
+        (bool success, ) = payable(msg.sender).call{value: payoutAmount}("");
+        require(success, "ETH transfer failed");
+
+        emit FundsWithdrawn(bookingId, msg.sender, payoutAmount);
+    }
+}
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";

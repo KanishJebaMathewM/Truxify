@@ -20,7 +20,7 @@ vi.mock('../../src/middleware/logger.js', () => ({
   default: { debug: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() },
 }));
 
-const { requestCache } = await import('../../src/middleware/requestCacheMiddleware.js');
+const { requestCache, requestCacheMiddleware } = await import('../../src/middleware/requestCacheMiddleware.js');
 
 const mockRes = () => {
   const res = {
@@ -46,7 +46,7 @@ describe('requestCache middleware', () => {
     redis.get.mockResolvedValue(JSON.stringify({ status: 200, body: { cached: true } }));
     const res = mockRes();
     const next = vi.fn();
-    await requestCache(60)({ method: 'GET', originalUrl: '/api/orders' }, res, next);
+    await requestCache(60)({ method: 'GET', originalUrl: '/api/orders', user: { id: 'user-1' } }, res, next);
     expect(next).not.toHaveBeenCalled();
     expect(res.json).toHaveBeenCalledWith({ cached: true });
   });
@@ -55,23 +55,57 @@ describe('requestCache middleware', () => {
     redis.get.mockResolvedValue(null);
     const res = mockRes();
     const next = vi.fn(() => res.json({ fresh: true }));
-    await requestCache(60)({ method: 'GET', originalUrl: '/api/orders' }, res, next);
+    await requestCache(60)({ method: 'GET', originalUrl: '/api/orders', user: { id: 'user-1' } }, res, next);
     expect(next).toHaveBeenCalledOnce();
-    expect(redis.setEx).toHaveBeenCalledWith('cache:/api/orders', 60, expect.stringContaining('"fresh":true'));
+    expect(redis.setEx).toHaveBeenCalledWith('cache:user:user-1:/api/orders', 60, expect.stringContaining('"fresh":true'));
   });
 
   it('does not cache error responses', async () => {
     redis.get.mockResolvedValue(null);
     const res = mockRes();
     res.statusCode = 500;
-    await requestCache(60)({ method: 'GET', originalUrl: '/api/orders' }, res, vi.fn(() => res.json({ error: 'x' })));
+    await requestCache(60)({ method: 'GET', originalUrl: '/api/orders', user: { id: 'user-1' } }, res, vi.fn(() => res.json({ error: 'x' })));
     expect(redis.setEx).not.toHaveBeenCalled();
   });
 
   it('falls through when redis read throws', async () => {
     redis.get.mockRejectedValue(new Error('redis down'));
     const next = vi.fn();
-    await requestCache(60)({ method: 'GET', originalUrl: '/x' }, mockRes(), next);
+    await requestCache(60)({ method: 'GET', originalUrl: '/x', user: { id: 'user-1' } }, mockRes(), next);
     expect(next).toHaveBeenCalledOnce();
+  });
+
+  it('exports the middleware name imported by the API entry point', () => {
+    expect(requestCacheMiddleware).toBe(requestCache);
+  });
+
+  it('does not reuse a cache entry across authenticated users', async () => {
+    redis.get.mockResolvedValue(null);
+    const firstRes = mockRes();
+    const secondRes = mockRes();
+    const firstNext = vi.fn(() => firstRes.json({ owner: 'user-1' }));
+    const secondNext = vi.fn(() => secondRes.json({ owner: 'user-2' }));
+
+    await requestCache(60)(
+      { method: 'GET', originalUrl: '/api/orders', user: { id: 'user-1' } },
+      firstRes,
+      firstNext
+    );
+    await requestCache(60)(
+      { method: 'GET', originalUrl: '/api/orders', user: { id: 'user-2' } },
+      secondRes,
+      secondNext
+    );
+
+    expect(redis.get).toHaveBeenNthCalledWith(1, 'cache:user:user-1:/api/orders');
+    expect(redis.get).toHaveBeenNthCalledWith(2, 'cache:user:user-2:/api/orders');
+  });
+
+  it('bypasses the cache when no authenticated user is present', async () => {
+    const next = vi.fn();
+    await requestCache(60)({ method: 'GET', originalUrl: '/api/orders' }, mockRes(), next);
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(redis.get).not.toHaveBeenCalled();
   });
 });

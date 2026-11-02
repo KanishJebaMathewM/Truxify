@@ -75,7 +75,10 @@ class AlertRouter {
         case ALERT_CHANNELS.DASHBOARD:
           return await this.logToDashboard(alert);
         default:
-          logger.warn({ channel }, '[AlertRouter] Unknown alert channel');
+          // Resolving silently marks the channel as delivered in the
+          // allSettled result, so an unknown/misconfigured channel would drop
+          // the alert without a retry or a Sentry event.
+          throw new Error(`Unknown alert channel: ${channel}`);
       }
     } catch (err) {
       logger.error({ err, channel, alertType: alert.type }, '[AlertRouter] Error sending alert to channel');

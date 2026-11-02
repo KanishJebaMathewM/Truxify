@@ -5,8 +5,29 @@ import { getLiveTrafficMultiplier } from '../trafficService.js';
 import { getHaversineDistance } from '../routingService.js';
 import { broadcastOrderEta } from '../../sockets/tracker.js';
 import { emitEtaUpdateToBooking } from '../../sockets/locationServer.js';
+// backend/api/src/services/orderService.js (or orderRoutes.js excerpt)
+
+async function completeTripAndReleaseEscrow(orderId) {
+  // 1. Attempt atomic state transition to prevent race conditions
+  const { data: updatedOrder, error: updateError } = await supabase
+    .from('orders')
+    .update({ status: 'COMPLETED', completed_at: new Date().toISOString() })
+    .eq('id', orderId)
+    .eq('status', 'IN_PROGRESS') // Crucial: Ensures only 1 request succeeds
+    .select()
+    .single();
+
+  if (updateError || !updatedOrder) {
+    // State was already modified by concurrent request
+    const error = new Error('Trip already completed or escrow already released.');
+    error.statusCode = 400;
+    throw error;
+  }
 import { validateCoordinate } from '../../utils/coordinates.js';
 
+  // 2. Proceed with secure blockchain escrow release for the single winner
+  return await releaseEscrowFunds(orderId);
+}
 /** Order statuses where live ETA updates are meaningful. */
 export const ACTIVE_ETA_STATUSES = [
   'truck_assigned',

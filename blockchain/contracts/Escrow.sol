@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.24;
 
 contract Escrow {
     enum EscrowStatus {
@@ -15,6 +15,65 @@ contract Escrow {
         uint256 amount;
         EscrowStatus status;
     }
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract Escrow {
+    struct EscrowDetails {
+        address customer;
+        address driver;
+        uint256 amount;
+        bool isDisputed;
+        uint256 disputeTimestamp;
+        bool isResolved;
+    }
+
+    // 7-day timeout window for admin/relayer dispute resolution
+    uint256 public constant DISPUTE_TIMELOCK = 7 days;
+
+    mapping(bytes32 => EscrowDetails) public escrows;
+
+    event DisputeRaised(bytes32 indexed bookingId, address indexed raisedBy, uint256 timestamp);
+    event DisputeTimeoutRefunded(bytes32 indexed bookingId, address indexed customer, uint256 amount);
+    event DisputeResolved(bytes32 indexed bookingId, address indexed winner, uint256 amount);
+
+    /**
+     * @notice Raises a dispute on an active escrow booking
+     */
+    function raiseDispute(bytes32 bookingId) external {
+        EscrowDetails storage escrow = escrows[bookingId];
+        require(msg.sender == escrow.customer || msg.sender == escrow.driver, "Unauthorized");
+        require(!escrow.isResolved, "Escrow already resolved");
+        require(!escrow.isDisputed, "Dispute already active");
+
+        escrow.isDisputed = true;
+        escrow.disputeTimestamp = block.timestamp;
+
+        emit DisputeRaised(bookingId, msg.sender, block.timestamp);
+    }
+
+    /**
+     * @notice Allows customer to claim a refund if the relayer fails to resolve the dispute within the timelock window
+     */
+    function refundAfterDisputeTimeout(bytes32 bookingId) external {
+        EscrowDetails storage escrow = escrows[bookingId];
+        require(escrow.isDisputed, "Escrow is not in dispute");
+        require(!escrow.isResolved, "Escrow already resolved");
+        require(block.timestamp > escrow.disputeTimestamp + DISPUTE_TIMELOCK, "Dispute timelock has not expired");
+        require(msg.sender == escrow.customer, "Only customer can claim timeout refund");
+
+        escrow.isResolved = true;
+        escrow.isDisputed = false;
+
+        uint256 refundAmount = escrow.amount;
+        escrow.amount = 0;
+
+        (bool success, ) = payable(escrow.customer).call{value: refundAmount}("");
+        require(success, "ETH transfer failed");
+
+        emit DisputeTimeoutRefunded(bookingId, escrow.customer, refundAmount);
+    }
+}
 
     address public owner;
     mapping(address => bool) public authorizedRelayers;

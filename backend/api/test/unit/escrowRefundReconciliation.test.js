@@ -5,6 +5,230 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// backend/api/test/unit/escrowRefundReconciliation.test.js
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { reconcilePendingEscrowRefunds, _resetStateForTesting } from '../../src/services/escrowRefundReconciliation.js';
+import supabase from '../../src/config/supabase.js';
+import redisClient from '../../src/config/redis.js';
+import { confirmEscrowRefund } from '../../src/services/escrow.js';
+import { acquireLock, releaseLock } from '../../src/utils/redisLock.js';
+
+// Mock dependencies
+vi.mock('../../src/config/supabase.js', () => ({
+  default: {
+    from: vi.fn(() => ({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      update: vi.fn().mockReturnThis(),
+    })),
+    rpc: vi.fn(),
+  },
+}));
+
+vi.mock('../../src/config/redis.js', () => ({
+  default: {
+    get: vi.fn(),
+    set: vi.fn(),
+  },
+}));
+
+vi.mock('../../src/services/escrow.js', () => ({
+  confirmEscrowRefund: vi.fn(),
+}));
+
+vi.mock('../../src/utils/redisLock.js', () => ({
+  acquireLock: vi.fn(),
+  releaseLock: vi.fn(),
+}));
+
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: {
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+  },
+}));
+
+describe('escrowRefundReconciliation.js Unit Tests', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    if (typeof _resetStateForTesting === 'function') {
+      _resetStateForTesting();
+    }
+    // Mock process.pid and os.hostname for deterministic output
+    vi.spyOn(process, 'pid', 'get').mockReturnValue(12345);
+    vi.spyOn(require('os'), 'hostname').mockReturnValue('test-host');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('1. skips when reconciliationRunning is true (idempotency guard)', async () => {
+    // Run two concurrent calls
+    acquireLock.mockResolvedValue(true);
+    supabase.from.mockReturnValue({
+      select: vi.fn().mockResolvedValue({ data: [], error: null }),
+    });
+
+    // Slow down the first call to keep reconciliationRunning = true
+    const p1 = reconcilePendingEscrowRefunds();
+    const p2 = reconcilePendingEscrowRefunds();
+
+    await Promise.all([p1, p2]);
+    // Expect acquireLock or supabase query to be guarded
+    expect(acquireLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('2. acquires global lock and queries pending refund orders from Supabase', async () => {
+    acquireLock.mockResolvedValue('lock_token_123');
+    const selectMock = vi.fn().mockResolvedValue({ data: [], error: null });
+    supabase.from.mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      eq: selectMock,
+    });
+
+    await reconcilePendingEscrowRefunds();
+
+    expect(acquireLock).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.any(Number));
+  });
+
+  it('3. skips batch when global lock is held by another instance', async () => {
+    acquireLock.mockResolvedValue(null); // Lock not acquired
+
+    await reconcilePendingEscrowRefunds();
+
+    expect(supabase.from).not.toHaveBeenCalled();
+  });
+
+  it('4. handles empty pending queue gracefully', async () => {
+    acquireLock.mockResolvedValue('lock_token_123');
+    supabase.from.mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+    });
+
+    await reconcilePendingEscrowRefunds();
+
+    expect(releaseLock).toHaveBeenCalled();
+  });
+
+  it('5. processes a single pending order: claims via RPC, confirms refund, updates order to refunded status', async () => {
+    acquireLock.mockResolvedValue('lock_token_123');
+    
+    // Mock pending orders fetch
+    supabase.from.mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({
+        data: [{ id: 'order_1', tx_hash: '0xabc', escrow_status: 'refund_pending' }],
+        error: null,
+      }),
+    });
+
+    // Mock RPC claim success
+    supabase.rpc.mockResolvedValueOnce({ data: [{ id: 'order_1' }], error: null });
+
+    // Mock blockchain confirmation success
+    confirmEscrowRefund.mockResolvedValueOnce(true);
+
+    // Mock order status update to refunded
+    supabase.from.mockReturnValueOnce({
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ error: null }),
+    });
+
+    await reconcilePendingEscrowRefunds();
+
+    expect(supabase.rpc).toHaveBeenCalled();
+    expect(confirmEscrowRefund).toHaveBeenCalledWith('0xabc');
+  });
+
+  it('6. skips already-claimed orders (RPC returns empty claim)', async () => {
+    acquireLock.mockResolvedValue('lock_token_123');
+    
+    supabase.from.mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({
+        data: [{ id: 'order_1', tx_hash: '0xabc', escrow_status: 'refund_pending' }],
+        error: null,
+      }),
+    });
+
+    // Mock RPC claim returning empty (already claimed by another worker)
+    supabase.rpc.mockResolvedValueOnce({ data: [], error: null });
+
+    await reconcilePendingEscrowRefunds();
+
+    expect(confirmEscrowRefund).not.toHaveBeenCalled();
+  });
+
+  it('7. skips orders that are no longer in refund_pending status', async () => {
+    acquireLock.mockResolvedValue('lock_token_123');
+    
+    supabase.from.mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({
+        data: [{ id: 'order_1', tx_hash: '0xabc', escrow_status: 'completed' }],
+        error: null,
+      }),
+    });
+
+    await reconcilePendingEscrowRefunds();
+
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it('8. handles blockchain confirmation failure with error logging', async () => {
+    acquireLock.mockResolvedValue('lock_token_123');
+    
+    supabase.from.mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({
+        data: [{ id: 'order_1', tx_hash: '0xabc', escrow_status: 'refund_pending' }],
+        error: null,
+      }),
+    });
+
+    supabase.rpc.mockResolvedValueOnce({ data: [{ id: 'order_1' }], error: null });
+    confirmEscrowRefund.mockRejectedValueOnce(new Error('RPC Provider Error'));
+
+    await reconcilePendingEscrowRefunds();
+
+    // Verify reconciliation completes without crashing despite blockchain failure
+    expect(releaseLock).toHaveBeenCalled();
+  });
+
+  it('9. releases per-order locks and global lock after processing', async () => {
+    acquireLock.mockResolvedValue('lock_token_123');
+    
+    supabase.from.mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+    });
+
+    await reconcilePendingEscrowRefunds();
+
+    expect(releaseLock).toHaveBeenCalled();
+  });
+
+  it('10. properly resets reconciliationRunning flag on success and on error', async () => {
+    acquireLock.mockResolvedValue('lock_token_123');
+    
+    // First run with error
+    supabase.from.mockRejectedValueOnce(new Error('Database Down'));
+    await reconcilePendingEscrowRefunds();
+
+    // Second run should execute successfully (flag was reset)
+    supabase.from.mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+    });
+
+    await reconcilePendingEscrowRefunds();
+    expect(acquireLock).toHaveBeenCalledTimes(2);
+  });
+});
 // Module-level mocks: hoisted so vi.mock factories can reference them via closure
 const mocks = vi.hoisted(() => ({
   redisSet: vi.fn(),

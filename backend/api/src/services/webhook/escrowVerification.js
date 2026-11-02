@@ -169,8 +169,9 @@ function destroyProvider(provider) {
   }
 }
 
-function findPaymentReleasedEvent(receipt, escrowAddress) {
+function findPaymentReleasedEvents(receipt, escrowAddress) {
   const logs = receipt && Array.isArray(receipt.logs) ? receipt.logs : [];
+  const events = [];
   for (const log of logs) {
     if (!log || typeof log.address !== 'string') continue;
     if (log.address.toLowerCase() !== escrowAddress) continue;
@@ -179,17 +180,17 @@ function findPaymentReleasedEvent(receipt, escrowAddress) {
     try {
       const parsed = PAYMENT_RELEASED_IFACE.parseLog(log);
       if (parsed) {
-        return {
+        events.push({
           bookingId: parsed.args.bookingId,
           driver: parsed.args.driver,
           amount: parsed.args.paymentAmount,
-        };
+        });
       }
     } catch (err) {
       logger.warn(`[escrow-verification] Failed to parse PaymentReleased log: ${err?.message}`);
     }
   }
-  return null;
+  return events;
 }
 
 /**
@@ -349,8 +350,8 @@ async function verifyWithProvider(params, provider) {
       { retryable: false },
     );
   }
-  const event = findPaymentReleasedEvent(receipt, escrowAddress);
-  if (!event) {
+  const events = findPaymentReleasedEvents(receipt, escrowAddress);
+  if (events.length === 0) {
     throw new EscrowVerificationError(
       'PAYMENT_RELEASED_EVENT_NOT_FOUND',
       `Transaction ${txHash} did not emit a PaymentReleased event`,
@@ -358,26 +359,52 @@ async function verifyWithProvider(params, provider) {
     );
   }
 
-  // Malformed on-chain event fields are permanent failures: never trust
-  // unparseable event data, and never let it crash the process.
-  let eventBookingId;
-  let eventAmount;
+  let expectedBookingId;
   try {
-    eventBookingId = BigInt(event.bookingId);
-    eventAmount = BigInt(event.amount);
+    expectedBookingId = getEscrowBookingId(orderDisplayId);
   } catch (err) {
     throw new EscrowVerificationError(
-      'EVENT_DATA_INVALID',
-      `PaymentReleased event in ${txHash} has invalid bookingId/amount data`,
+      'INVALID_PAYLOAD',
+      `Order ${orderDisplayId} has no valid escrow booking id`,
       { retryable: false },
     );
   }
+  const expectedBookingBigInt = BigInt(expectedBookingId);
 
-  const expectedBookingId = getEscrowBookingId(orderDisplayId);
-  if (eventBookingId !== BigInt(expectedBookingId)) {
+  // A batch release transaction can emit one PaymentReleased event per
+  // booking. Selecting only the first log rejected a valid webhook whenever
+  // another booking's event came first. Match the event that belongs to this
+  // order instead.
+  let event = null;
+  let eventBookingId = null;
+  let eventAmount = null;
+  let malformedEvent = null;
+  for (const candidate of events) {
+    try {
+      const candidateBookingId = BigInt(candidate.bookingId);
+      const candidateAmount = BigInt(candidate.amount);
+      if (candidateBookingId === expectedBookingBigInt) {
+        event = candidate;
+        eventBookingId = candidateBookingId;
+        eventAmount = candidateAmount;
+        break;
+      }
+    } catch (err) {
+      malformedEvent = candidate;
+    }
+  }
+
+  if (!event) {
+    if (malformedEvent) {
+      throw new EscrowVerificationError(
+        'EVENT_DATA_INVALID',
+        `PaymentReleased event in ${txHash} has invalid bookingId/amount data`,
+        { retryable: false },
+      );
+    }
     throw new EscrowVerificationError(
       'ORDER_MISMATCH',
-      `PaymentReleased event in ${txHash} belongs to booking ${event.bookingId}, not ${orderDisplayId}`,
+      `PaymentReleased events in ${txHash} do not belong to ${orderDisplayId}`,
       { retryable: false },
     );
   }

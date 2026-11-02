@@ -197,6 +197,22 @@ describe('biometricAuthRoutes', () => {
       expect(res.status).toBe(500);
       expect(res.body.error).toMatch(/Failed to create/i);
     });
+
+    it('maps challenge store capacity errors to 429', async () => {
+      biometricAuthServiceMock.requiresBiometricAuth.mockReturnValue(true);
+      biometricAuthServiceMock.createChallenge.mockImplementation(() => {
+        const error = new Error('Biometric challenge capacity reached (1000 sessions).');
+        error.statusCode = 429;
+        throw error;
+      });
+
+      const res = await request(makeApp())
+        .post('/api/biometric-auth/challenge')
+        .send(validPayload);
+
+      expect(res.status).toBe(429);
+      expect(res.body.error).toMatch(/capacity reached/i);
+    });
   });
 
   describe('POST /api/biometric-auth/verify', () => {

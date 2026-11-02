@@ -16,36 +16,6 @@
  */
 
 import logger from '../middleware/logger.js';
-/**
- * Computes order pricing based on distance and service parameters.
- * @param {Object} params
- * @param {number} params.pickupLat
- * @param {number} params.pickupLng
- * @param {number} params.dropLat
- * @param {number} params.dropLng
- * @returns {Object} Pricing breakdown
- */
-export function computeOrderPricing({ pickupLat, pickupLng, dropLat, dropLng, ...options }) {
-  // Explicit null, undefined, and non-finite validation guards
-  const coordinates = { pickupLat, pickupLng, dropLat, dropLng };
-  
-  for (const [key, value] of Object.entries(coordinates)) {
-    if (value === null || value === undefined || !Number.isFinite(Number(value))) {
-      throw new TypeError(`Invalid coordinate provided for '${key}': must be a finite number, received ${value}`);
-    }
-  }
-
-  // Parse to numbers after validation
-  const pLat = Number(pickupLat);
-  const pLng = Number(pickupLng);
-  const dLat = Number(dropLat);
-  const dLng = Number(dropLng);
-
-  // Proceed with distance calculation and pricing logic...
-  const distanceKm = haversineKm(pLat, pLng, dLat, dLng);
-
-  // ... rest of pricing computation
-}
 // Floor and ceiling for a single freight price in paisa (1 INR = 100 paisa).
 // Negative/NaN/Infinity clamp to the floor (0); the ceiling is ₹10,00,000.
 const MIN_FREIGHT_PAISa = 0;
@@ -76,7 +46,33 @@ export function sanitizePrice(value) {
   if (!Number.isFinite(num) || num < 0) return MIN_FREIGHT_PAISa;
   return Math.round(Math.min(MAX_FREIGHT_PAISa, num));
 }
+// backend/api/src/lib/pricing.js (Excerpt)
 
+const DEFAULTS = {
+  BASE_FREIGHT: 50.0,
+  TOLL_ESTIMATE: 15.0,
+  PLATFORM_FEE: 5.0
+};
+
+/**
+ * Helper to safely parse numeric environment variables,
+ * treating empty or whitespace-only strings as unset (falling back to default).
+ */
+function parseEnvNumber(envValue, defaultValue) {
+  if (envValue === undefined || envValue === null || String(envValue).trim() === '') {
+    return defaultValue;
+  }
+  const parsed = Number(envValue);
+  return Number.isNaN(parsed) ? defaultValue : parsed;
+}
+
+export function readRateCard() {
+  return {
+    baseFreight: parseEnvNumber(process.env.BASE_FREIGHT, DEFAULTS.BASE_FREIGHT),
+    tollEstimate: parseEnvNumber(process.env.TOLL_ESTIMATE, DEFAULTS.TOLL_ESTIMATE),
+    platformFee: parseEnvNumber(process.env.PLATFORM_FEE, DEFAULTS.PLATFORM_FEE)
+  };
+}
 const EARTH_RADIUS_KM = 6371.0088;
 
 // Pricing constants (all amounts in paisa unless noted)

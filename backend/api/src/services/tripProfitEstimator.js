@@ -69,15 +69,22 @@ export function toFinitePositive(value, fallback = 0) {
  * @param {Partial<TripProfitConfig>} [params.config] - Override defaults
  * @returns {TripProfitBreakdown}
  */
-export function estimateTripProfit({ freightAmountInr, distanceKm, config = {} } = {}) {
+export function estimateTripProfit(input = {}) {
+  // The function promises not to throw on missing data. Destructuring null (or
+  // a non-object) and then reading properties from a null config violated that
+  // contract for a common "no pricing data yet" request shape.
+  const params = input && typeof input === 'object' ? input : {};
+  const { freightAmountInr, distanceKm } = params;
+  const overrides = params.config && typeof params.config === 'object' ? params.config : {};
+
   const freight = toFinitePositive(freightAmountInr);
   const distance = toFinitePositive(distanceKm);
 
   const cfg = {
-    fuelPricePerLitre: toFinitePositive(config.fuelPricePerLitre, DEFAULT_PROFIT_CONFIG.fuelPricePerLitre),
-    truckKmPerLitre:   toFinitePositive(config.truckKmPerLitre,   DEFAULT_PROFIT_CONFIG.truckKmPerLitre),
-    tollRatePerKm:     toFinitePositive(config.tollRatePerKm,     DEFAULT_PROFIT_CONFIG.tollRatePerKm),
-    otherCostPerKm:    toFinitePositive(config.otherCostPerKm,    DEFAULT_PROFIT_CONFIG.otherCostPerKm),
+    fuelPricePerLitre: toFinitePositive(overrides.fuelPricePerLitre, DEFAULT_PROFIT_CONFIG.fuelPricePerLitre),
+    truckKmPerLitre:   toFinitePositive(overrides.truckKmPerLitre,   DEFAULT_PROFIT_CONFIG.truckKmPerLitre),
+    tollRatePerKm:     toFinitePositive(overrides.tollRatePerKm,     DEFAULT_PROFIT_CONFIG.tollRatePerKm),
+    otherCostPerKm:    toFinitePositive(overrides.otherCostPerKm,    DEFAULT_PROFIT_CONFIG.otherCostPerKm),
   };
 
   // Guard against zero mileage — avoid division by zero

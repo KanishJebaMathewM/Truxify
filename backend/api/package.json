@@ -33,7 +33,7 @@
     "@sentry/node": "^10.75.0",
     "@supabase/supabase-js": "^2.109.0",
     "@upstash/redis": "^1.39.0",
-    "axios": "^1.20.0",
+    "axios": "^1.21.0",
     "circuit-breaker-js": "0.0.1",
     "compression": "^1.8.2",
     "cors": "^2.8.5",

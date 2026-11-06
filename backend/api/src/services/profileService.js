@@ -288,6 +288,7 @@ export const ProfileService = {
   updateProfile,
   deleteProfile,
   sanitizeProfilePii,
+  updateProfileFcmToken,
 };
 
 export default ProfileService;

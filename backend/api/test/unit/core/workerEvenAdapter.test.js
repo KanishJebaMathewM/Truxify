@@ -17,7 +17,7 @@ describe('WorkerEventAdapter', () => {
 
   it('should connect successfully', async () => {
     await expect(adapter.connect()).resolves.not.toThrow();
-    expect(adapter.isConnected()).toBe(true);
+    expect(adapter.isConnected).toBe(true);
   });
 
   it('should disconnect and cleanup workers', async () => {
@@ -26,7 +26,7 @@ describe('WorkerEventAdapter', () => {
 
     await adapter.disconnect();
     
-    expect(adapter.isConnected()).toBe(false);
+    expect(adapter.isConnected).toBe(false);
     expect(mockWorker.terminate).toHaveBeenCalled();
   });
 

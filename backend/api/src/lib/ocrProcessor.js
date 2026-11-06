@@ -65,7 +65,7 @@ export async function extractText(imageBuffer, language = 'eng') {
         };
     } catch (err) {
         logger.error({ err }, 'OCR extraction failed');
-        throw new Error(`OCR failed: ${err.message}`);
+        throw new Error(`OCR failed: ${err.message}`, { cause: err });
     }
 }
 

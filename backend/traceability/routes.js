@@ -7,35 +7,51 @@ const router = express.Router();
 /**
  * Middleware to validate user access to shipment
  * CWE-639: Insecure Direct Object Reference prevention
+ *
+ * Used for routes where shipmentId is provided in req.params.
  */
 async function validateShipmentAccess(req, res, next) {
     const { shipmentId } = req.params;
     const userId = req.user?.id;
-    
+
     if (!userId) {
-        logger.warn(`[SECURITY] Unauthorized shipment access attempt: ${shipmentId}`);
+        logger.warn(
+            `[SECURITY] Unauthorized shipment access attempt: ${shipmentId}`
+        );
+
         return res.status(401).json({
             success: false,
             error: 'Authentication required',
             message: 'Please login to access shipment information'
         });
     }
-    
+
     try {
-        const hasAccess = await traceService.verifyShipmentOwnership(shipmentId, userId);
-        
+        const hasAccess =
+            await traceService.verifyShipmentOwnership(
+                shipmentId,
+                userId
+            );
+
         if (!hasAccess) {
-            logger.warn(`[SECURITY] IDOR attempt: User ${userId} tried to access shipment ${shipmentId}`);
+            logger.warn(
+                `[SECURITY] IDOR attempt: User ${userId} tried to access shipment ${shipmentId}`
+            );
+
             return res.status(403).json({
                 success: false,
                 error: 'Access denied',
-                message: 'You do not have permission to view this shipment'
+                message: 'You do not have permission to access this shipment'
             });
         }
-        
+
         next();
     } catch (error) {
-        logger.error('[SECURITY] Error validating shipment access:', error);
+        logger.error(
+            '[SECURITY] Error validating shipment access:',
+            error
+        );
+
         return res.status(500).json({
             success: false,
             error: 'Internal server error',
@@ -44,21 +60,38 @@ async function validateShipmentAccess(req, res, next) {
     }
 }
 
-// Create product
+/**
+ * Create product
+ */
 router.post('/trace/product', async (req, res) => {
     try {
         const result = await traceService.createProduct(req.body);
-        res.json({ success: true, data: result });
+
+        res.json({
+            success: true,
+            data: result
+        });
     } catch (error) {
         logger.error('Product creation error:', error);
-        res.status(500).json({ success: false, error: error.message });
+
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
     }
 });
 
-// Create shipment
+/**
+ * Create shipment
+ */
 router.post('/trace/shipment', async (req, res) => {
     try {
-        const { productId, receiver, location } = req.body;
+        const {
+            productId,
+            receiver,
+            location
+        } = req.body;
+
         if (!productId || !receiver) {
             return res.status(400).json({
                 success: false,
@@ -66,37 +99,87 @@ router.post('/trace/shipment', async (req, res) => {
             });
         }
 
-        const result = await traceService.createShipment(productId, receiver, location);
-        res.json({ success: true, data: result });
+        const result =
+            await traceService.createShipment(
+                productId,
+                receiver,
+                location
+            );
+
+        res.json({
+            success: true,
+            data: result
+        });
     } catch (error) {
         logger.error('Shipment creation error:', error);
-        res.status(500).json({ success: false, error: error.message });
+
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
     }
 });
 
-// Update shipment status
-router.post('/trace/shipment/update', async (req, res) => {
-    try {
-        const { shipmentId, status, location } = req.body;
-        if (!shipmentId || !status) {
-            return res.status(400).json({
+/**
+ * Update shipment status
+ *
+ * SECURITY FIX:
+ * shipmentId is now part of the URL so that
+ * validateShipmentAccess can verify ownership
+ * before allowing the update.
+ */
+router.post(
+    '/trace/shipment/:shipmentId/update',
+    validateShipmentAccess,
+    async (req, res) => {
+        try {
+            const { shipmentId } = req.params;
+            const { status, location } = req.body;
+
+            if (!status) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'status required'
+                });
+            }
+
+            const result =
+                await traceService.updateShipmentStatus(
+                    shipmentId,
+                    status,
+                    location
+                );
+
+            res.json({
+                success: true,
+                data: result
+            });
+        } catch (error) {
+            logger.error(
+                'Shipment update error:',
+                error
+            );
+
+            res.status(500).json({
                 success: false,
-                error: 'shipmentId and status required'
+                error: error.message
             });
         }
-
-        const result = await traceService.updateShipmentStatus(shipmentId, status, location);
-        res.json({ success: true, data: result });
-    } catch (error) {
-        logger.error('Shipment update error:', error);
-        res.status(500).json({ success: false, error: error.message });
     }
-});
+);
 
-// Add custom event
+/**
+ * Add custom event
+ */
 router.post('/trace/event', async (req, res) => {
     try {
-        const { productId, eventType, location, description } = req.body;
+        const {
+            productId,
+            eventType,
+            location,
+            description
+        } = req.body;
+
         if (!productId || !eventType) {
             return res.status(400).json({
                 success: false,
@@ -104,18 +187,42 @@ router.post('/trace/event', async (req, res) => {
             });
         }
 
-        const result = await traceService.addCustomEvent(productId, eventType, location, description);
-        res.json({ success: true, data: result });
+        const result =
+            await traceService.addCustomEvent(
+                productId,
+                eventType,
+                location,
+                description
+            );
+
+        res.json({
+            success: true,
+            data: result
+        });
     } catch (error) {
-        logger.error('Custom event error:', error);
-        res.status(500).json({ success: false, error: error.message });
+        logger.error(
+            'Custom event error:',
+            error
+        );
+
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
     }
 });
 
-// Verify product
+/**
+ * Verify product
+ */
 router.post('/trace/verify', async (req, res) => {
     try {
-        const { productId, isValid, notes } = req.body;
+        const {
+            productId,
+            isValid,
+            notes
+        } = req.body;
+
         if (!productId) {
             return res.status(400).json({
                 success: false,
@@ -123,58 +230,151 @@ router.post('/trace/verify', async (req, res) => {
             });
         }
 
-        const result = await traceService.verifyProduct(productId, isValid, notes);
-        res.json({ success: true, data: result });
+        const result =
+            await traceService.verifyProduct(
+                productId,
+                isValid,
+                notes
+            );
+
+        res.json({
+            success: true,
+            data: result
+        });
     } catch (error) {
-        logger.error('Verification error:', error);
-        res.status(500).json({ success: false, error: error.message });
+        logger.error(
+            'Verification error:',
+            error
+        );
+
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
     }
 });
 
-// Get product trace
-router.get('/trace/product/trace/:productId', async (req, res) => {
-    try {
-        const { productId } = req.params;
-        const trace = await traceService.getProductTrace(productId);
-        res.json({ success: true, data: trace });
-    } catch (error) {
-        logger.error('Product trace error:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
+/**
+ * Get product trace
+ */
+router.get(
+    '/trace/product/trace/:productId',
+    async (req, res) => {
+        try {
+            const { productId } = req.params;
 
-// Get product
-router.get('/trace/product/:productId', async (req, res) => {
-    try {
-        const { productId } = req.params;
-        const product = await traceService.getProduct(productId);
-        res.json({ success: true, data: product });
-    } catch (error) {
-        logger.error('Product fetch error:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
+            const trace =
+                await traceService.getProductTrace(
+                    productId
+                );
 
-// Get shipment - PROTECTED with IDOR validation
-router.get('/trace/shipment/:shipmentId', validateShipmentAccess, async (req, res) => {
-    try {
-        const { shipmentId } = req.params;
-        const shipment = await traceService.getShipment(shipmentId);
-        res.json({ success: true, data: shipment });
-    } catch (error) {
-        logger.error('Shipment fetch error:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
+            res.json({
+                success: true,
+                data: trace
+            });
+        } catch (error) {
+            logger.error(
+                'Product trace error:',
+                error
+            );
 
-// Get stats
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    }
+);
+
+/**
+ * Get product
+ */
+router.get(
+    '/trace/product/:productId',
+    async (req, res) => {
+        try {
+            const { productId } = req.params;
+
+            const product =
+                await traceService.getProduct(
+                    productId
+                );
+
+            res.json({
+                success: true,
+                data: product
+            });
+        } catch (error) {
+            logger.error(
+                'Product fetch error:',
+                error
+            );
+
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    }
+);
+
+/**
+ * Get shipment
+ *
+ * Protected with shipment ownership validation.
+ */
+router.get(
+    '/trace/shipment/:shipmentId',
+    validateShipmentAccess,
+    async (req, res) => {
+        try {
+            const { shipmentId } = req.params;
+
+            const shipment =
+                await traceService.getShipment(
+                    shipmentId
+                );
+
+            res.json({
+                success: true,
+                data: shipment
+            });
+        } catch (error) {
+            logger.error(
+                'Shipment fetch error:',
+                error
+            );
+
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    }
+);
+
+/**
+ * Get statistics
+ */
 router.get('/trace/stats', async (req, res) => {
     try {
-        const stats = await traceService.getTraceabilityStats();
-        res.json({ success: true, data: stats });
+        const stats =
+            await traceService.getTraceabilityStats();
+
+        res.json({
+            success: true,
+            data: stats
+        });
     } catch (error) {
-        logger.error('Stats error:', error);
-        res.status(500).json({ success: false, error: error.message });
+        logger.error(
+            'Stats error:',
+            error
+        );
+
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
     }
 });
 

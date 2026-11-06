@@ -57,7 +57,7 @@ dependencies:
   image_picker: ^1.1.2
   flutter_image_compress: ^2.3.0
   battery_plus: ^7.1.2
-  flutter_dotenv: ^5.2.0
+  flutter_dotenv: ^6.0.1
   sentry_flutter: ^8.14.1
 
 dev_dependencies:

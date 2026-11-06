@@ -8,10 +8,10 @@
 
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import i18next from 'i18next';
 import middleware from 'i18next-http-middleware';
 import logger from './logger.js';
-import logger from './logger.js'; // Adjust relative import path as needed
 
 // Inside backend/api/src/middleware/i18n.js
 

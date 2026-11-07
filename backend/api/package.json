@@ -90,5 +90,8 @@
     "verification"
   ],
   "author": "Truxify Dev Team",
-  "license": "ISC"
+  "license": "ISC",
+  "engines": {
+    "node": ">=22.0.0"
+  }
 }

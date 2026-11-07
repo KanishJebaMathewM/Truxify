@@ -1,7 +1,6 @@
 <img width="1536" height="1024" alt="Cover img Truxify" src="https://github.com/user-attachments/assets/eb96ea33-edb3-433a-b6b5-ecaddfc34306" />
 
 # 🚛 Truxify
-
 ### Broker-Free · ML-Powered · Blockchain-Secured Freight Platform
 
 **Directly connecting manufacturers and truck drivers — eliminating the middleman, maximising earnings, and bringing transparency to India's ₹14 lakh crore freight industry.**

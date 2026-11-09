@@ -27,6 +27,45 @@ export const ISO_17712_CLASSES = {
     }
 };
 
+// Maximum accepted base64 image payload. 750,000 characters decode to roughly
+// 550 KB, which keeps a single verification request well below the JSON body
+// limit while still allowing normal handoff photos.
+export const MAX_SEAL_IMAGE_BASE64_LENGTH = 750000;
+const MAX_SEAL_IMAGE_BYTES = 562500;
+
+function validationError(message, statusCode = 400) {
+    const error = new TypeError(message);
+    error.statusCode = statusCode;
+    return error;
+}
+
+function assertSealImageInput(name, value) {
+    if (value === undefined || value === null || value === '') {
+        return;
+    }
+
+    if (Buffer.isBuffer(value)) {
+        if (value.length > MAX_SEAL_IMAGE_BYTES) {
+            throw validationError(
+                `${name} exceeds the maximum decoded size of ${MAX_SEAL_IMAGE_BYTES} bytes.`,
+                413
+            );
+        }
+        return;
+    }
+
+    if (typeof value !== 'string') {
+        throw validationError(`${name} must be a base64 string.`);
+    }
+
+    if (value.length > MAX_SEAL_IMAGE_BASE64_LENGTH) {
+        throw validationError(
+            `${name} exceeds the maximum length of ${MAX_SEAL_IMAGE_BASE64_LENGTH} characters.`,
+            413
+        );
+    }
+}
+
 /**
  * Computes a 64-bit difference perceptual hash (dHash) from image byte buffer.
  * Perceptual hashes are invariant to minor lighting, compression, and sensor noise.
@@ -38,6 +77,8 @@ export function calculatePerceptualHash(imageInput) {
     if (!imageInput) {
         return '0000000000000000';
     }
+
+    assertSealImageInput('imageInput', imageInput);
 
     const buffer = Buffer.isBuffer(imageInput)
         ? imageInput
@@ -117,6 +158,8 @@ export function verifyTrailerSealIntegrity(verifyParams = {}) {
         defectScoreOverride,
         sealClass = 'HIGH_SECURITY'
     } = verifyParams;
+
+    assertSealImageInput('sealImageBase64', sealImageBase64);
 
     const normalizedExpected = (expectedSerial || '').trim().toUpperCase();
 

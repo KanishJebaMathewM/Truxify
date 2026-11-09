@@ -1,5 +1,5 @@
 import express from 'express';
-import { matchLtlPartialLoads, optimizeLtlConsolidationKnapsack } from '../services/ltlConsolidation.js';
+import { matchLtlPartialLoads, optimizeLtlConsolidationKnapsack, MAX_LTL_PARTIAL_LOADS } from '../services/ltlConsolidation.js';
 
 const router = express.Router();
 
@@ -25,6 +25,13 @@ router.post('/match', (req, res) => {
             });
         }
 
+        if (partialLoads.length > MAX_LTL_PARTIAL_LOADS) {
+            return res.status(413).json({
+                success: false,
+                error: `partialLoads must contain at most ${MAX_LTL_PARTIAL_LOADS} loads per request.`
+            });
+        }
+
         const matchResults = matchLtlPartialLoads(truck, partialLoads);
 
         return res.status(200).json({
@@ -32,7 +39,7 @@ router.post('/match', (req, res) => {
             data: matchResults
         });
     } catch (error) {
-        return res.status(500).json({
+        return res.status(error.statusCode || 500).json({
             success: false,
             error: error.message
         });
@@ -62,6 +69,13 @@ router.post('/optimize', (req, res) => {
             });
         }
 
+        if (partialLoads.length > MAX_LTL_PARTIAL_LOADS) {
+            return res.status(413).json({
+                success: false,
+                error: `partialLoads must contain at most ${MAX_LTL_PARTIAL_LOADS} loads per request.`
+            });
+        }
+
         const optimalManifest = optimizeLtlConsolidationKnapsack(truck, partialLoads, options);
 
         return res.status(200).json({
@@ -69,7 +83,7 @@ router.post('/optimize', (req, res) => {
             data: optimalManifest
         });
     } catch (error) {
-        return res.status(500).json({
+        return res.status(error.statusCode || 500).json({
             success: false,
             error: error.message
         });

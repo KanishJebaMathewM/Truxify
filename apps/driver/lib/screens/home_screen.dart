@@ -21,7 +21,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
-import 'package:truxify_shared/truxify_shared.dart';
+import 'package:truxify_shared/truxify_shared.dart' hide OfflineBanner;
 
 import '../core/app_routes.dart';
 import '../l10n/app_localizations.dart';
@@ -539,7 +539,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       return await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+        desiredAccuracy: LocationAccuracy.high,
       );
     } catch (e, stackTrace) {
       debugPrint('LOCATION ERROR: $e\n$stackTrace');

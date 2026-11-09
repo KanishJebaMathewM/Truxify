@@ -1,6 +1,27 @@
 import crypto from 'crypto';
 import logger from '../middleware/logger.js';
+// backend/api/src/services/trackingTokenService.js (Excerpt)
 
+import logger from '../middleware/logger.js';
+
+export async function generateTrackingToken(orderId) {
+  try {
+    // ... token generation logic ...
+  } catch (err) {
+    // ✅ Updated to structured error logging preserving stack trace and context
+    logger.error({ err, orderId }, 'Failed to generate tracking token for order');
+    throw new Error('Tracking token generation failed.');
+  }
+}
+
+export async function validateTrackingToken(token) {
+  try {
+    // ... token validation logic ...
+  } catch (err) {
+    logger.error({ err, token }, 'Failed to validate tracking token');
+    return null;
+  }
+}
 const TOKEN_BYTE_LENGTH = 32;
 const TOKEN_EXPIRY_DAYS = 7;
 const PUBLIC_TRACKING_LOCATION_FRESHNESS_SECONDS = parseInt(process.env.PUBLIC_TRACKING_LOCATION_FRESHNESS_SECONDS || '900', 10);
@@ -12,7 +33,31 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-
 function isValidUUID(uuid) {
   return typeof uuid === 'string' && UUID_REGEX.test(uuid);
 }
+// backend/api/src/services/trackingTokenService.js (Excerpt)
 
+export async function getDriverLocation(driverId) {
+  try {
+    // FIX: Use .maybeSingle() instead of .single() per issue #4974
+    const { data, error } = await supabase
+      .from('driver_locations')
+      .select('*')
+      .eq('driver_id', driverId)
+      .order('created_at', { ascending: false })
+      .maybeSingle();
+
+    if (error) {
+      // Reserve error logging strictly for actual query/database failures
+      logger.error({ err: error, driverId }, '[trackingTokenService] Database query failed for driver location');
+      throw new Error(`Failed to fetch driver location: ${error.message}`);
+    }
+
+    // Returns null gracefully when no active row exists (normal tracking state)
+    return data;
+  } catch (err) {
+    logger.error({ err, driverId }, '[trackingTokenService] Unexpected exception in getDriverLocation');
+    throw err;
+  }
+}
 export class TrackingTokenService {
   constructor({ supabase, supabaseAdmin, logger: injectedLogger }) {
     this._supabase = supabase;

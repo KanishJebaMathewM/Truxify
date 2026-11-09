@@ -24,7 +24,7 @@ describe('IFTA report OpenAPI contract', () => {
 
   it('documents every status the handler and auth chain return', () => {
     expect(operation.security).toEqual([{ BearerAuth: [] }]);
-    expect(Object.keys(operation.responses).sort()).toEqual(['200', '400', '401', '403', '500']);
+    expect(Object.keys(operation.responses).sort()).toEqual(['200', '400', '401', '403', '413', '500']);
   });
 
   it('documents exactly the fields generateIftaReport returns', () => {

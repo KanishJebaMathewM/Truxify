@@ -908,7 +908,11 @@ async def verify_kyc_endpoint(file: UploadFile = File(...), _auth=Depends(verify
                 extracted_number=None,
                 raw_text="",
             )
+# backend/ml/main.py (Excerpt)
 
+# REMOVED:
+# MAX_CONCURRENT_INFERENCE = int(os.getenv("MAX_CONCURRENT_INFERENCE", 4))
+# INFERENCE_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_INFERENCE)
         result = ocr_verifier.verify_license(text)
         return KYCVerificationOutput(**result)
     except HTTPException:

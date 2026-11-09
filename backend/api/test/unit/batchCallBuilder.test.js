@@ -92,11 +92,11 @@ describe('BatchCallBuilder', () => {
       expect(call.decodeFn(data)).toEqual({ score: '42' })
     })
 
-    it('falls back to the escrow address when no reputation contract is configured', () => {
+    it('refuses to target escrow when no reputation contract is configured', () => {
       process.env.REPUTATION_CONTRACT_ADDRESS = ''
       builder = new BatchCallBuilder({ provider: null })
-      const call = builder.buildReputationCall('0x' + 'b'.repeat(40))
-      expect(call.target).toBe(process.env.ESCROW_CONTRACT_ADDRESS)
+      expect(() => builder.buildReputationCall('0x' + 'b'.repeat(40)))
+        .toThrow('REPUTATION_CONTRACT_ADDRESS is not configured')
     })
   })
 

@@ -163,7 +163,24 @@ import { requireIdempotency } from '../middleware/idempotency.js';
 // NOTE: In a real project, you'd likely move all handlers to driverController.js.
 // Here, we are merging into the router file. I will assume the existence of 
 // driverController.js as per the new snippet.
+// backend/api/src/routes/driverRoutes.js (Excerpt)
 
+// BEFORE:
+// const { data, error } = await supabase
+//   .from('route_map_points')
+//   .update({ claimed })
+//   .eq('id', routePointId);
+
+// FIXED: Update is_claimed column per issue #6965
+const { data, error } = await supabase
+  .from('route_map_points')
+  .update({ is_claimed: claimed })
+  .eq('id', routePointId);
+
+if (error) {
+  logger.error({ err: error, routePointId }, '[driverRoutes] Failed to update route point claim status');
+  return res.status(500).json({ error: 'Failed to update route point' });
+}
 import driverController from '../controllers/driverController.js'; 
 
 // Reuse one caller-scoped client per request without sharing credentials
@@ -185,7 +202,56 @@ const router = express.Router();
 const hosStatusSchema = z.object({
   status: z.enum(['off_duty', 'on_duty', 'driving', 'resting'])
 });
+// backend/api/src/routes/driverRoutes.js (Excerpt)
 
+import { Router } from 'express';
+import { getDriverProfile, updateDriverStatus } from '../services/driverService.js';
+import { authenticate } from '../middleware/auth.js';
+import { logger } from '../utils/logger.js'; // Ensure centralized logger is imported
+
+const router = Router();
+
+router.get('/profile', authenticate, async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    const result = await getDriverProfile(driverId);
+
+    if (!result.success) {
+      // FIX: Replace unstructured logs with structured logger.warn per issue #9522
+      logger.warn({ driverId, reason: result.error }, '[driverRoutes] Failed to fetch driver profile');
+      return res.status(404).json({ success: false, error: result.error });
+    }
+
+    return res.status(200).json({ success: true, data: result.data });
+  } catch (err) {
+    // FIX: Use structured logger.error with err object and metadata per issue #9522
+    logger.error({ err, userId: req.user?.id }, '[driverRoutes] Unexpected error in GET /profile');
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+router.patch('/status', authenticate, async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!status) {
+      logger.warn({ userId: req.user?.id, body: req.body }, '[driverRoutes] Status update missing status field');
+      return res.status(400).json({ success: false, error: 'Status field is required' });
+    }
+
+    const result = await updateDriverStatus(req.user.id, status);
+    if (!result.success) {
+      logger.error({ err: result.error, driverId: req.user.id, status }, '[driverRoutes] Failed to update driver status');
+      return res.status(400).json({ success: false, error: result.error });
+    }
+
+    return res.status(200).json({ success: true, data: result.data });
+  } catch (err) {
+    logger.error({ err, driverId: req.user?.id }, '[driverRoutes] Unexpected error in PATCH /status');
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+export default router;
 // ============================================================================
 // ACTIVE DRIVERS (B2B, consumed by the n8n document-integrity workflow)
 // ============================================================================
@@ -301,7 +367,30 @@ function requireDriverRole(req, res, next) {
   }
   next();
 }
+router.get('/driver/:id/earnings', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { period = 'week' } = req.query;
 
+    // Calculate date filter based on period
+    const startDate = getStartDateForPeriod(period);
+
+    const { data: trips, error } = await supabase
+      .from('trips')
+      .select('*, route_details, gross_payment, estimated_fuel_cost, deadhead_saved, tx_hash')
+      .eq('driver_id', id)
+      .gte('completed_at', startDate.toISOString())
+      .order('completed_at', { ascending: false });
+
+    if (error) throw error;
+
+    const summary = computeEarningsSummary(trips);
+
+    return res.status(200).json({ success: true, period, summary, trips });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
 function parseIntegerQuery(value) {
   if (value === undefined) return undefined;
   if (!/^\d+$/.test(String(value))) return NaN;
@@ -449,6 +538,13 @@ router.put('/online', authenticate, userLimiter, requirePolicy('driver:toggle-on
   } catch (err) {
     logger.error({ event: 'DRIVER_ONLINE_STATUS_UPDATE_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver online status update error');
     res.status(500).json({ error: 'Internal Server Error' });
+    // backend/api/src/routes/driverRoutes.js (Excerpt from earnings report handler)
+
+// BEFORE:
+// const avg_earning_per_km = totalKm > 0 ? (totalNetEarnings / 100.0) / totalKm : 0;
+
+// FIXED (Per issue #8818 - keeping units consistent in paisa):
+const avg_earning_per_km = totalKm > 0 ? totalNetEarnings / totalKm : 0;
   }
 });
 
@@ -1642,7 +1738,7 @@ async function handleDriverEarningsAndStatement(req, res, filename, errorLabel) 
         drop_address: trip.drop_address,
         pickup_date: trip.pickup_date,
         base_freight: baseFreight,
-        platform_fee: platformFee;
+        platform_fee: platformFee,
         toll_estimate: tollEstimate,
         net_earnings: netEarnings,
         status: trip.status
@@ -1650,7 +1746,6 @@ async function handleDriverEarningsAndStatement(req, res, filename, errorLabel) 
     });
 
     // Apply sorting before formatting output
-    avg_earning_per_km: totalKm > 0 ? totalNetEarnings / totalKm : 0,
     if (sort_by === 'net_earnings') {
       tripsList.sort((a, b) => (b.net_earnings - a.net_earnings) || new Date(b.pickup_date) - new Date(a.pickup_date));
     } else if (sort_by === 'base_freight') {

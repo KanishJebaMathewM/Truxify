@@ -341,9 +341,9 @@ class FederatedClient:
     def simulate_driver_behavior(self, num_samples: int = 100):
         """Simulate driver behavior data"""
         # Features: speed, acceleration, braking, cornering, etc.
-        np.random.seed(int(time.time()) % 1000 + hash(self.client_id) % 1000)
+        rng = np.random.RandomState(int(time.time()) % 1000 + hash(self.client_id) % 1000)
         
-        data = np.random.randn(num_samples, 10)
+        data = rng.randn(num_samples, 10)
         
         # Labels: risky (1) or safe (0)
         # Safe drivers: 0, Risky drivers: 1

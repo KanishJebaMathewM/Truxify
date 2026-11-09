@@ -65,7 +65,8 @@ import { checkEscrowHealth } from '../services/escrow.js';
 import logger from '../middleware/logger.js';
 import { createDefaultAggregator } from '../core/health/index.js';
 import { captureDebugException } from '../middleware/sentry.js';
-
+ fix/driver-routes-syntax-19611
+ main
 const router = express.Router();
 
 const DEFAULT_TIMEOUT_MS = 400;
@@ -82,6 +83,7 @@ function withTimeout(promise) {
     }),
   ]).finally(() => clearTimeout(timer));
 }
+
 
 async function checkSupabase() {
   // Probe through the service-role client: anon privileges on profiles are

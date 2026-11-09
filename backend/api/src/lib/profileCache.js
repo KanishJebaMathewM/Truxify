@@ -6,10 +6,38 @@ import {
   customerStatsKey,
   driverDetailsKey,
 } from "../cache/profileCacheKeys.js";
+// backend/api/src/lib/profileCache.js (Excerpt)
 
+export function isValidCachedProfile(uid, profile) {
+  // FIX: Add strict type guards per issue #6982
+  if (typeof uid !== 'string' || uid.trim() === '') {
+    return false;
+  }
+
+  if (!profile || typeof profile !== 'object' || Array.isArray(profile)) {
+    return false;
+  }
+
+  // Additional cache validation logic...
+  return true;
+}
 let _publishFn = null;
 let _pubSubChecked = false;
+// backend/api/src/lib/profileCache.js (Excerpt)
 
+export function isValidCachedProfile(cachedProfile) {
+  // FIX: Explicit null guard before typeof check per issue #8340
+  if (cachedProfile === null || typeof cachedProfile !== 'object') {
+    return false;
+  }
+
+  // Proceed with existing validation checks on properties (e.g. isActive, etc.)
+  if (typeof cachedProfile.isActive !== 'boolean') {
+    return false;
+  }
+
+  return true;
+}
 async function _publishProfileInvalidation(eventOpts) {
   if (!_pubSubChecked) {
     _pubSubChecked = true;
@@ -56,7 +84,26 @@ export function getCacheStats() {
     hitRate: total > 0 ? ((hits / total) * 100).toFixed(1) + '%' : '0%',
   };
 }
+// backend/api/src/lib/profileCache.js (Excerpt)
 
+export function isValidCachedProfile(firebaseUid, cachedProfile) {
+  // FIX: Ensure firebaseUid is a valid non-empty trimmed string per issue #6939
+  if (typeof firebaseUid !== 'string' || firebaseUid.trim() === '') {
+    return false;
+  }
+
+  // FIX: Ensure cachedProfile is a non-null plain object before property access
+  if (!cachedProfile || typeof cachedProfile !== 'object' || Array.isArray(cachedProfile)) {
+    return false;
+  }
+
+  // Validate expected primitive/string properties safely
+  if (typeof cachedProfile.id !== 'string' || typeof cachedProfile.role !== 'string') {
+    return false;
+  }
+
+  return true;
+}
 export function resetCacheStats() {
   cacheHits = 0;
   cacheMisses = 0;

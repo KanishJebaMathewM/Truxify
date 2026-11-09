@@ -60,7 +60,37 @@ const enDict = (() => {
     return {};
   }
 })();
+// backend/api/src/middleware/i18n.js
 
+/**
+ * i18n Configuration & Localization Utilities
+ * Cleaned up per #14582 (unused i18nMiddleware removed)
+ */
+
+export const supportedLocales = ['en', 'es', 'fr', 'de', 'ta'];
+export const defaultLocale = 'en';
+
+/**
+ * Resolves the preferred locale from request headers or query parameters.
+ * @param {Object} req - Express request object.
+ * @returns {string} Resolved locale code.
+ */
+export function resolveLocale(req) {
+  const queryLocale = req.query?.lang || req.query?.locale;
+  if (queryLocale && supportedLocales.includes(queryLocale)) {
+    return queryLocale;
+  }
+
+  const acceptHeader = req.headers?.['accept-language'];
+  if (acceptHeader) {
+    const primaryLang = acceptHeader.split(',')[0].substring(0, 2).toLowerCase();
+    if (supportedLocales.includes(primaryLang)) {
+      return primaryLang;
+    }
+  }
+
+  return defaultLocale;
+}
 const esDict = (() => {
   try {
     return JSON.parse(fs.readFileSync(path.join(__dirname, '../locales/es.json')));

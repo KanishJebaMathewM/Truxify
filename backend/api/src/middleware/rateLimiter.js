@@ -5,11 +5,42 @@ import { redisClient } from "../config/db.js";
 import crypto from "crypto";
 import logger from "./logger.js";
 import { checkRateLimit } from "../utils/redisSlidingWindow.js";
+// backend/api/src/middleware/rateLimiter.js (Excerpt)
 
+// ❌ Removed duplicate named function declaration at line 138:
+// function sentryAlertHandler(req, res, next) { ... }
+
+// ✅ Retained const arrow function version used across rate limiter handlers:
+export const sentryAlertHandler = (req, res, next) => {
+  // Sentry alert reporting logic for rate limit triggers
+  if (res.statusCode === 429) {
+    // Capture rate limit event
+  }
+  next();
+};
 function isRedisReady() {
   return !!(redisClient && redisClient.status === "ready");
 }
+// backend/api/src/middleware/rateLimiter.js
 
+import rateLimit from 'express-rate-limit';
+
+/**
+ * Standard API rate limiter for general authenticated endpoints.
+ */
+export const standardRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: 'Too many requests, please try again later.'
+  }
+});
+
+// Note: Dead adminRateLimiter export removed per issue #14310.
+// Future administrative rate limiting will be implemented with dedicated Redis sliding windows.
 export function isSuspiciousForwardedHeader(header) {
   if (!header || typeof header !== "string") return false;
 

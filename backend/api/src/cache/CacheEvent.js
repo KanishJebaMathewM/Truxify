@@ -15,7 +15,23 @@
 
 import crypto from "crypto";
 import logger from "../middleware/logger.js";
+// backend/api/src/cache/CacheEvent.js
 
+import logger from '../middleware/logger.js'; // Adjust path per module structure
+
+export function handleCacheEvent(eventName, payload) {
+  try {
+    // Existing cache event dispatch and synchronization logic
+    dispatchToListeners(eventName, payload);
+  } catch (e) {
+    // Log the caught error with event context
+    logger.warn('Failed to dispatch cache event', { 
+      event: eventName, 
+      error: e.message,
+      stack: e.stack 
+    });
+  }
+}
 export const CacheEventType = Object.freeze({
   INVALIDATE_KEY: "INVALIDATE_KEY",
   INVALIDATE_PATTERN: "INVALIDATE_PATTERN",

@@ -102,13 +102,15 @@ class AppLocalizationsKn extends AppLocalizations {
   String get loginWithBiometrics => 'ಬಯೋಮೆಟ್ರಿಕ್ಸ್‌ನೊಂದಿಗೆ ಲಾಗಿನ್ ಮಾಡಿ';
 
   @override
-  String get biometricsNotSupported => 'ಈ ಸಾಧನದಲ್ಲಿ ಬಯೋಮೆಟ್ರಿಕ್ಸ್ ಬೆಂಬಲಿಸುವುದಿಲ್ಲ';
+  String get biometricsNotSupported =>
+      'ಈ ಸಾಧನದಲ್ಲಿ ಬಯೋಮೆಟ್ರಿಕ್ಸ್ ಬೆಂಬಲಿಸುವುದಿಲ್ಲ';
 
   @override
   String get biometricAuthSuccessful => 'ಬಯೋಮೆಟ್ರಿಕ್ ದೃಢೀಕರಣ ಯಶಸ್ವಿಯಾಗಿದೆ';
 
   @override
-  String get biometricAuthRequiresSession => 'ಯಾವುದೇ ಉಳಿಸಿದ ಸೆಷನ್ ಕಂಡುಬಂದಿಲ್ಲ. ದಯವಿಟ್ಟು ಮೊದಲು ನಿಮ್ಮ ಫೋನ್ ಸಂಖ್ಯೆಯೊಂದಿಗೆ ಸೈನ್ ಇನ್ ಮಾಡಿ.';
+  String get biometricAuthRequiresSession =>
+      'ಯಾವುದೇ ಉಳಿಸಿದ ಸೆಷನ್ ಕಂಡುಬಂದಿಲ್ಲ. ದಯವಿಟ್ಟು ಮೊದಲು ನಿಮ್ಮ ಫೋನ್ ಸಂಖ್ಯೆಯೊಂದಿಗೆ ಸೈನ್ ಇನ್ ಮಾಡಿ.';
 
   @override
   String get pleaseEnterPhone => 'ದಯವಿಟ್ಟು ನಿಮ್ಮ ಫೋನ್ ಸಂಖ್ಯೆಯನ್ನು ನಮೂದಿಸಿ';
@@ -125,16 +127,20 @@ class AppLocalizationsKn extends AppLocalizations {
   String get phoneMustBeDigits => 'ಫೋನ್ ಸಂಖ್ಯೆಯಲ್ಲಿ ಕೇವಲ ಅಂಕಿಗಳಿರಬೇಕು';
 
   @override
-  String get verificationFailed => 'ಪರಿಶೀಲನೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
+  String get verificationFailed =>
+      'ಪರಿಶೀಲನೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
 
   @override
-  String get phoneVerificationFailed => 'ಫೋನ್ ಪರಿಶೀಲನೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
+  String get phoneVerificationFailed =>
+      'ಫೋನ್ ಪರಿಶೀಲನೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
 
   @override
-  String get autoVerificationFailed => 'ಸ್ವಯಂ-ಪರಿಶೀಲನೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು OTP ಯನ್ನು ಹಸ್ತಚಾಲಿತವಾಗಿ ನಮೂದಿಸಿ.';
+  String get autoVerificationFailed =>
+      'ಸ್ವಯಂ-ಪರಿಶೀಲನೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು OTP ಯನ್ನು ಹಸ್ತಚಾಲಿತವಾಗಿ ನಮೂದಿಸಿ.';
 
   @override
-  String get failedToSendOtp => 'OTP ಕಳುಹಿಸಲು ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
+  String get failedToSendOtp =>
+      'OTP ಕಳುಹಿಸಲು ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
 
   @override
   String get enterOtp => 'OTP ನಮೂದಿಸಿ';
@@ -145,10 +151,12 @@ class AppLocalizationsKn extends AppLocalizations {
   }
 
   @override
-  String get invalidOtp => 'ಅಮಾನ್ಯ OTP. ದಯವಿಟ್ಟು ಪರಿಶೀಲಿಸಿ ಮತ್ತು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
+  String get invalidOtp =>
+      'ಅಮಾನ್ಯ OTP. ದಯವಿಟ್ಟು ಪರಿಶೀಲಿಸಿ ಮತ್ತು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
 
   @override
-  String get verificationSessionExpired => 'ಪರಿಶೀಲನಾ ಅಧಿವೇಶನ ಅವಧಿ ಮುಗಿದಿದೆ. ದಯವಿಟ್ಟು ಹೊಸ OTP ವಿನಂತಿಸಿ.';
+  String get verificationSessionExpired =>
+      'ಪರಿಶೀಲನಾ ಅಧಿವೇಶನ ಅವಧಿ ಮುಗಿದಿದೆ. ದಯವಿಟ್ಟು ಹೊಸ OTP ವಿನಂತಿಸಿ.';
 
   @override
   String get invalidVerificationCode => 'ಅಮಾನ್ಯ ಪರಿಶೀಲನಾ ಕೋಡ್.';
@@ -446,16 +454,19 @@ class AppLocalizationsKn extends AppLocalizations {
   String get unableToShare => 'ಹಂಚಿಕೊಳ್ಳಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ';
 
   @override
-  String get linkExpired => 'ಈ ಟ್ರ್ಯಾಕಿಂಗ್ ಲಿಂಕ್ ಅವಧಿ ಮುಗಿದಿದೆ ಅಥವಾ ಇನ್ನು ಮಾನ್ಯವಾಗಿಲ್ಲ.';
+  String get linkExpired =>
+      'ಈ ಟ್ರ್ಯಾಕಿಂಗ್ ಲಿಂಕ್ ಅವಧಿ ಮುಗಿದಿದೆ ಅಥವಾ ಇನ್ನು ಮಾನ್ಯವಾಗಿಲ್ಲ.';
 
   @override
-  String get trackingRevoked => 'ಎಲ್ಲಾ ಟ್ರ್ಯಾಕಿಂಗ್ ಲಿಂಕ್‌ಗಳನ್ನು ರದ್ದುಗೊಳಿಸಲಾಗಿದೆ.';
+  String get trackingRevoked =>
+      'ಎಲ್ಲಾ ಟ್ರ್ಯಾಕಿಂಗ್ ಲಿಂಕ್‌ಗಳನ್ನು ರದ್ದುಗೊಳಿಸಲಾಗಿದೆ.';
 
   @override
   String get copyLink => 'ಲಿಂಕ್ ನಕಲಿಸಿ';
 
   @override
-  String get shareMessage => 'Truxify ನಲ್ಲಿ ನಿಮ್ಮ ಸರಕು ಸಾಗಣೆಯನ್ನು ಟ್ರ್ಯಾಕ್ ಮಾಡಿ';
+  String get shareMessage =>
+      'Truxify ನಲ್ಲಿ ನಿಮ್ಮ ಸರಕು ಸಾಗಣೆಯನ್ನು ಟ್ರ್ಯಾಕ್ ಮಾಡಿ';
 
   @override
   String get orderNotFound => 'ಆದೇಶ ಕಂಡುಬಂದಿಲ್ಲ';

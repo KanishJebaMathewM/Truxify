@@ -40,33 +40,32 @@ export const tracingMiddleware = (req, res, next) => {
         // Continue request
         next();
 
-        // End span after response
-        res.on('finish', () => {
-            const durationMs = Date.now() - req._startTime;
-            span.setAttributes({
-                'http.status_code': res.statusCode,
-                'http.response_time_ms': durationMs,
-            });
-            
-            if (res.statusCode >= 400) {
-                span.setStatus({
-                    code: 2, // ERROR status
-                    message: `HTTP ${res.statusCode}`
-                });
-            } else {
-                span.setStatus({ code: 1 }); // OK status
-            }
-            
-            span.end();
-        });
+        // A response can emit more than one terminal event: an aborted
+        // connection often fires 'close' after 'error' or 'finish'. Ending the
+        // span twice corrupts its duration and produces duplicate exports.
+        let spanEnded = false;
+        const endSpan = (statusCode, error) => {
+            if (spanEnded) return;
+            spanEnded = true;
 
-        res.on('error', (error) => {
-            span.recordException(error);
+            if (error) {
+                span.recordException(error);
+            }
+            span.setAttributes({
+                'http.status_code': statusCode,
+                'http.response_time_ms': Date.now() - req._startTime,
+            });
             span.setStatus({
-                code: 2,
-                message: error.message
+                code: statusCode >= 400 ? 2 : 1,
+                message: error?.message || (statusCode >= 400 ? `HTTP ${statusCode}` : undefined),
             });
             span.end();
+        };
+
+        res.once('finish', () => endSpan(res.statusCode));
+        res.once('error', (error) => endSpan(500, error));
+        res.once('close', () => {
+            if (!res.writableEnded) endSpan(499);
         });
     });
 };

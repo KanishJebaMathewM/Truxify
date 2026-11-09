@@ -8,7 +8,25 @@ const IN_MEMORY_TTL_MS = 86400000;
 const CLEANUP_INTERVAL_MS = 60000;
 const MAX_IN_MEMORY_ENTRIES = 10000;
 const EVICTION_BATCH_SIZE = Math.floor(MAX_IN_MEMORY_ENTRIES * 0.1); // evict 10% at a time
+// backend/api/src/middleware/idempotency.js (Excerpt)
 
+const inMemoryStore = new Map();
+const MAX_IN_MEMORY_ENTRIES = 10000;
+
+export function storeIdempotencyResponse(key, responseData, ttlMs) {
+  // FIX: Enforce max size limit with eviction per issue #6683
+  if (inMemoryStore.size >= MAX_IN_MEMORY_ENTRIES) {
+    const oldestKey = inMemoryStore.keys().next().value;
+    if (oldestKey !== undefined) {
+      inMemoryStore.delete(oldestKey);
+    }
+  }
+
+  inMemoryStore.set(key, {
+    data: responseData,
+    expiry: Date.now() + ttlMs,
+  });
+}
 // The Redis lock must outlive the longest guarded handler or a slow request's
 // lock can expire mid-execution and let a duplicate re-acquire it. Escrow flows
 // wait up to 60s for on-chain confirmation (see services/escrow.js), so the

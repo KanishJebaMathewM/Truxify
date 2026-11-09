@@ -1,5 +1,21 @@
 import { z } from 'zod';
+// backend/api/src/validation/loadSchemas.js (Excerpt)
 
+import { z } from 'zod';
+
+export const loadSchema = z.object({
+  // Before: z.string({ error: 'Load ID is required' })
+  loadId: z.string({
+    required_error: 'Load ID is required.',
+    invalid_type_error: 'Load ID must be a valid string.'
+  }),
+  origin: z.string({
+    required_error: 'Origin location is required.'
+  }),
+  destination: z.string({
+    required_error: 'Destination location is required.'
+  })
+});
 const nonNegativeDecimalString = (field) => z
   .string({
     invalid_type_error: `${field} must be a single numeric string`,

@@ -10,9 +10,22 @@ import {
     getPredictiveInsights
 } from '../services/fleetAnalyticsService.js';
 import { generateCSV, generateHTMLReport } from '../lib/reportGenerator.js';
+import { AnalyticsRangeTooLargeError } from '../lib/metricsAggregator.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
+
+function sendAnalyticsError(res, err, logMessage, serverErrorMessage) {
+    if (err instanceof AnalyticsRangeTooLargeError) {
+        return res.status(413).json({
+            error: 'Analytics range too large',
+            message: err.message,
+            maxRows: err.maxRows
+        });
+    }
+    logger.error({ err }, logMessage);
+    return res.status(500).json({ error: serverErrorMessage });
+}
 
 /**
  * GET /api/analytics/dashboard
@@ -29,8 +42,7 @@ router.get('/dashboard', authenticate, requireRole(['fleet_manager', 'admin']), 
 
         res.json({ success: true, ...metrics });
     } catch (err) {
-        logger.error({ err }, 'GET /analytics/dashboard error');
-        res.status(500).json({ error: 'Failed to fetch dashboard metrics' });
+        sendAnalyticsError(res, err, 'GET /analytics/dashboard error', 'Failed to fetch dashboard metrics');
     }
 });
 
@@ -83,8 +95,7 @@ router.get('/export/csv', authenticate, requireRole(['fleet_manager', 'admin']),
         res.setHeader('Content-Disposition', `attachment; filename=fleet_utilization_${Date.now()}.csv`);
         res.send(csvContent);
     } catch (err) {
-        logger.error({ err }, 'GET /analytics/export/csv error');
-        res.status(500).json({ error: 'Failed to export CSV' });
+        sendAnalyticsError(res, err, 'GET /analytics/export/csv error', 'Failed to export CSV');
     }
 });
 
@@ -126,8 +137,7 @@ router.get('/export/html', authenticate, requireRole(['fleet_manager', 'admin'])
         res.setHeader('Content-Type', 'text/html');
         res.send(htmlReport);
     } catch (err) {
-        logger.error({ err }, 'GET /analytics/export/html error');
-        res.status(500).json({ error: 'Failed to generate report' });
+        sendAnalyticsError(res, err, 'GET /analytics/export/html error', 'Failed to generate report');
     }
 });
 

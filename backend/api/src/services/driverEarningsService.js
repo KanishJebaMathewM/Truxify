@@ -62,7 +62,7 @@ export function aggregateTripEarnings(trips = []) {
     const nEarn = toAmount(trip.net_earnings);
     totalEarnings += tEarn;
     netEarnings += nEarn;
-    if (trip.status === 'completed' || trip.status === undefined) {
+    if (trip.status === 'completed') {
       completedCount += 1;
     }
   }
@@ -132,7 +132,7 @@ export const calculateEarningsAggregation = (trips, allCompletedTrips, lifetimeT
       totalKm += distanceNum;
     }
 
-    if (trip.status === 'completed' || trip.status === undefined) {
+    if (trip.status === 'completed') {
       completedTripsCount += 1;
     }
 

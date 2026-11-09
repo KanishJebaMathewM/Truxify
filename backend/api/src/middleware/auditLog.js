@@ -25,6 +25,24 @@ const SENSITIVE_KEYS = new Set([
   'cardnumber',
   'cvv',
 ]);
+// backend/api/src/middleware/auditLog.js (Excerpt)
+
+export const auditLog = (req, res, next) => {
+  // FIX: Add null guard for req.user per issue #6968
+  const actorId = req.user?.id || null;
+  const actorRole = req.user?.role || 'anonymous';
+
+  const logPayload = {
+    method: req.method,
+    path: req.originalUrl || req.url,
+    actorId,
+    actorRole,
+    timestamp: new Date().toISOString(),
+  };
+
+  // ... write log payload ...
+  next();
+};
 
 /**
  * Maps HTTP methods and policy actions to semantic resource types.

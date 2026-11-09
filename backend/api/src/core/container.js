@@ -13,7 +13,20 @@ import { OrderNotificationService } from '../services/order/orderNotificationSer
 import { BidAcceptanceService } from '../services/order/bidAcceptanceService.js';
 import { DeliveryVerificationService } from '../services/order/deliveryVerificationService.js';
 import { OrderLifecycleService } from '../services/order/orderLifecycleService.js';
+// backend/api/src/core/container.js (Excerpt)
+import {
+  buildDepositTx,
+  submitEscrowRefund, // Keep once
+  recordDepositTx,
+  confirmEscrowRefund,
+} from '../services/escrow.js';
 
+export {
+  buildDepositTx,
+  submitEscrowRefund, // Keep once
+  recordDepositTx,
+  confirmEscrowRefund,
+};
 import {
   buildDepositTx,
   submitEscrowRefund,

@@ -1,5 +1,9 @@
 name: Truxify CI
-
+# .github/workflows/ci.yml (Excerpt)
+- name: Install Backend Dependencies
+  run: npm install
+  working-directory: backend/api
+  # Remove cache-dependency-path if package-lock.json is absent
 on:
   pull_request:
     paths:

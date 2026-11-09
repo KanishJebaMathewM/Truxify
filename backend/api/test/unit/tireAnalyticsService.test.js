@@ -1,7 +1,21 @@
-import { describe, it, expect } from 'vitest';
-import { tireAnalyticsService } from '../../src/services/tireAnalyticsService.js';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
+import {
+  tireAnalyticsService,
+  MAX_RETAINED_TIRE_REPORTS,
+  TIRE_REPORT_TTL_MS,
+} from '../../src/services/tireAnalyticsService.js';
 
 describe('tireAnalyticsService', () => {
+  const reading = [{ position: 'FL', pressurePsi: 105, tempC: 45, mileageKm: 20000 }];
+
+  beforeEach(() => {
+    tireAnalyticsService.clearReports();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   describe('analyzeTireHealth', () => {
     it('throws an error if tpmsReadings is empty or not an array', async () => {
       await expect(
@@ -89,6 +103,102 @@ describe('tireAnalyticsService', () => {
         truckId: 'truck-owned',
         ownerId: 'owner-a',
       });
+    });
+  });
+
+  describe('owner-scoped storage', () => {
+    it('keeps separate reports when two owners use the same truck ID', async () => {
+      const reportA = await tireAnalyticsService.analyzeTireHealth({
+        ownerId: 'owner-a',
+        truckId: 'shared-truck',
+        tpmsReadings: reading,
+      });
+      const reportB = await tireAnalyticsService.analyzeTireHealth({
+        ownerId: 'owner-b',
+        truckId: 'shared-truck',
+        tpmsReadings: [{ position: 'FR', pressurePsi: 95, tempC: 50, mileageKm: 90000 }],
+      });
+
+      expect(tireAnalyticsService.getReportCount()).toBe(2);
+      await expect(tireAnalyticsService.getTireStatus('shared-truck', 'owner-a')).resolves.toMatchObject({
+        ownerId: 'owner-a',
+        tires: reportA.tires,
+      });
+      await expect(tireAnalyticsService.getTireStatus('shared-truck', 'owner-b')).resolves.toMatchObject({
+        ownerId: 'owner-b',
+        tires: reportB.tires,
+      });
+    });
+
+    it('returns the newest matching report for an admin lookup', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+      await tireAnalyticsService.analyzeTireHealth({
+        ownerId: 'owner-a',
+        truckId: 'shared-truck',
+        tpmsReadings: reading,
+      });
+
+      vi.setSystemTime(new Date('2026-01-01T00:00:01.000Z'));
+      await tireAnalyticsService.analyzeTireHealth({
+        ownerId: 'owner-b',
+        truckId: 'shared-truck',
+        tpmsReadings: reading,
+      });
+
+      const latest = await tireAnalyticsService.getTireStatus('shared-truck');
+      expect(latest.ownerId).toBe('owner-b');
+    });
+
+    it('expires reports after the retention window', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+      await tireAnalyticsService.analyzeTireHealth({
+        ownerId: 'owner-expiry',
+        truckId: 'expiring-truck',
+        tpmsReadings: reading,
+      });
+
+      vi.setSystemTime(new Date(Date.now() + TIRE_REPORT_TTL_MS + 1));
+
+      await expect(tireAnalyticsService.getTireStatus('expiring-truck', 'owner-expiry')).resolves.toBeNull();
+      expect(tireAnalyticsService.getReportCount()).toBe(0);
+    });
+
+    it('caps retained reports and rejects new trucks at capacity', async () => {
+      for (let index = 0; index < MAX_RETAINED_TIRE_REPORTS; index += 1) {
+        await tireAnalyticsService.analyzeTireHealth({
+          ownerId: 'owner-cap',
+          truckId: `truck-${index}`,
+          tpmsReadings: reading,
+        });
+      }
+
+      expect(tireAnalyticsService.getReportCount()).toBe(MAX_RETAINED_TIRE_REPORTS);
+      await expect(tireAnalyticsService.analyzeTireHealth({
+        ownerId: 'owner-cap',
+        truckId: 'truck-overflow',
+        tpmsReadings: reading,
+      })).rejects.toMatchObject({ statusCode: 429 });
+    });
+
+    it('allows replacing an existing truck report at capacity', async () => {
+      for (let index = 0; index < MAX_RETAINED_TIRE_REPORTS; index += 1) {
+        await tireAnalyticsService.analyzeTireHealth({
+          ownerId: 'owner-cap',
+          truckId: `truck-${index}`,
+          tpmsReadings: reading,
+        });
+      }
+
+      await expect(tireAnalyticsService.analyzeTireHealth({
+        ownerId: 'owner-cap',
+        truckId: 'truck-0',
+        tpmsReadings: [{ position: 'RL', pressurePsi: 90, tempC: 70, mileageKm: 100000 }],
+      })).resolves.toMatchObject({ truckId: 'truck-0' });
+      expect(tireAnalyticsService.getReportCount()).toBe(MAX_RETAINED_TIRE_REPORTS);
     });
   });
 });

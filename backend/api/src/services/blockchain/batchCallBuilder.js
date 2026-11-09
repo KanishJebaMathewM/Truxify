@@ -51,8 +51,15 @@ class BatchCallBuilder {
   }
 
   buildReputationCall(driver) {
+    if (!this.reputationAddress) {
+      // Encoding a reputation function against the escrow address makes the
+      // whole multicall revert and takes the payment/balance reads down with
+      // it. Callers that need reputation must configure the contract.
+      throw new Error('REPUTATION_CONTRACT_ADDRESS is not configured');
+    }
+
     return {
-      target: this.reputationAddress || this.escrowAddress,
+      target: this.reputationAddress,
       callData: this.reputationIface.encodeFunctionData('getReputation', [driver]),
       decodeFn: (data) => {
         const decoded = this.reputationIface.decodeFunctionResult('getReputation', data);
@@ -62,11 +69,14 @@ class BatchCallBuilder {
   }
 
   buildShipmentCompletionBatch(shipment) {
-    return [
+    const calls = [
       this.buildPaymentStatusCall(shipment.bookingId),
       this.buildDriverBalanceCall(shipment.driverAddress),
-      this.buildReputationCall(shipment.driverAddress),
     ];
+    if (this.reputationAddress) {
+      calls.push(this.buildReputationCall(shipment.driverAddress));
+    }
+    return calls;
   }
 
   buildMultiShipmentBatch(shipments) {

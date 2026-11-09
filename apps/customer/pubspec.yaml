@@ -22,7 +22,7 @@ dependencies:
   google_sign_in: ^6.2.1
 
   web: ^1.1.0
-  record: ^5.0.5
+  record: ^7.1.2
   pointycastle: ^4.0.0
 
   supabase_flutter: ^2.9.1

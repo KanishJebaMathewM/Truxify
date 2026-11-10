@@ -1,29 +1,4 @@
-// backend/api/src/core/health/checks/kafkaHealth.js (Excerpt)
-
-import logger from '../../../middleware/logger.js';
-
-export async function checkKafkaHealth() {
-  try {
-    // Attempt dynamic import or status check of Kafka infrastructure
-    const kafkaConfig = await import('../../../config/kafka.config.js');
-    
-    if (!kafkaConfig) {
-      return { status: 'degraded', reason: 'module_not_available' };
-    }
-
-    // Perform connectivity check...
-    return { status: 'healthy' };
-  } catch (err) {
-    // ✅ Fixed: Replaced bare catch with proper server-side error logging
-    logger.error({ err }, '[kafkaHealth] Module import error');
-    
-    return { 
-      status: 'degraded', 
-      reason: 'module_not_available',
-      error: err.message 
-    };
-  }
-}import { HealthStatus, executeCheck } from '../HealthCheck.js';
+import { HealthStatus, executeCheck } from '../HealthCheck.js';
 import logger from '../../../middleware/logger.js';
 
 const NAME = 'kafka';
@@ -47,7 +22,7 @@ async function check() {
     logger.warn('[kafkaHealth] Failed to import kafka config:', err?.message);
     return { status: HealthStatus.DEGRADED, message: 'module_not_available' };
   }
-} // <-- This closing brace was missing
+}
 
 export default function kafkaHealth(opts) {
   return executeCheck(NAME, check, {

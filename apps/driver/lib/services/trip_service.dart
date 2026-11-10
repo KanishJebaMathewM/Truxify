@@ -24,16 +24,6 @@ class TripService {
   String? _lastErrorMessage;
   bool _isDisposed = false;
 
-  String _requireNonEmpty(String value, String name) {
-    if (value.isEmpty) throw ArgumentError('$name must not be empty');
-    return value;
-  }
-
-  Map<String, dynamic> _sanitizePayload(Map<String, dynamic> payload) {
-    payload.removeWhere((k, v) => v == null);
-    return payload;
-  }
-
   String get _driverId {
     final user = _client.auth.currentUser;
     if (user == null) {
@@ -78,7 +68,6 @@ class TripService {
     if (status != null) {
       path += '?status=${Uri.encodeQueryComponent(status)}';
     }
-    
     try {
       final body = await _apiClient.get(path);
       if (body is Map<String, dynamic>) {
@@ -108,7 +97,6 @@ class TripService {
     if (status != null) {
       path += '&status=${Uri.encodeQueryComponent(status)}';
     }
-    
     try {
       final body = await _apiClient.get(path);
       if (body is! Map<String, dynamic>) {
@@ -135,7 +123,8 @@ class TripService {
   Future<List<Map<String, dynamic>>> fetchTripItems(
     String tripDisplayId,
   ) async {
-    final path = '/api/driver/trips/${_encodePathSegment(tripDisplayId)}/items';
+    final path =
+        '/api/driver/trips/${_encodePathSegment(tripDisplayId)}/items';
     try {
       final body = await _apiClient.get(path);
       if (body is! List) {
@@ -151,7 +140,8 @@ class TripService {
   Future<List<Map<String, dynamic>>> fetchTripStops(
     String tripDisplayId,
   ) async {
-    final path = '/api/driver/trips/${_encodePathSegment(tripDisplayId)}/stops';
+    final path =
+        '/api/driver/trips/${_encodePathSegment(tripDisplayId)}/stops';
     try {
       final body = await _apiClient.get(path);
       if (body is! List) {
@@ -167,7 +157,8 @@ class TripService {
   Future<List<Map<String, dynamic>>> fetchRouteMapPoints(
     String tripDisplayId,
   ) async {
-    final path = '/api/driver/trips/${_encodePathSegment(tripDisplayId)}/route-points';
+    final path =
+        '/api/driver/trips/${_encodePathSegment(tripDisplayId)}/route-points';
     try {
       final body = await _apiClient.get(path);
       if (body is! List) {
@@ -185,7 +176,8 @@ class TripService {
     String tripDisplayId,
   ) async {
     await verifyTripOwnership(tripDisplayId);
-    final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/stops/${_encodePathSegment(stopId)}/complete';
+    final path =
+        '/api/v1/trips/${_encodePathSegment(tripDisplayId)}/stops/${_encodePathSegment(stopId)}/complete';
     try {
       await _apiClient.put(path);
     } catch (e) {
@@ -209,7 +201,8 @@ class TripService {
 
   Future<void> startTrip(String tripDisplayId) async {
     await verifyTripOwnership(tripDisplayId);
-    final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/start';
+    final path =
+        '/api/v1/trips/${_encodePathSegment(tripDisplayId)}/start';
     try {
       await _apiClient.put(path);
     } catch (e) {
@@ -219,7 +212,8 @@ class TripService {
   }
 
   Future<void> setRoutePointClaimed(String pointId, bool claimed) async {
-    final path = '/api/driver/route-points/${_encodePathSegment(pointId)}/claim';
+    final path =
+        '/api/driver/route-points/${_encodePathSegment(pointId)}/claim';
     try {
       await _apiClient.patch(
         path,
@@ -231,14 +225,14 @@ class TripService {
     }
   }
 
-  /// Confirm delivery OTP and release escrow payment.
   Future<Map<String, dynamic>> confirmOtp({
     required String orderId,
     String? otp,
     double? latitude,
     double? longitude,
   }) async {
-    final path = '/api/deliveries/${_encodePathSegment(orderId)}/confirm-otp';
+    final path =
+        '/api/deliveries/${_encodePathSegment(orderId)}/confirm-otp';
     try {
       final body = await _apiClient.post(
         path,

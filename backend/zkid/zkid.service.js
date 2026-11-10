@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 import { randomUUID as uuidv4 } from 'node:crypto';
 import crypto from 'crypto';
 import logger from '../api/src/middleware/logger.js';
-import { supabase } from '../api/src/config/db.js';
+import { supabaseAdmin } from '../api/src/config/db.js';
 import {
     createVerificationChallenge,
     getZkidChainId,
@@ -328,7 +328,7 @@ export class ZKIDService {
     // ============ Database Operations ============
 
     async storeIdentity(data) {
-        const { error } = await supabase.from('zkid_identities').insert([{
+        const { error } = await supabaseAdmin.from('zkid_identities').insert([{
             identity_hash: data.identityHash,
             user_address: data.userAddress,
             tx_hash: data.txHash,
@@ -338,7 +338,7 @@ export class ZKIDService {
     }
 
     async storeCredential(data) {
-        const { error } = await supabase.from('zkid_credentials').insert([{
+        const { error } = await supabaseAdmin.from('zkid_credentials').insert([{
             identity_hash: data.identityHash,
             credential_hash: data.credentialHash,
             credential_type: data.credentialType,
@@ -349,7 +349,7 @@ export class ZKIDService {
     }
 
     async updateCredentialStatus(credentialHash, revoked) {
-        const { error } = await supabase
+        const { error } = await supabaseAdmin
             .from('zkid_credentials')
             .update({ revoked, revoked_at: new Date().toISOString() })
             .eq('credential_hash', credentialHash);
@@ -357,7 +357,7 @@ export class ZKIDService {
     }
 
     async storeVerificationRequest(data) {
-        const { error } = await supabase.from('zkid_verifications').insert([{
+        const { error } = await supabaseAdmin.from('zkid_verifications').insert([{
             request_id: data.requestId,
             identity_hash: data.identityHash,
             credential_hash: data.credentialHash,
@@ -370,7 +370,7 @@ export class ZKIDService {
     }
 
     async storeSelectiveDisclosure(data) {
-        const { error } = await supabase.from('zkid_disclosures').insert([{
+        const { error } = await supabaseAdmin.from('zkid_disclosures').insert([{
             disclosure_id: data.disclosureId,
             identity_hash: data.identityHash,
             disclosed_attributes: data.disclosedAttributes,
@@ -385,10 +385,10 @@ export class ZKIDService {
 
     async getZKIDStats() {
         try {
-            const { data: identities } = await supabase.from('zkid_identities').select('*');
-            const { data: credentials } = await supabase.from('zkid_credentials').select('*');
-            const { data: verifications } = await supabase.from('zkid_verifications').select('*');
-            const { data: disclosures } = await supabase.from('zkid_disclosures').select('*');
+            const { data: identities } = await supabaseAdmin.from('zkid_identities').select('*');
+            const { data: credentials } = await supabaseAdmin.from('zkid_credentials').select('*');
+            const { data: verifications } = await supabaseAdmin.from('zkid_verifications').select('*');
+            const { data: disclosures } = await supabaseAdmin.from('zkid_disclosures').select('*');
 
             return {
                 totalIdentities: identities?.length || 0,

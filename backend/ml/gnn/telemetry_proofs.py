@@ -55,9 +55,9 @@ class PoseidonHasher:
     def _check_node(self) -> bool:
         """Check if Node.js is available for circomlibjs."""
         try:
-            subprocess.run(["node", "--version"], capture_output=True, check=True)
+            subprocess.run(["node", "--version"], capture_output=True, check=True, timeout=30)
             return True
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
             return False
     
     def hash2(self, a: int, b: int) -> int:
@@ -92,7 +92,8 @@ class PoseidonHasher:
                 ["node", temp_path],
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                timeout=60
             )
             return int(result.stdout.strip())
         finally:

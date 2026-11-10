@@ -14,7 +14,8 @@ export class GaslessRelayerService {
     this.privateKey = options.relayerPrivateKey || process.env.RELAYER_WALLET_PRIVATE_KEY || '';
     this.contractAddress = options.contractAddress || process.env.FREIGHT_ESCROW_CONTRACT_ADDRESS || '';
 
-    this.provider = new ethers.JsonRpcProvider(this.rpcUrl);
+    // Test seam: a caller may inject a provider (otherwise built from rpcUrl).
+    this.provider = options.provider || new ethers.JsonRpcProvider(this.rpcUrl);
     this.wallet = this.privateKey ? new ethers.Wallet(this.privateKey, this.provider) : null;
     this.dlq = [];
   }

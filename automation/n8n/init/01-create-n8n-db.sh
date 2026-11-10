@@ -14,7 +14,7 @@ if [ -z "${N8N_DB_PASSWORD:-}" ]; then
   exit 1
 fi
 
-psql -v ON_ERROR_STOP=1 --username "${POSTGRES_USER}" --dbname "${POSTGRES_DB}" <<EOSQL
-CREATE ROLE n8n LOGIN PASSWORD '${N8N_DB_PASSWORD}';
+psql -v ON_ERROR_STOP=1 --username "${POSTGRES_USER}" --dbname "${POSTGRES_DB}" -v n8n_pwd="${N8N_DB_PASSWORD}" <<EOSQL
+CREATE ROLE n8n LOGIN PASSWORD :'n8n_pwd';
 CREATE DATABASE truxify_n8n OWNER n8n;
 EOSQL

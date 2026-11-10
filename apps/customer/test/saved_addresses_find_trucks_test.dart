@@ -54,7 +54,7 @@ void main() {
     );
   }
 
-  SavedAddress _makeAddress({
+  SavedAddress makeAddress({
     required String id,
     required String label,
     required String addressLine,
@@ -81,16 +81,17 @@ void main() {
   group('Loading saved addresses', () {
     testWidgets('loads and displays address chips on screen open', (tester) async {
       final addresses = [
-        _makeAddress(id: '1', label: 'Home', addressLine: '12 MG Road', latitude: 19.07, longitude: 72.87),
-        _makeAddress(id: '2', label: 'Office', addressLine: 'BKC', latitude: 19.05, longitude: 72.86),
+        makeAddress(id: '1', label: 'Home', addressLine: '12 MG Road', latitude: 19.07, longitude: 72.87),
+        makeAddress(id: '2', label: 'Office', addressLine: 'BKC', latitude: 19.05, longitude: 72.86),
       ];
       when(() => mockRepo.fetchAll()).thenAnswer((_) async => addresses);
 
       await tester.pumpWidget(createTestWidget(tester));
       await tester.pumpAndSettle();
 
-      expect(find.text('Home'), findsOneWidget);
-      expect(find.text('Office'), findsOneWidget);
+      // Addresses render as chips in BOTH the pickup and drop rows.
+      expect(find.text('Home'), findsNWidgets(2));
+      expect(find.text('Office'), findsNWidgets(2));
     });
 
     testWidgets('does not show chips when saved addresses is empty', (tester) async {
@@ -116,6 +117,10 @@ void main() {
 
       // Screen should render without error while loading
       expect(find.byType(FindTrucksScreen), findsOneWidget);
+
+      // Flush the mock's pending 5s delay in fake time so no timer is left
+      // pending at teardown.
+      await tester.pump(const Duration(seconds: 5));
     });
 
     testWidgets('handles error gracefully without crashing', (tester) async {
@@ -134,15 +139,16 @@ void main() {
   group('Selecting saved address', () {
     testWidgets('tapping pickup chip populates pickup field and coordinates', (tester) async {
       final addresses = [
-        _makeAddress(id: '1', label: 'Home', addressLine: '12 MG Road', latitude: 19.07, longitude: 72.87),
+        makeAddress(id: '1', label: 'Home', addressLine: '12 MG Road', latitude: 19.07, longitude: 72.87),
       ];
       when(() => mockRepo.fetchAll()).thenAnswer((_) async => addresses);
 
       await tester.pumpWidget(createTestWidget(tester));
       await tester.pumpAndSettle();
 
-      // Tap the Home chip (under pickup section)
-      await tester.tap(find.text('Home'));
+      // Tap the Home chip (under pickup section) — addresses render as chips
+      // in BOTH the pickup and drop rows; the pickup row comes first.
+      await tester.tap(find.text('Home').first);
       await tester.pumpAndSettle();
 
       // Pickup field should be populated with full address
@@ -151,7 +157,7 @@ void main() {
 
     testWidgets('tapping drop chip populates drop field', (tester) async {
       final addresses = [
-        _makeAddress(id: '1', label: 'Warehouse', addressLine: '45 Industrial Area', latitude: 19.10, longitude: 72.90),
+        makeAddress(id: '1', label: 'Warehouse', addressLine: '45 Industrial Area', latitude: 19.10, longitude: 72.90),
       ];
       when(() => mockRepo.fetchAll()).thenAnswer((_) async => addresses);
 
@@ -172,7 +178,7 @@ void main() {
 
     testWidgets('chips show correct label and icon', (tester) async {
       final addresses = [
-        _makeAddress(id: '1', label: 'Home', addressLine: '12 MG Road'),
+        makeAddress(id: '1', label: 'Home', addressLine: '12 MG Road'),
       ];
       when(() => mockRepo.fetchAll()).thenAnswer((_) async => addresses);
 
@@ -188,7 +194,7 @@ void main() {
 
     testWidgets('office label shows business icon', (tester) async {
       final addresses = [
-        _makeAddress(id: '1', label: 'Office', addressLine: 'BKC'),
+        makeAddress(id: '1', label: 'Office', addressLine: 'BKC'),
       ];
       when(() => mockRepo.fetchAll()).thenAnswer((_) async => addresses);
 
@@ -202,7 +208,7 @@ void main() {
   group('Bottom sheet', () {
     testWidgets('bookmark icon opens saved address bottom sheet', (tester) async {
       final addresses = [
-        _makeAddress(id: '1', label: 'Home', addressLine: '12 MG Road'),
+        makeAddress(id: '1', label: 'Home', addressLine: '12 MG Road'),
       ];
       when(() => mockRepo.fetchAll()).thenAnswer((_) async => addresses);
 
@@ -232,13 +238,13 @@ void main() {
     });
 
     testWidgets('bottom sheet shows error state with retry button', (tester) async {
-      when(() => mockRepo.fetchAll()).thenAnswer((_) async => []);
+      // The sheet renders the screen's CACHED address state (loaded at init)
+      // with an explicit Retry — so the error state requires the initial load
+      // to fail, not a later flip.
+      when(() => mockRepo.fetchAll()).thenThrow(Exception('DB error'));
 
       await tester.pumpWidget(createTestWidget(tester));
       await tester.pumpAndSettle();
-
-      // Now make fetchAll fail
-      when(() => mockRepo.fetchAll()).thenThrow(Exception('DB error'));
 
       await tester.tap(find.byIcon(Icons.bookmark_rounded).first);
       await tester.pumpAndSettle();
@@ -249,7 +255,7 @@ void main() {
 
     testWidgets('selecting address from bottom sheet populates field and dismisses sheet', (tester) async {
       final addresses = [
-        _makeAddress(id: '1', label: 'Home', addressLine: '12 MG Road', latitude: 19.07, longitude: 72.87),
+        makeAddress(id: '1', label: 'Home', addressLine: '12 MG Road', latitude: 19.07, longitude: 72.87),
       ];
       when(() => mockRepo.fetchAll()).thenAnswer((_) async => addresses);
 
@@ -271,7 +277,7 @@ void main() {
 
     testWidgets('drop bookmark icon opens drop address sheet', (tester) async {
       final addresses = [
-        _makeAddress(id: '1', label: 'Office', addressLine: 'BKC'),
+        makeAddress(id: '1', label: 'Office', addressLine: 'BKC'),
       ];
       when(() => mockRepo.fetchAll()).thenAnswer((_) async => addresses);
 
@@ -302,7 +308,7 @@ void main() {
     testWidgets('chips are horizontal scrollable', (tester) async {
       final addresses = List.generate(
         10,
-        (i) => _makeAddress(id: '$i', label: 'Addr $i', addressLine: 'Line $i'),
+        (i) => makeAddress(id: '$i', label: 'Addr $i', addressLine: 'Line $i'),
       );
       when(() => mockRepo.fetchAll()).thenAnswer((_) async => addresses);
 
@@ -316,7 +322,7 @@ void main() {
 
     testWidgets('no duplicate chips for same address', (tester) async {
       final addresses = [
-        _makeAddress(id: '1', label: 'Home', addressLine: '12 MG Road'),
+        makeAddress(id: '1', label: 'Home', addressLine: '12 MG Road'),
       ];
       when(() => mockRepo.fetchAll()).thenAnswer((_) async => addresses);
 
@@ -329,7 +335,7 @@ void main() {
 
     testWidgets('selected chip has accent styling', (tester) async {
       final addresses = [
-        _makeAddress(id: '1', label: 'Home', addressLine: '12 MG Road', latitude: 19.07, longitude: 72.87),
+        makeAddress(id: '1', label: 'Home', addressLine: '12 MG Road', latitude: 19.07, longitude: 72.87),
       ];
       when(() => mockRepo.fetchAll()).thenAnswer((_) async => addresses);
 
@@ -348,7 +354,7 @@ void main() {
   group('Refresh address list', () {
     testWidgets('addresses refresh after successful save', (tester) async {
       final initialAddresses = [
-        _makeAddress(id: '1', label: 'Home', addressLine: '12 MG Road'),
+        makeAddress(id: '1', label: 'Home', addressLine: '12 MG Road'),
       ];
       when(() => mockRepo.fetchAll()).thenAnswer((_) async => initialAddresses);
 
@@ -372,7 +378,9 @@ void main() {
       // Form should render
       expect(find.byType(FindTrucksScreen), findsOneWidget);
       expect(find.byType(PrimaryButton), findsOneWidget);
-      expect(find.text('Find Trucks'), findsOneWidget);
+      // 'Find Trucks' is both the section header and the submit button label
+      // — scope to the button.
+      expect(find.widgetWithText(PrimaryButton, 'Find Trucks'), findsOneWidget);
     });
 
     testWidgets('RouteDraft populated from pending draft still works', (tester) async {

@@ -36,6 +36,58 @@ describe('BlockchainMetrics', () => {
     metrics.metrics.paymentProcessingLatency = [];
   });
 
+  describe('metrics collection lifecycle', () => {
+    it('unrefs the collection timer so it does not hold the event loop open', () => {
+      expect(metrics._timer).toBeTruthy();
+      expect(typeof metrics._timer.hasRef).toBe('function');
+      expect(metrics._timer.hasRef()).toBe(false);
+    });
+
+    it('is idempotent and stops cleanly', () => {
+      vi.useFakeTimers();
+      try {
+        metrics.stopMetricsCollection();
+        metrics.startMetricsCollection();
+        const timer = metrics._timer;
+
+        metrics.startMetricsCollection();
+
+        expect(metrics._timer).toBe(timer);
+        expect(vi.getTimerCount()).toBe(1);
+
+        metrics.stopMetricsCollection();
+
+        expect(metrics._timer).toBeNull();
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('skips a tick while the previous aggregation is still running', async () => {
+      vi.useFakeTimers();
+      try {
+        metrics.stopMetricsCollection();
+        let resolveAggregation;
+        metrics.aggregateMetrics = vi.fn(() => new Promise((resolve) => {
+          resolveAggregation = resolve;
+        }));
+
+        metrics.startMetricsCollection();
+        await vi.advanceTimersByTimeAsync(60000);
+        expect(metrics.aggregateMetrics).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(60000);
+        expect(metrics.aggregateMetrics).toHaveBeenCalledTimes(1);
+
+        resolveAggregation();
+        metrics.stopMetricsCollection();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe('recordPaymentEvent', () => {
     it('raises success rate on success', () => {
       metrics.metrics.contractCallSuccessRate = 0;

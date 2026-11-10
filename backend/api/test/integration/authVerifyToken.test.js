@@ -3,17 +3,31 @@ import request from 'supertest';
 import express from 'express';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'truxify-jwt-secret-key';
+// The factory is hoisted above imports — the mock must be created via
+// vi.hoisted so it exists when the factory runs.
+const verifyIdTokenMock = vi.hoisted(() => vi.fn());
 
-// verifyIdToken is mocked so each test controls exactly which token the route
-// accepts. mockResolvedValueOnce / mockRejectedValueOnce drive the fail-closed
-// and fail-open assertions below.
-const verifyIdTokenMock = vi.fn();
+// Mock DB module
+// The hardened /verify fails closed (503) without a profile database and
+// refuses to mint tokens for unprovisioned identities (6b92d0318) — provision
+// one profile row for the uid/email pairs these tests verify with.
+// vi.hoisted: the vi.mock factory runs above module-level consts.
+const supabaseMock = vi.hoisted(() => ({
+  from: () => ({
+    select: () => ({
+      eq: () => ({
+        maybeSingle: () => Promise.resolve({
+          data: { id: 'profile-999', role: 'customer', full_name: null, phone: null, email: null, firebase_uid: 'firebase-uid-999' },
+          error: null,
+        }),
+      }),
+    }),
+  }),
+}));
 
-// Mock DB module. firebaseAdmin is present so the route reaches verification.
 vi.mock('../../src/config/db.js', () => {
   return {
-    supabase: null,
+    supabase: supabaseMock,
     supabaseAdmin: null,
     firebaseAdmin: {
       auth: () => ({ verifyIdToken: verifyIdTokenMock }),
@@ -39,6 +53,13 @@ vi.mock('../../src/lib/profileCache.js', () => ({
 }));
 
 import authRoutes from '../../src/routes/authRoutes.js';
+import { authenticate } from '../../src/middleware/auth.js';
+import { getJwtSecret } from '../../src/config/jwtSecret.js';
+
+// Must resolve through the same shared resolver as the route, otherwise the
+// key used to decode below would not match the key the route actually signs
+// with.
+const JWT_SECRET = getJwtSecret();
 
 const app = express();
 app.use(express.json());
@@ -60,7 +81,8 @@ describe('POST /api/auth/verify — Firebase ID Token to Backend JWT exchange', 
     it('returns 401 for an empty body', async () => {
       const res = await request(app).post('/api/auth/verify').send({});
 
-      expect(res.status).toBe(401);
+      // Hardened contract (6b92d0318): a missing token is a 400 Bad Request.
+      expect(res.status).toBe(400);
       expect(res.body.success).toBe(false);
       expect(res.body.token).toBeUndefined();
       expect(verifyIdTokenMock).not.toHaveBeenCalled();
@@ -73,7 +95,9 @@ describe('POST /api/auth/verify — Firebase ID Token to Backend JWT exchange', 
         .post('/api/auth/verify')
         .send({ email: 'attacker@truxify.com', role: 'admin' });
 
-      expect(res.status).toBe(401);
+      // Hardened contract: email-only is a 400 Bad Request — the token is the
+      // only accepted proof of identity.
+      expect(res.status).toBe(400);
       expect(res.body.success).toBe(false);
       expect(res.body.token).toBeUndefined();
     });

@@ -1,95 +1,57 @@
 import { calculateHaversineDistanceMeters } from '../gps/geofenceEvaluator.js';
+import { paisa, finiteNumber, geographic, admitCandidates, roundDistanceChargePaisa, detourPolicy, affinity, compareAffinity, presentedAffinity } from './profitabilityPolicy.js';
 
 export class ProfitabilityScorer {
-  /**
-   * @param {object} [options={}]
-   * @param {number} [options.maxDetourRatio=0.15] - Maximum 15% detour allowed
-   * @param {number} [options.fuelCostPerKmPaisa=2000] - ₹20.00 / km diesel cost estimate
-   */
+  #ratio;
+  #fuelRate;
   constructor(options = {}) {
-    this.maxDetourRatio = options.maxDetourRatio || 0.15;
-    this.fuelCostPerKmPaisa = options.fuelCostPerKmPaisa || 2000;
+    this.#ratio = finiteNumber(options.maxDetourRatio ?? 0.15, 'detour ratio');
+    if (this.#ratio < 0 || this.#ratio > 1) throw new RangeError('detour ratio must be in [0,1]');
+    this.#fuelRate = paisa(options.fuelCostPerKmPaisa ?? 2000, 'fuel rate');
   }
+  get maxDetourRatio() { return this.#ratio; }
+  get fuelCostPerKmPaisa() { return Number(this.#fuelRate); }
 
-  /**
-   * Evaluates and scores candidate loads based on detour distance, fuel cost, and net payout.
-   * 
-   * @param {object} corridor - Corridor details (origin, destination, directDistanceKm)
-   * @param {Array<object>} candidateLoads - List of loads found by SpatialMatcher
-   * @returns {Array<object>} Ranked list of profitable matches
-   */
+  /** Admit complete owned inputs; publish only finite ranked records with exact integer paisa charges. */
   scoreAndRankMatches(corridor, candidateLoads = []) {
-    const { origin, destination, directDistanceKm } = corridor;
-    const directKm = directDistanceKm > 0
-      ? directDistanceKm
-      : calculateHaversineDistanceMeters(origin.lat, origin.lng, destination.lat, destination.lng) / 1000;
-
-    const scoredMatches = [];
-
-    for (const load of candidateLoads) {
-      const pLat = Number(load.pickup_lat);
-      const pLng = Number(load.pickup_lng);
-      const dLat = Number(load.drop_lat);
-      const dLng = Number(load.drop_lng);
-
-      // Approximate segmented distances in km
-      const d1 = calculateHaversineDistanceMeters(origin.lat, origin.lng, pLat, pLng) / 1000;
-      const d2 = calculateHaversineDistanceMeters(pLat, pLng, dLat, dLng) / 1000;
-      const d3 = calculateHaversineDistanceMeters(dLat, dLng, destination.lat, destination.lng) / 1000;
-
-      const totalDetourKm = d1 + d2 + d3;
-      const incrementalDetourKm = Math.max(0, totalDetourKm - directKm);
-      const detourRatio = directKm > 0 ? incrementalDetourKm / directKm : 0;
-
-      // Filter out loads that exceed 15% detour tolerance
-      if (detourRatio > this.maxDetourRatio) {
-        continue;
-      }
-
-      // Financials in paisa
-      const offeredPayoutPaisa = Number(load.price_paisa || 500000); // Default ₹5,000
-      const extraFuelPaisa = Math.round(incrementalDetourKm * this.fuelCostPerKmPaisa);
-      const extraTollPaisa = Math.round(incrementalDetourKm * 200); // ~₹2/km toll proxy
-      const netIncrementalPayoutPaisa = offeredPayoutPaisa - extraFuelPaisa - extraTollPaisa;
-
-      // Skip if net profit is negative
-      if (netIncrementalPayoutPaisa <= 0) {
-        continue;
-      }
-
-      // Affinity Score (0.0 to 1.0)
-      const profitMargin = offeredPayoutPaisa > 0 ? netIncrementalPayoutPaisa / offeredPayoutPaisa : 0.5;
-      const detourPenalty = 1.0 - (detourRatio / this.maxDetourRatio);
-      const affinityScore = Number((0.6 * profitMargin + 0.4 * detourPenalty).toFixed(3));
-
-      scoredMatches.push({
-        loadId: load.id,
-        customerId: load.customer_id,
-        pickupAddress: load.pickup_address,
-        dropAddress: load.drop_address,
-        weightKg: load.weight_kg,
-        financials: {
-          offeredPayoutPaisa,
-          offeredPayoutInr: Number((offeredPayoutPaisa / 100).toFixed(2)),
-          extraFuelInr: Number((extraFuelPaisa / 100).toFixed(2)),
-          extraTollInr: Number((extraTollPaisa / 100).toFixed(2)),
-          netIncrementalPayoutInr: Number((netIncrementalPayoutPaisa / 100).toFixed(2)),
-        },
-        detourMetrics: {
-          directDistanceKm: Number(directKm.toFixed(1)),
-          totalDetourKm: Number(totalDetourKm.toFixed(1)),
-          incrementalDetourKm: Number(incrementalDetourKm.toFixed(1)),
-          detourPercentage: Number((detourRatio * 100).toFixed(1)),
-        },
-        affinityScore,
-      });
+    if (!corridor || typeof corridor !== 'object' || Array.isArray(corridor)) throw new TypeError('corridor must be an object');
+    const origin = geographic(corridor.origin, 'origin');
+    const destination = geographic(corridor.destination, 'destination');
+    const supplied = finiteNumber(corridor.directDistanceKm ?? 0, 'direct distance');
+    if (supplied < 0) throw new RangeError('direct distance must be nonnegative');
+    const loads = admitCandidates(candidateLoads);
+    const directKm = supplied || calculateHaversineDistanceMeters(origin.lat, origin.lng, destination.lat, destination.lng) / 1000;
+    finiteNumber(directKm, 'computed direct distance');
+    const scored = [];
+    for (const load of loads) {
+      if (load.payout === 0n) continue;
+      const d1 = calculateHaversineDistanceMeters(origin.lat, origin.lng, load.pickup.lat, load.pickup.lng) / 1000;
+      const d2 = calculateHaversineDistanceMeters(load.pickup.lat, load.pickup.lng, load.drop.lat, load.drop.lng) / 1000;
+      const d3 = calculateHaversineDistanceMeters(load.drop.lat, load.drop.lng, destination.lat, destination.lng) / 1000;
+      const total = finiteNumber(d1 + d2 + d3, 'computed segmented distance');
+      const incremental = Math.max(0, total - directKm);
+      const penalty = detourPolicy(incremental, directKm, this.#ratio);
+      if (!penalty) continue;
+      const fuel = roundDistanceChargePaisa(incremental, this.#fuelRate);
+      const toll = roundDistanceChargePaisa(incremental, 200n);
+      const net = load.payout - fuel - toll;
+      if (net <= 0n) continue;
+      // Positive net guarantees every published fee/net is within admitted safe payout.
+      const score = affinity(net, load.payout, penalty);
+      const detourRatio = directKm ? incremental / directKm : 0;
+      const inr = value => Number((Number(value) / 100).toFixed(2));
+      scored.push({ score, index: load.index, output: {
+        loadId: load.id, customerId: load.customer, pickupAddress: load.pickupAddress, dropAddress: load.dropAddress, weightKg: load.weight,
+        financials: { offeredPayoutPaisa: Number(load.payout), offeredPayoutInr: inr(load.payout),
+          extraFuelPaisa: Number(fuel), extraTollPaisa: Number(toll), netIncrementalPayoutPaisa: Number(net),
+          extraFuelInr: inr(fuel), extraTollInr: inr(toll), netIncrementalPayoutInr: inr(net) },
+        detourMetrics: { directDistanceKm: Number(directKm.toFixed(1)), totalDetourKm: Number(total.toFixed(1)),
+          incrementalDetourKm: Number(incremental.toFixed(1)), detourPercentage: Number((detourRatio * 100).toFixed(1)) },
+        affinityScore: presentedAffinity(score),
+      } });
     }
-
-    // Rank descending by highest affinity score
-    scoredMatches.sort((a, b) => b.affinityScore - a.affinityScore);
-
-    return scoredMatches;
+    scored.sort((left, right) => compareAffinity(right.score, left.score) || left.index - right.index);
+    return scored.map(item => item.output);
   }
 }
-
 export default ProfitabilityScorer;

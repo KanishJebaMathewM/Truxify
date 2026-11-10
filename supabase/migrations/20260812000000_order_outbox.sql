@@ -1238,4 +1238,8 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.cancel_stale_order_tx(UUID, TEXT, TIMESTAMPTZ) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.cancel_stale_order_tx(UUID, TEXT, TIMESTAMPTZ) TO service_role;
 
+-- update_order_and_load_offer stays revoked from direct client access in the
+-- definition that supersedes the original (the gate reads the latest block).
+REVOKE EXECUTE ON FUNCTION public.update_order_and_load_offer(UUID, TEXT, JSONB, JSONB) FROM anon, authenticated;
+
 COMMIT;

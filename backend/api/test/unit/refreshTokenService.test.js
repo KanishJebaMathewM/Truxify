@@ -51,6 +51,9 @@ vi.mock('@supabase/supabase-js', () => ({
   })),
 }));
 
+process.env.SUPABASE_URL = 'https://test.supabase.co';
+process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
+
 import refreshTokenService, {
   createRefreshToken,
   rotateRefreshToken,
@@ -200,5 +203,18 @@ describe('refreshTokenService', () => {
       expect(refreshTokenService.revokeToken).toBe(revokeToken);
       expect(refreshTokenService.revokeAllUserTokens).toBe(revokeAllUserTokens);
     });
+  });
+
+  it('fails closed when the service-role client is not configured', async () => {
+    vi.resetModules();
+    vi.stubEnv('SUPABASE_URL', '');
+    vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', '');
+    vi.stubEnv('SUPABASE_ANON_KEY', 'anon-key-that-must-not-be-used');
+    const isolated = await import('../../src/services/refreshTokenService.js');
+
+    await expect(isolated.revokeToken('token')).rejects.toThrow(
+      /SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required/
+    );
+    vi.unstubAllEnvs();
   });
 });

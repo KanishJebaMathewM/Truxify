@@ -8,7 +8,25 @@ const IN_MEMORY_TTL_MS = 86400000;
 const CLEANUP_INTERVAL_MS = 60000;
 const MAX_IN_MEMORY_ENTRIES = 10000;
 const EVICTION_BATCH_SIZE = Math.floor(MAX_IN_MEMORY_ENTRIES * 0.1); // evict 10% at a time
+// backend/api/src/middleware/idempotency.js (Excerpt)
 
+const inMemoryStore = new Map();
+const MAX_IN_MEMORY_ENTRIES = 10000;
+
+export function storeIdempotencyResponse(key, responseData, ttlMs) {
+  // FIX: Enforce max size limit with eviction per issue #6683
+  if (inMemoryStore.size >= MAX_IN_MEMORY_ENTRIES) {
+    const oldestKey = inMemoryStore.keys().next().value;
+    if (oldestKey !== undefined) {
+      inMemoryStore.delete(oldestKey);
+    }
+  }
+
+  inMemoryStore.set(key, {
+    data: responseData,
+    expiry: Date.now() + ttlMs,
+  });
+}
 // The Redis lock must outlive the longest guarded handler or a slow request's
 // lock can expire mid-execution and let a duplicate re-acquire it. Escrow flows
 // wait up to 60s for on-chain confirmation (see services/escrow.js), so the
@@ -92,6 +110,7 @@ export function requireIdempotency(ttlSeconds = 3600) {
     req.idempotencyKey = idempotencyKey;
     const key = cacheKey(req, idempotencyKey);
 
+    let restoreJson = () => {};
     try {
       let pendingCache = null;
       let responded = false;
@@ -105,7 +124,7 @@ export function requireIdempotency(ttlSeconds = 3600) {
       }
 
       if (cached) {
-        logger.info(`[Idempotency] Cache hit for key ${idempotencyKey}`);
+        logger.info({ event: 'IDEMPOTENCY_KEY_DETECTED', requestId: req.requestId, idempotencyKey }, 'Cache hit for idempotency key');
         return res.status(cached.statusCode).json(cached.body);
       }
 
@@ -169,17 +188,25 @@ export function requireIdempotency(ttlSeconds = 3600) {
         // a duplicate arriving after 'finish' finds the cached entry and
         // short-circuits instead of re-acquiring the lock and re-entering the
         // handler.
-        const finalize = async () => {
-          if (pendingCache) {
-            const cachePromise = pendingCache;
-            pendingCache = null;
-            try {
-              await cachePromise;
-            } catch (err) {
-              /* error already logged by the cache write's own .catch */
-            }
+        // finish and close can both fire while the cache write is pending.
+        // Share one completion promise so neither event bypasses the wait.
+        let finalizationPromise;
+        const finalize = () => {
+          if (!finalizationPromise) {
+            finalizationPromise = (async () => {
+              if (pendingCache) {
+                const cachePromise = pendingCache;
+                pendingCache = null;
+                try {
+                  await cachePromise;
+                } catch (err) {
+                  /* error already logged by the cache write's own .catch */
+                }
+              }
+              await releaseLock();
+            })();
           }
-          await releaseLock();
+          return finalizationPromise;
         };
 
         // Ensure lock is reliably released when response terminates
@@ -210,36 +237,62 @@ export function requireIdempotency(ttlSeconds = 3600) {
         res.once('close', releaseMemoryLock);
       }
 
-      const originalJson = res.json.bind(res);
+      const originalJson = res.json;
+      let jsonRestored = false;
+      restoreJson = () => {
+        if (!jsonRestored) {
+          jsonRestored = true;
+          res.json = originalJson;
+          if (typeof res.removeListener === 'function') {
+            res.removeListener('finish', restoreJson);
+            res.removeListener('close', restoreJson);
+          }
+        }
+      };
+
+      if (typeof res.once === 'function') {
+        res.once('finish', restoreJson);
+        res.once('close', restoreJson);
+      }
+
       res.json = function (body) {
-        if (responded) return originalJson(body);
+        restoreJson();
+        if (responded) return originalJson.call(this || res, body);
         responded = true;
 
         if (res.statusCode >= 200 && res.statusCode < 300) {
-          const cacheData = JSON.stringify({ statusCode: res.statusCode, body });
+          try {
+            const cacheData = JSON.stringify({ statusCode: res.statusCode, body });
 
-          if (redisClient) {
-            pendingCache = redisClient.set(key, cacheData, 'EX', ttlSeconds).catch((err) => {
-              logger.error(
-                { event: 'IDEMPOTENCY_CACHE_SET_ERROR', idempotencyKey, error: err && err.message },
-                '[Idempotency] Failed to cache response'
-              );
-            });
-          } else {
-            setInMemory(key, cacheData, ttlMs);
+            if (redisClient) {
+              pendingCache = redisClient.set(key, cacheData, 'EX', ttlSeconds).catch((err) => {
+                logger.error(
+                  { event: 'IDEMPOTENCY_CACHE_SET_ERROR', idempotencyKey, error: err && err.message },
+                  '[Idempotency] Failed to cache response'
+                );
+              });
+            } else {
+              setInMemory(key, cacheData, ttlMs);
+            }
+          } catch (serializeErr) {
+            logger.error(
+              { event: 'IDEMPOTENCY_CACHE_SERIALIZE_ERROR', idempotencyKey, error: serializeErr && serializeErr.message },
+              '[Idempotency] Failed to serialize response for caching'
+            );
           }
         }
 
-        return originalJson(body);
+        return originalJson.call(this || res, body);
       };
 
       next();
     } catch (err) {
+      restoreJson();
       logger.error(
         { event: 'IDEMPOTENCY_PROCESS_ERROR', key: key && key.substring(0, 50), error: err && err.message },
         '[Idempotency] Error processing idempotency key'
       );
-      next();
+      next(err);
     }
   };
 }

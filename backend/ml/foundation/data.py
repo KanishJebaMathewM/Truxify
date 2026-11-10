@@ -43,30 +43,9 @@ class LogisticsDataProcessor:
     
     def create_pretraining_data(self, data: List[Dict]) -> List[Dict]:
         """Create MLM pretraining data"""
-        pretrain_data = []
-        
-        for item in data:
-            # Combine fields
-            text = f"{item.get('origin', '')} {item.get('destination', '')} {item.get('cargo_type', '')} {item.get('route', '')}"
-            
-            # Tokenize
-            tokens = self.prepare_sequence(text)
-            
-            # Create MLM labels (masked tokens)
-            labels = tokens.copy()
-            for i in range(len(tokens)):
-                if np.random.random() < 0.15:  # Mask 15% of tokens
-                    tokens[i] = 1  # [MASK] token
-                    labels[i] = labels[i]  # Keep original
-            
-            pretrain_data.append({
-                'tokens': tokens,
-                'labels': labels,
-                'metadata': item
-            })
-        
-        return pretrain_data
-    
+        from .pretraining import masked_examples
+        return masked_examples(self, data)
+
     def create_finetuning_data(self, data: List[Dict], task: str = 'classification') -> List[Dict]:
         """Create fine-tuning data for specific tasks"""
         finetune_data = []

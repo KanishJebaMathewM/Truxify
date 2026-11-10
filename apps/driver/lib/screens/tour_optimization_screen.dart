@@ -94,7 +94,7 @@ class _TourOptimizationScreenState extends State<TourOptimizationScreen> {
         const SizedBox(height: 24),
         const Text('Tour Itinerary', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
-        ..._tour!.legs.asMap().entries.map((entry) => _buildLegCard(entry.key + 1, entry.value)).toList(),
+        ..._tour!.legs.asMap().entries.map((entry) => _buildLegCard(entry.key + 1, entry.value)),
         const SizedBox(height: 80), // Padding for FAB
       ],
     );

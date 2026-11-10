@@ -169,7 +169,7 @@ class _DeadheadHeatmapScreenState extends State<DeadheadHeatmapScreen> {
                 height: isSelected ? 60 : 40,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: heatColor.withOpacity(0.6),
+                  color: heatColor.withValues(alpha: 0.6),
                   border: isSelected ? Border.all(color: Colors.white, width: 3) : null,
                   boxShadow: isSelected ? [BoxShadow(color: heatColor, blurRadius: 10, spreadRadius: 5)] : null,
                 ),
@@ -225,7 +225,7 @@ class _DeadheadHeatmapScreenState extends State<DeadheadHeatmapScreen> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: riskColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+              decoration: BoxDecoration(color: riskColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
               child: Text(
                 region.emptyMileProbability > 0.7 
                   ? 'CRITICAL RISK: Highly likely to deadhead out of this market. Negotiate a higher inbound rate.'

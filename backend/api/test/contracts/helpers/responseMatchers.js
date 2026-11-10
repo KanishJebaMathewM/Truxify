@@ -8,7 +8,13 @@ export function expectContract(res, expectedStatus) {
 export function expectErrorContract(res, expectedStatus) {
   expectContract(res, expectedStatus);
   expect(res.body).toHaveProperty('error');
-  expect(typeof res.body.error).toBe('string');
+  // The shared errorHandler emits the structured shape
+  // ({ error: { code, message } }); route-level DomainError catches emit a
+  // plain string. Both are production contract — accept either.
+  const err = res.body.error;
+  const isString = typeof err === 'string';
+  const isStructured = err !== null && typeof err === 'object' && typeof err.message === 'string';
+  expect(isString || isStructured).toBe(true);
 }
 
 export function expectValidationError(res) {

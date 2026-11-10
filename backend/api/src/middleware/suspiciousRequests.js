@@ -6,11 +6,9 @@ const SQLI_PATTERNS = [
   /insert\s+into/i,
   /delete\s+from/i,
   /or\s+1=1/i,
-  // Match -- only when it appears in a SQL comment context: preceded by
-  // whitespace, a quote, a closing paren, or a semicolon — not when
-  // embedded mid-word (e.g. date ranges like 2026-01-01--2026-02-01,
-  // negative numbers, or note fields containing "--").
-  /(?:^|[\s'");])--/,
+  // A bare -- is also ordinary note/address/search text, and JSON quoting
+  // cannot establish SQL context. Block only the explicit SQL signatures
+  // above; database queries must still use parameter binding.
 ];
 
 const XSS_PATTERNS = [
@@ -95,12 +93,28 @@ export function sanitizeKey(k) {
   if (k.startsWith('__') || k.includes('..')) return null;
   return k;
 }
-export function sanitizeQueryParams(obj) {
+export function sanitizeQueryParams(obj, depth = 0, seen = new WeakSet()) {
   if (!obj || typeof obj !== 'object') return {};
+  if (depth > 10 || seen.has(obj)) return {};
+  seen.add(obj);
+
+  if (Array.isArray(obj)) {
+    return obj.map((item) => (
+      item && typeof item === 'object'
+        ? sanitizeQueryParams(item, depth + 1, seen)
+        : item
+    ));
+  }
+
   const out = {};
   for (const [k, v] of Object.entries(obj)) {
     const safe = sanitizeKey(k);
-    if (safe !== null) out[safe] = v;
+    if (safe === null) continue;
+    if (v && typeof v === 'object') {
+      out[safe] = sanitizeQueryParams(v, depth + 1, seen);
+    } else {
+      out[safe] = v;
+    }
   }
   return out;
 }

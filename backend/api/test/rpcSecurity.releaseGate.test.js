@@ -37,10 +37,24 @@ function latestSecurityDefinerFunctions() {
     while ((match = re.exec(sql)) !== null) {
       const start = match.index;
       const nextCreate = sql.indexOf('CREATE', start + 1);
-      const block = sql.slice(start, nextCreate === -1 ? sql.length : nextCreate);
+      let block = sql.slice(start, nextCreate === -1 ? sql.length : nextCreate);
+      // GRANT/REVOKE hardening lines live at file END (after the closing $$),
+      // outside the block heuristic — pull in any that name this function.
+      const accessLines = sql
+        .split('\n')
+        .filter(
+          (line) =>
+            (line.includes('REVOKE') || line.includes('GRANT')) &&
+            line.includes(match[1]),
+        );
+      if (accessLines.length) block += '\n' + accessLines.join('\n');
       const headerEnd = block.indexOf('AS $');
       const header = headerEnd === -1 ? block : block.slice(0, headerEnd);
       if (!header.includes('SECURITY DEFINER')) continue;
+      // Trigger handlers (RETURNS TRIGGER) are not RPC-callable: Postgres only
+      // runs them via their trigger, so they cannot be invoked over PostgREST
+      // and need no caller gate. Only table-valued/scalar RPCs are vectors.
+      if (/RETURNS\s+TRIGGER/i.test(header)) continue;
       defs[match[1]] = { file, block };
     }
   }

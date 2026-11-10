@@ -1,175 +1,266 @@
-"""
-Capacitated Vehicle Routing Problem with Time Windows (CVRPTW) & Pickup/Delivery Engine
-Calculates optimal stop sequences for consolidated multi-customer LTL freight trips.
-"""
+"""Bounded pickup/delivery feasibility search using great-circle travel estimates."""
 
-from typing import List, Dict, Any, Tuple
 import math
+from fractions import Fraction
+from numbers import Real
+from typing import Any
+
+
+def _finite(value, name, *, minimum=None, maximum=None):
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise TypeError(f"{name} must be a finite real number")
+    try:
+        result = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{name} must be float-representable") from exc
+    if (
+        not math.isfinite(result)
+        or (minimum is not None and result < minimum)
+        or (maximum is not None and result > maximum)
+    ):
+        raise ValueError(f"{name} is outside its finite range")
+    return result
 
 
 def haversine_distance_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
-    """Calculates great-circle distance between coordinates in kilometers."""
-    R = 6371.0
-    d_lat = math.radians(lat2 - lat1)
-    d_lng = math.radians(lng2 - lng1)
+    """Great-circle distance, including antipodal floating-point boundaries."""
+    d_lat, d_lng = math.radians(lat2 - lat1), math.radians(lng2 - lng1)
     a = (
         math.sin(d_lat / 2.0) ** 2
         + math.cos(math.radians(lat1))
         * math.cos(math.radians(lat2))
         * math.sin(d_lng / 2.0) ** 2
     )
-    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
-    return R * c
+    a = min(1.0, max(0.0, a))
+    return 6371.0 * 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+
+
+def _upper_float(value):
+    """Round an exact accumulated nonnegative quantity outward for publication."""
+    result = float(value)
+    if not math.isfinite(result):
+        raise OverflowError("route quantity exceeds finite float range")
+    if Fraction.from_float(result) < value:
+        result = math.nextafter(result, math.inf)
+    if not math.isfinite(result):
+        raise OverflowError("route quantity exceeds finite float range")
+    return result
 
 
 class CvrptwSolver:
-    """
-    Solves multi-stop Pickup and Delivery Routing with vehicle capacity
-    and operational time windows.
-    """
+    """Find the first feasible open itinerary; distance optimality is not claimed."""
 
-    def __init__(self, avg_speed_kmh: float = 45.0, service_time_mins: float = 30.0):
-        self.avg_speed_kmh = float(avg_speed_kmh)
-        self.service_time_mins = float(service_time_mins)
+    def __init__(
+        self, avg_speed_kmh=45.0, service_time_mins=30.0, max_search_states=10000
+    ):
+        self.avg_speed_kmh = _finite(avg_speed_kmh, "speed", minimum=0)
+        if self.avg_speed_kmh == 0:
+            raise ValueError("speed must be positive")
+        self.service_time_mins = _finite(service_time_mins, "service time", minimum=0)
+        if type(max_search_states) is not int or not 1 <= max_search_states <= 100000:
+            raise ValueError("search budget must be an integer in [1, 100000]")
+        self.max_search_states = max_search_states
 
     def solve(
         self,
-        depot: Dict[str, Any],
-        consignments: List[Dict[str, Any]],
+        depot: dict[str, Any],
+        consignments: list[dict[str, Any]],
         max_capacity_kg: float = 25000.0,
-    ) -> Dict[str, Any]:
-        """
-        Solves the CVRPTW stop sequence.
+    ) -> dict[str, Any]:
+        # Revalidate public configuration attributes before admitting a problem.
+        config = CvrptwSolver(
+            self.avg_speed_kmh, self.service_time_mins, self.max_search_states
+        )
+        capacity = _finite(max_capacity_kg, "capacity", minimum=0)
+        if not isinstance(depot, dict) or not isinstance(consignments, list):
+            raise TypeError("depot and consignments must be a mapping and list")
+        stops, weights, identities = [], [], set()
+        for index, consignment in enumerate(consignments):
+            if not isinstance(consignment, dict):
+                raise TypeError("each consignment must be a mapping")
+            identity = consignment.get("id", f"c_{index}")
+            if (
+                type(identity) not in (str, int)
+                or (isinstance(identity, str) and not identity.strip())
+                or identity in identities
+            ):
+                raise ValueError(
+                    "consignment IDs must be unique nonempty strings or integers"
+                )
+            identities.add(identity)
+            weight = _finite(consignment.get("weight_kg", 0), "weight", minimum=0)
+            weights.append(Fraction.from_float(weight))
+            for kind, key in (("PICKUP", "pickup"), ("DELIVERY", "delivery")):
+                location = consignment.get(key)
+                if not isinstance(location, dict):
+                    raise TypeError("pickup and delivery locations are required")
+                lat = _finite(location.get("lat"), "latitude", minimum=-90, maximum=90)
+                lng = _finite(
+                    location.get("lng"), "longitude", minimum=-180, maximum=180
+                )
+                start = _finite(
+                    location.get("time_window_start_min", 0), "window start", minimum=0
+                )
+                end = _finite(
+                    location.get("time_window_end_min", 1440), "window end", minimum=0
+                )
+                if start > end:
+                    raise ValueError("time window start must not exceed end")
+                name = location.get("name")
+                if name is not None and not isinstance(name, str):
+                    raise TypeError("stop name must be a string or None")
+                stops.append(
+                    {
+                        "consignment_id": identity,
+                        "job": index,
+                        "type": kind,
+                        "lat": lat,
+                        "lng": lng,
+                        "name": name or f"{kind.title()} #{identity}",
+                        "tw_start": Fraction.from_float(start),
+                        "tw_end": Fraction.from_float(end),
+                    }
+                )
+        initial_lat = _finite(
+            depot.get("lat", stops[0]["lat"] if stops else 0),
+            "depot latitude",
+            minimum=-90,
+            maximum=90,
+        )
+        initial_lng = _finite(
+            depot.get("lng", stops[0]["lng"] if stops else 0),
+            "depot longitude",
+            minimum=-180,
+            maximum=180,
+        )
+        initial_time = Fraction.from_float(
+            _finite(depot.get("start_time_min", 0), "start time", minimum=0)
+        )
+        capacity_exact = Fraction.from_float(capacity)
+        service = Fraction.from_float(config.service_time_mins)
+        complete = (1 << len(weights)) - 1
+        numeric_limit = False
 
-        Consignment schema:
-          - id: str
-          - pickup: { lat, lng, time_window_start_min, time_window_end_min, name }
-          - delivery: { lat, lng, time_window_start_min, time_window_end_min, name }
-          - weight_kg: float
-        """
-        if not consignments:
+        def result(
+            success,
+            reason,
+            path=None,
+            distance=Fraction(0),
+            end_time=initial_time,
+            states=0,
+        ):
+            itinerary = []
+            while path is not None:
+                entry, path = path
+                itinerary.append(entry)
+            itinerary.reverse()
             return {
-                "success": True,
-                "total_distance_km": 0.0,
-                "total_duration_mins": 0.0,
-                "stops": [],
+                "success": success,
+                "reason": reason,
+                "itinerary": itinerary,
+                "stops": list(itinerary),
+                "total_stops": len(itinerary),
+                "consignments_count": len(weights),
+                "max_capacity_kg": capacity,
+                "total_distance_km": _upper_float(distance),
+                "total_duration_mins": _upper_float(end_time - initial_time),
+                "total_duration_hours": _upper_float((end_time - initial_time) / 60),
+                "search_states": states,
             }
 
-        # Build list of stops with pickup/dropoff dependencies
-        stops = []
-        for idx, c in enumerate(consignments):
-            c_id = c.get("id", f"c_{idx}")
-            weight = float(c.get("weight_kg", 0.0))
+        if any(weight > capacity_exact for weight in weights):
+            return result(False, "infeasible")
+        if not weights:
+            return result(True, "feasible", states=1)
 
-            p = c.get("pickup", {})
-            stops.append({
-                "consignment_id": c_id,
-                "type": "PICKUP",
-                "lat": float(p.get("lat", 0.0)),
-                "lng": float(p.get("lng", 0.0)),
-                "name": p.get("name", f"Pickup #{c_id}"),
-                "tw_start": float(p.get("time_window_start_min", 0.0)),
-                "tw_end": float(p.get("time_window_end_min", 1440.0)),
-                "weight_delta": weight,
-            })
+        # State: picked mask, delivered mask, last stop, exact clock/load/distance,
+        # and owned itinerary. Earlier arrival dominates a later identical state
+        # for static travel and service-start windows, independent of distance.
+        root = (0, 0, -1, initial_time, Fraction(0), Fraction(0), None)
+        earliest = {(0, 0, -1): initial_time}
 
-            d = c.get("delivery", {})
-            stops.append({
-                "consignment_id": c_id,
-                "type": "DELIVERY",
-                "lat": float(d.get("lat", 0.0)),
-                "lng": float(d.get("lng", 0.0)),
-                "name": d.get("name", f"Delivery #{c_id}"),
-                "tw_start": float(d.get("time_window_start_min", 0.0)),
-                "tw_end": float(d.get("time_window_end_min", 1440.0)),
-                "weight_delta": -weight,
-            })
-
-        # Nearest Insertion with Pickup-before-Delivery precedence heuristic
-        depot_lat = float(depot.get("lat", stops[0]["lat"]))
-        depot_lng = float(depot.get("lng", stops[0]["lng"]))
-
-        unvisited = list(stops)
-        route = []
-        picked_up_consignments = set()
-
-        curr_lat, curr_lng = depot_lat, depot_lng
-        curr_time_min = float(depot.get("start_time_min", 0.0))
-        curr_load_kg = 0.0
-        total_dist_km = 0.0
-
-        while unvisited:
-            # Candidates are:
-            # 1. Any PICKUP stop (if capacity allows)
-            # 2. Any DELIVERY stop whose corresponding PICKUP has already occurred
+        def transitions(state):
+            nonlocal numeric_limit
+            picked, delivered, last, clock, load, distance, path = state
+            lat = initial_lat if last == -1 else stops[last]["lat"]
+            lng = initial_lng if last == -1 else stops[last]["lng"]
             candidates = []
-            for s in unvisited:
-                if s["type"] == "PICKUP":
-                    if curr_load_kg + s["weight_delta"] <= max_capacity_kg:
-                        candidates.append(s)
-                elif s["type"] == "DELIVERY":
-                    if s["consignment_id"] in picked_up_consignments:
-                        candidates.append(s)
+            for stop_index, stop in enumerate(stops):
+                bit = 1 << stop["job"]
+                if stop["type"] == "PICKUP":
+                    if picked & bit:
+                        continue
+                    next_load = load + weights[stop["job"]]
+                    if next_load > capacity_exact:
+                        continue
+                    next_picked, next_delivered = picked | bit, delivered
+                else:
+                    if not picked & bit or delivered & bit:
+                        continue
+                    next_load = load - weights[stop["job"]]
+                    next_picked, next_delivered = picked, delivered | bit
+                leg = haversine_distance_km(lat, lng, stop["lat"], stop["lng"])
+                travel = (leg / config.avg_speed_kmh) * 60
+                if not math.isfinite(travel):
+                    numeric_limit = True
+                    continue
+                arrival = clock + Fraction.from_float(travel)
+                start_service = max(arrival, stop["tw_start"])
+                if start_service > stop["tw_end"]:
+                    continue
+                departure = start_service + service
+                next_distance = distance + Fraction.from_float(leg)
+                try:
+                    entry = {
+                        "sequence": picked.bit_count() + delivered.bit_count() + 1,
+                        "consignment_id": stop["consignment_id"],
+                        "type": stop["type"],
+                        "name": stop["name"],
+                        "location": {"lat": stop["lat"], "lng": stop["lng"]},
+                        "distance_from_prev_km": leg,
+                        "arrival_time_min": _upper_float(arrival),
+                        "start_service_time_min": _upper_float(start_service),
+                        "departure_time_min": _upper_float(departure),
+                        "vehicle_load_kg": _upper_float(next_load),
+                        "is_within_time_window": True,
+                    }
+                    _upper_float(next_distance)
+                except OverflowError:
+                    numeric_limit = True
+                    continue
+                child = (
+                    next_picked,
+                    next_delivered,
+                    stop_index,
+                    departure,
+                    next_load,
+                    next_distance,
+                    (entry, path),
+                )
+                candidates.append((leg, stop_index, child))
+            candidates.sort(key=lambda candidate: candidate[:2])
+            return iter(child for _, _, child in candidates)
 
-            if not candidates:
-                # Capacity constraint or cyclic deadlock fallback: force nearest delivery
-                delivery_candidates = [
-                    s for s in unvisited if s["consignment_id"] in picked_up_consignments
-                ]
-                candidates = delivery_candidates if delivery_candidates else unvisited
-
-            # Select nearest candidate
-            best_stop = None
-            best_dist = float("inf")
-
-            for cand in candidates:
-                dist = haversine_distance_km(curr_lat, curr_lng, cand["lat"], cand["lng"])
-                if dist < best_dist:
-                    best_dist = dist
-                    best_stop = cand
-
-            if best_stop is None:
-                best_stop = unvisited[0]
-                best_dist = haversine_distance_km(curr_lat, curr_lng, best_stop["lat"], best_stop["lng"])
-
-            # Advance vehicle state
-            travel_time_min = (best_dist / self.avg_speed_kmh) * 60.0
-            arrival_time_min = curr_time_min + travel_time_min
-
-            # Wait if arrived earlier than time window start
-            start_service_time = max(arrival_time_min, best_stop["tw_start"])
-            departure_time_min = start_service_time + self.service_time_mins
-
-            curr_load_kg += best_stop["weight_delta"]
-            total_dist_km += best_dist
-
-            if best_stop["type"] == "PICKUP":
-                picked_up_consignments.add(best_stop["consignment_id"])
-
-            route_entry = {
-                "sequence": len(route) + 1,
-                "consignment_id": best_stop["consignment_id"],
-                "type": best_stop["type"],
-                "name": best_stop["name"],
-                "location": {"lat": best_stop["lat"], "lng": best_stop["lng"]},
-                "distance_from_prev_km": round(best_dist, 2),
-                "arrival_time_min": round(arrival_time_min, 1),
-                "departure_time_min": round(departure_time_min, 1),
-                "vehicle_load_kg": round(curr_load_kg, 1),
-                "is_within_time_window": arrival_time_min <= best_stop["tw_end"],
-            }
-            route.append(route_entry)
-
-            curr_lat, curr_lng = best_stop["lat"], best_stop["lng"]
-            curr_time_min = departure_time_min
-            unvisited.remove(best_stop)
-
-        return {
-            "success": True,
-            "total_distance_km": round(total_dist_km, 2),
-            "total_duration_hours": round(curr_time_min / 60.0, 2),
-            "total_stops": len(route),
-            "consignments_count": len(consignments),
-            "max_capacity_kg": max_capacity_kg,
-            "itinerary": route,
-        }
+        # Explicit frames avoid recursion limits and admit one child
+        # at a time, so nearest-first work cannot consume its budget on siblings.
+        stack = [transitions(root)]
+        admitted = 1
+        while stack:
+            child = next(stack[-1], None)
+            if child is None:
+                stack.pop()
+                continue
+            picked, delivered, last, clock, _, distance, path = child
+            key = picked, delivered, last
+            if key in earliest and earliest[key] <= clock:
+                continue
+            if admitted >= config.max_search_states:
+                return result(False, "search_limit", states=admitted)
+            admitted += 1
+            earliest[key] = clock
+            if delivered == complete:
+                return result(True, "feasible", path, distance, clock, admitted)
+            stack.append(transitions(child))
+        return result(
+            False, "numeric_limit" if numeric_limit else "infeasible", states=admitted
+        )

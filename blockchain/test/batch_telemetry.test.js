@@ -7,8 +7,20 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const path = require("path");
+const { execFileSync } = require("child_process");
 const { groth16 } = require("snarkjs");
 const wasm_tester = require("circom_tester").wasm;
+
+// This suite compiles the circuit with the circom binary; skip cleanly on
+// machines without the circom toolchain installed.
+function circomAvailable() {
+    try {
+        execFileSync("circom", ["--version"], { stdio: "pipe" });
+        return true;
+    } catch {
+        return false;
+    }
+}
 
 describe("BatchTelemetry Circuit (#11248)", function () {
     this.timeout(300000); // 5 minutes for circuit compilation
@@ -16,6 +28,10 @@ describe("BatchTelemetry Circuit (#11248)", function () {
     let circuit;
 
     before(async function () {
+        if (!circomAvailable()) {
+            console.log("      circom binary not found — skipping circuit suite");
+            this.skip();
+        }
         // Compile the circuit
         circuit = await wasm_tester(
             path.join(__dirname, "../circuits/batch_telemetry.circom"),

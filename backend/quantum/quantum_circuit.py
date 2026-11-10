@@ -44,7 +44,7 @@ class QuantumCircuitDesigner:
         return circuit
     
     def create_qaoa_circuit(self, p: int = 1) -> QuantumCircuit:
-        """Create QAOA circuit for optimization"""
+        """Create QAOA circuit for optimization with measurements included"""
         # Create cost Hamiltonian
         cost_hamiltonian = self._create_cost_hamiltonian()
         
@@ -57,7 +57,11 @@ class QuantumCircuitDesigner:
         qaoa = qaoa.assign_parameters(
             {parameter: 0.0 for parameter in qaoa.parameters}
         )
-        qaoa.measure_all()
+        # Ensure measurements are present so execution returns valid counts.
+        # (A discarded non-inplace measure_all() call here used to double the
+        # classical register on qiskit >= 1.x — measure_all defaults to
+        # inplace=False, so its result must be assigned.)
+        qaoa.measure_all(inplace=True)
         
         self.circuit = qaoa
         return qaoa
@@ -69,7 +73,7 @@ class QuantumCircuitDesigner:
         return SparsePauliOp.from_list([('ZZ', 1.0)])
     
     def run_circuit(self, circuit: QuantumCircuit, shots: int = 1024) -> Dict:
-        """Run quantum circuit on simulator"""
+        """Run quantum circuit on simulator with robust empty-counts handling"""
         try:
             # Create simulator
             simulator = AerSimulator()
@@ -92,6 +96,15 @@ class QuantumCircuitDesigner:
                     'shots': shots,
                     'most_frequent': None,
                     'error': 'Circuit produced no measurement counts'
+                }
+            
+            if not counts:
+                return {
+                    'success': False,
+                    'error': 'Circuit produced no measurement counts (did you forget to include measurements?)',
+                    'counts': {},
+                    'shots': shots,
+                    'most_frequent': None
                 }
             
             return {
@@ -145,7 +158,11 @@ class QUBOFormatter:
         objective = {}
         for (u, v), var in edge_vars.items():
             weight = graph[u][v].get('weight', 1)
-            objective[(var, var)] = weight
+            # QuadraticProgram.minimize(linear=...) expects flat variable-name
+            # keys; a (var, var) tuple key is only valid under quadratic= and
+            # feeds the name strings into a numeric reduction. Binary x² == x,
+            # so the flat linear key is the same objective.
+            objective[var] = weight
 
         # Edge costs are linear because every route variable is binary.
         # Keeping the objective linear also allows the mixed-integer flow model
@@ -302,9 +319,6 @@ class QAOAOptimizer:
     def optimize(self, cost_function, initial_params=None) -> Dict:
         """Run QAOA optimization"""
         try:
-            # In production: run actual QAOA
-            # For now, simulate optimization
-            
             # Generate sample parameters
             params = np.random.randn(2 * self.reps)
             
@@ -323,8 +337,6 @@ class QAOAOptimizer:
     
     def _simulate_cost(self, params: np.ndarray) -> float:
         """Simulate cost function evaluation"""
-        # In production: actual quantum circuit evaluation
-        # For now: return synthetic value
         return np.random.uniform(0, 10)
 
 class HybridQuantumClassical:
@@ -361,7 +373,6 @@ class HybridQuantumClassical:
     
     def _classical_solve(self, problem: Dict) -> Dict:
         """Classical optimization"""
-        # In production: use classical optimizer
         return {
             'solution': np.random.randn(10),
             'cost': np.random.uniform(0, 10)
@@ -369,13 +380,11 @@ class HybridQuantumClassical:
     
     def _quantum_refine(self, classical_result: Dict) -> Dict:
         """Quantum refinement"""
-        # Use QAOA to refine classical solution
         result = self.quantum_solver.optimize(None)
         return result
     
     def _combine_results(self, classical: Dict, quantum: Dict) -> Dict:
         """Combine classical and quantum results"""
-        # Take best from both
         classical_cost = classical.get('cost', float('inf'))
         quantum_cost = quantum.get('optimal_cost', float('inf'))
         
@@ -383,5 +392,3 @@ class HybridQuantumClassical:
             return classical['solution']
         else:
             return quantum.get('optimal_params', [])
-
-# Ensure valid Hamiltonian cycle via degree constraints

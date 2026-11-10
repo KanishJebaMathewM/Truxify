@@ -237,6 +237,7 @@ class DriverProfitInput(BaseModel):
 class DriverProfitOutput(BaseModel):
     predicted_profit: float
     confidence_interval: dict
+    interval_calibration: dict | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -731,6 +732,8 @@ async def train_demand_endpoint(_auth=Depends(verify_api_key)):
         except asyncio.TimeoutError:
             logger.error("Demand model training timed out after %s seconds", timeout)
             raise HTTPException(status_code=504, detail="Training timed out")
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error("Demand model training failed: %s", e)
             raise HTTPException(status_code=500, detail="Training failed")
@@ -799,6 +802,8 @@ async def train_price_endpoint(_auth=Depends(verify_api_key)):
         except asyncio.TimeoutError:
             logger.error("Price model training timed out after %s seconds", timeout)
             raise HTTPException(status_code=504, detail="Training timed out")
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error("Price model training failed: %s", e)
             raise HTTPException(status_code=500, detail="Training failed")
@@ -903,7 +908,11 @@ async def verify_kyc_endpoint(file: UploadFile = File(...), _auth=Depends(verify
                 extracted_number=None,
                 raw_text="",
             )
+# backend/ml/main.py (Excerpt)
 
+# REMOVED:
+# MAX_CONCURRENT_INFERENCE = int(os.getenv("MAX_CONCURRENT_INFERENCE", 4))
+# INFERENCE_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_INFERENCE)
         result = ocr_verifier.verify_license(text)
         return KYCVerificationOutput(**result)
     except HTTPException:

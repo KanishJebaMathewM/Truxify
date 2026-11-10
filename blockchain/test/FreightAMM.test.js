@@ -2,6 +2,10 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
 describe("FreightAMM swap pools", function () {
+  // swap() was split into swapAForB/swapBForA with minAmountOut + deadline
+  // (slippage protection, #11630).
+  const deadline = async () => (await ethers.provider.getBlock("latest")).timestamp + 3600;
+
   it("Should swap tokens using constant product formula", async function () {
     const [owner, provider, swapper] = await ethers.getSigners();
     
@@ -22,8 +26,8 @@ describe("FreightAMM swap pools", function () {
     await tokenX.connect(swapper).approve(await amm.getAddress(), 100);
 
     // Swap 100 Credit tokens to Stablecoin
-    // Expected output Stable = (1000 * 100) / (1000 + 100) = 90.9 => 90 Stable
-    await amm.connect(swapper).swap(100, true, 0);
+    // Expected output Stable = (100 * 0.997 * 1000) / (1000 + 100 * 0.997) ≈ 90 Stable
+    await amm.connect(swapper).swapAForB(100, 0, await deadline());
 
     expect(await tokenY.balanceOf(swapper.address)).to.equal(90);
   });
@@ -45,8 +49,10 @@ describe("FreightAMM swap pools", function () {
     await tokenX.transfer(swapper.address, 100);
     await tokenX.connect(swapper).approve(await amm.getAddress(), 100);
 
-    // 100 Credit in against 1000/1000 pool yields only 90 Stable out
-    await expect(amm.connect(swapper).swap(100, true, 91)).to.be.revertedWith("Swap output below minAmountOut");
+    // 100 Credit in against 1000/1000 pool yields only ~90 Stable out
+    await expect(
+      amm.connect(swapper).swapAForB(100, 91, await deadline())
+    ).to.be.revertedWith("Slippage tolerance exceeded");
   });
 
   it("Should retain the swap fee in the pool reserve", async function () {
@@ -67,9 +73,9 @@ describe("FreightAMM swap pools", function () {
     await tokenX.connect(swapper).approve(await amm.getAddress(), 1000);
 
     // 0.3% fee on 1000 Credit input = 3 Credit, kept in the pool
-    await amm.connect(swapper).swap(1000, true, 0);
+    await amm.connect(swapper).swapAForB(1000, 0, await deadline());
 
-    expect(await amm.reserveCredit()).to.equal(2000);
+    expect(await amm.reserveA()).to.equal(2000);
     expect(await tokenX.balanceOf(amm.getAddress())).to.equal(2000);
   });
 });

@@ -45,7 +45,10 @@ class TestComputePhysicsResidual:
         """Regression (issue #11667): slope is a degree angle, so the force
         term must use sin(radians(slope)). Compare against the analytic value
         computed with math.sin(math.radians(deg))."""
-        speed, slope_deg, mass = 60.0, 5.0, 10000.0
+        # slope must be one where sin(deg-as-radians) is positive and
+        # differs from sin(radians(deg)): 5.0 rad is negative, breaking the
+        # bogus-value sanity assertions below. 3.0 keeps the intent.
+        speed, slope_deg, mass = 60.0, 3.0, 10000.0
         force = mass * (speed * 0.05) + mass * 9.81 * math.sin(math.radians(slope_deg))
         expected_min_wear = max(0.0, force * 1e-6)
         residual = self.loss.compute_physics_residual(speed, slope_deg, mass, expected_min_wear)

@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import '../lib/models/route_stop_model.dart';
-import '../lib/services/route_optimization_service.dart';
+import 'package:truxify_driver/models/route_stop_model.dart';
+import 'package:truxify_driver/services/route_optimization_service.dart';
 
 void main() {
   test('uses the previously selected stop as the next distance reference', () async {
@@ -12,7 +12,7 @@ void main() {
         id: 'b',
         address: 'B',
         latitude: 0,
-        longitude: 1,
+        longitude: 0.1,
         deliveryWindowStart: window,
         deliveryWindowEnd: window.add(const Duration(hours: 2)),
       ),
@@ -20,15 +20,15 @@ void main() {
         id: 'c',
         address: 'C',
         latitude: 0,
-        longitude: 1.9,
+        longitude: 0.2,
         deliveryWindowStart: window,
         deliveryWindowEnd: window.add(const Duration(hours: 2)),
       ),
       RouteStop(
         id: 'd',
         address: 'D',
-        latitude: 1,
-        longitude: 0.5,
+        latitude: 0.1,
+        longitude: 0.1,
         deliveryWindowStart: window,
         deliveryWindowEnd: window.add(const Duration(hours: 2)),
       ),

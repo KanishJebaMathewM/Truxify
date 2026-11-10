@@ -1,52 +1,72 @@
-const assert = require('assert');
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import {
+  getWimSigningSecret,
+  hasWimSigningSecret,
+  getWimCredentialTtlMs,
+  getMaxWimMeasurementAgeMs,
+  validateWimConfig,
+} from '../../../src/config/wim.js';
 
-describe('WIM Configuration Module', () => {
-  const originalEnv = process.env;
+describe('wim config', () => {
+  let originalEnv;
 
   beforeEach(() => {
-    // Reset process.env before each test to isolate environment overrides
-    jest.resetModules();
+    originalEnv = { ...process.env };
+    delete process.env.WIM_SIGNING_SECRET;
+    delete process.env.WIM_CREDENTIAL_TTL_MS;
+    delete process.env.MAX_WIM_MEASUREMENT_AGE_MS;
+  });
+
+  afterEach(() => {
     process.env = { ...originalEnv };
   });
 
-  afterAll(() => {
-    process.env = originalEnv;
+  it('getWimSigningSecret throws when the secret is missing or empty', () => {
+    expect(() => getWimSigningSecret()).toThrow(
+      'WIM_SIGNING_SECRET environment variable is required'
+    );
+    process.env.WIM_SIGNING_SECRET = '   ';
+    expect(() => getWimSigningSecret()).toThrow(
+      'WIM_SIGNING_SECRET environment variable is required'
+    );
   });
 
-  it('should load default configuration values correctly', () => {
-    const wimConfig = require('../../../src/config/wim');
+  it('getWimSigningSecret rejects short secrets and trims valid ones', () => {
+    process.env.WIM_SIGNING_SECRET = 'short';
+    expect(() => getWimSigningSecret()).toThrow('at least 32 characters');
 
-    assert.strictEqual(typeof wimConfig.DEFAULT_CREDENTIAL_TTL_MS, 'number');
-    assert.strictEqual(typeof wimConfig.DEFAULT_MAX_MEASUREMENT_AGE_MS, 'number');
-    assert.strictEqual(typeof wimConfig.MIN_SIGNING_SECRET_LENGTH, 'number');
-    
-    // Check reasonable default assumptions if specified by standard app settings
-    assert.ok(wimConfig.DEFAULT_CREDENTIAL_TTL_MS > 0);
-    assert.ok(wimConfig.DEFAULT_MAX_MEASUREMENT_AGE_MS > 0);
+    const secret = 'a'.repeat(32);
+    process.env.WIM_SIGNING_SECRET = `  ${secret}  `;
+    expect(getWimSigningSecret()).toBe(secret);
   });
 
-  it('should allow environment variable overrides for WIM config', () => {
+  it('hasWimSigningSecret reflects configuration without throwing', () => {
+    expect(hasWimSigningSecret()).toBe(false);
+    process.env.WIM_SIGNING_SECRET = 'b'.repeat(40);
+    expect(hasWimSigningSecret()).toBe(true);
+  });
+
+  it('getWimCredentialTtlMs defaults and honors overrides', () => {
+    expect(getWimCredentialTtlMs()).toBe(15 * 60 * 1000);
     process.env.WIM_CREDENTIAL_TTL_MS = '7200000';
-    process.env.WIM_MAX_MEASUREMENT_AGE_MS = '300000';
-    process.env.MIN_SIGNING_SECRET_LENGTH = '64';
-
-    const wimConfig = require('../../../src/config/wim');
-
-    assert.strictEqual(wimConfig.DEFAULT_CREDENTIAL_TTL_MS, 7200000);
-    assert.strictEqual(wimConfig.DEFAULT_MAX_MEASUREMENT_AGE_MS, 300000);
-    assert.strictEqual(wimConfig.MIN_SIGNING_SECRET_LENGTH, 64);
+    expect(getWimCredentialTtlMs()).toBe(7200000);
+    process.env.WIM_CREDENTIAL_TTL_MS = 'nope';
+    expect(getWimCredentialTtlMs()).toBe(15 * 60 * 1000);
   });
 
-  it('should return the expected configuration structure', () => {
-    const wimConfig = require('../../../src/config/wim');
+  it('getMaxWimMeasurementAgeMs defaults and honors overrides', () => {
+    expect(getMaxWimMeasurementAgeMs()).toBe(15 * 60 * 1000);
+    process.env.MAX_WIM_MEASUREMENT_AGE_MS = '300000';
+    expect(getMaxWimMeasurementAgeMs()).toBe(300000);
+  });
 
-    assert.strictEqual(typeof wimConfig, 'object');
-    assert.notStrictEqual(wimConfig, null);
-    
-    // Verify specific keys exist in the exported object
-    const keys = Object.keys(wimConfig);
-    assert.ok(keys.includes('DEFAULT_CREDENTIAL_TTL_MS'));
-    assert.ok(keys.includes('DEFAULT_MAX_MEASUREMENT_AGE_MS'));
-    assert.ok(keys.includes('MIN_SIGNING_SECRET_LENGTH'));
+  it('validateWimConfig fails fast without a secret and reports shape with one', () => {
+    expect(() => validateWimConfig()).toThrow();
+    process.env.WIM_SIGNING_SECRET = 'c'.repeat(40);
+    expect(validateWimConfig()).toEqual({
+      signingSecretConfigured: true,
+      credentialTtlMs: 15 * 60 * 1000,
+      maxMeasurementAgeMs: 15 * 60 * 1000,
+    });
   });
 });

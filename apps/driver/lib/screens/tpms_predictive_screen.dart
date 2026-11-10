@@ -95,8 +95,9 @@ class _TpmsPredictiveScreenState extends State<TpmsPredictiveScreen> {
     bool isCritical = t.milesToCriticalFailure < 50;
 
     Color borderColor = Colors.grey[300]!;
-    if (isCritical) borderColor = Colors.red;
-    else if (isWarning) borderColor = Colors.orange;
+    if (isCritical) {
+      borderColor = Colors.red;
+    } else if (isWarning) borderColor = Colors.orange;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),

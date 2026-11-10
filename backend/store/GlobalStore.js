@@ -154,14 +154,17 @@ class GlobalStore extends EventEmitter {
             return;
         }
         
-        // Save history for undo (skip while a transaction is active so that
-        // intermediate mutations do not pollute the undo history).
+        const oldValue = this.state[key];
+        this.state[key] = value;
+        
+        // Record the POST-mutation state (matching transaction commit's
+        // convention) — recording the pre-state here made undo() skip the
+        // immediate previous state (off-by-one).
+        // Skipped while a transaction is active so intermediate mutations do
+        // not pollute the undo history.
         if (!this.activeTransaction) {
             this.saveHistory();
         }
-        
-        const oldValue = this.state[key];
-        this.state[key] = value;
         
         this.emit('stateChanged', { key, oldValue, newValue: value });
         this.notifyListeners(key, value);
@@ -175,13 +178,13 @@ class GlobalStore extends EventEmitter {
             return;
         }
         
-        // Skip while a transaction is active so intermediate mutations do not
-        // pollute the undo history.
+        const oldState = { ...this.state };
+        Object.assign(this.state, updates);
+        
+        // Post-mutation snapshot — see set() for why the order matters.
         if (!this.activeTransaction) {
             this.saveHistory();
         }
-        const oldState = { ...this.state };
-        Object.assign(this.state, updates);
         
         this.emit('stateUpdated', { oldState, newState: this.state });
         
@@ -284,7 +287,7 @@ class GlobalStore extends EventEmitter {
         return {
             state: structuredClone(this.state),
             timestamp: Date.now(),
-            id: `snapshot_${Date.now()}`
+            id: `snapshot_${crypto.randomBytes(16).toString('hex')}`
         };
     }
     

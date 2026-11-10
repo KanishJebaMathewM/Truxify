@@ -18,7 +18,7 @@ class CustomsBrokerService {
       loadReference: loadReference,
       borderAgency: agency,
       portOfEntry: portOfEntry,
-      barcodeData: 'BCODE-${loadReference}-${DateTime.now().millisecondsSinceEpoch}',
+      barcodeData: 'BCODE-$loadReference-${DateTime.now().millisecondsSinceEpoch}',
       approvalStatus: 'APPROVED',
       submissionTime: DateTime.now(),
     );

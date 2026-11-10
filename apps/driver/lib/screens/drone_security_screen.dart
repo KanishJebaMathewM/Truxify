@@ -140,7 +140,7 @@ class _DroneSecurityScreenState extends State<DroneSecurityScreen> {
           children: [
             // Center reticle
             Center(
-              child: Icon(Icons.add, size: 48, color: s.isAlarmActive ? Colors.red.withOpacity(0.5) : Colors.green.withOpacity(0.5)),
+              child: Icon(Icons.add, size: 48, color: s.isAlarmActive ? Colors.red.withValues(alpha: 0.5) : Colors.green.withValues(alpha: 0.5)),
             ),
             // Threat overlays
             if (s.activeThreats.isNotEmpty)
@@ -151,7 +151,7 @@ class _DroneSecurityScreenState extends State<DroneSecurityScreen> {
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
                     border: Border.all(color: s.isAlarmActive ? Colors.red : Colors.orange, width: 2),
-                    color: s.isAlarmActive ? Colors.red.withOpacity(0.2) : Colors.orange.withOpacity(0.2),
+                    color: s.isAlarmActive ? Colors.red.withValues(alpha: 0.2) : Colors.orange.withValues(alpha: 0.2),
                   ),
                   child: Text(isFlir ? 'HEAT SIGNATURE' : 'FACE RECORDED', style: TextStyle(color: s.isAlarmActive ? Colors.red : Colors.orange, fontWeight: FontWeight.bold, fontSize: 10)),
                 ),

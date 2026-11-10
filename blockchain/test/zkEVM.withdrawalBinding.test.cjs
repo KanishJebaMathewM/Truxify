@@ -34,7 +34,7 @@ describe("zkEVM withdrawal proof binding", function () {
     const provedAmount = ethers.parseEther("1");
     const requestedAmount = ethers.parseEther("1.5");
 
-    await zkEVM.connect(withdrawer).depositToL2({ value: depositedAmount });
+    await zkEVM.connect(withdrawer)["depositToL2()"]({ value: depositedAmount });
 
     const proof = encodeProof(withdrawer.address, provedAmount);
 
@@ -49,7 +49,7 @@ describe("zkEVM withdrawal proof binding", function () {
     const { withdrawer, otherUser, zkEVM } = await deployFixture();
     const amount = ethers.parseEther("1");
 
-    await zkEVM.connect(otherUser).depositToL2({ value: amount });
+    await zkEVM.connect(otherUser)["depositToL2()"]({ value: amount });
 
     const proof = encodeProof(withdrawer.address, amount);
 
@@ -64,7 +64,7 @@ describe("zkEVM withdrawal proof binding", function () {
     const { withdrawer, zkEVM } = await deployFixture();
     const amount = ethers.parseEther("1");
 
-    await zkEVM.connect(withdrawer).depositToL2({ value: amount });
+    await zkEVM.connect(withdrawer)["depositToL2()"]({ value: amount });
 
     const proof = encodeProof(withdrawer.address, amount);
     await expect(

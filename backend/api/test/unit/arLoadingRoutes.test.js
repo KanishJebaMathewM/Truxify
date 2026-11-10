@@ -187,6 +187,19 @@ describe('arLoadingRoutes', () => {
       expect(res.body.error).toMatch(/Invalid pallet specifications at index 0/i);
     });
 
+    it('maps optimizer capacity exhaustion to 429', async () => {
+      const capacityError = new Error('AR loading plan capacity reached; try again later');
+      capacityError.statusCode = 429;
+      arLoadingOptimizerServiceMock.generateLoadingPlan.mockRejectedValue(capacityError);
+
+      const res = await request(makeApp())
+        .post('/api/ar-loading/optimize')
+        .send(validPayload);
+
+      expect(res.status).toBe(429);
+      expect(res.body.error).toMatch(/capacity reached/i);
+    });
+
     it('handles unexpected optimizer failure with 500', async () => {
       arLoadingOptimizerServiceMock.generateLoadingPlan.mockRejectedValue(
         new Error('3D packing solver timeout')

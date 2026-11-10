@@ -10,10 +10,6 @@ const MONITORED_HEADERS = new Set([
 ]);
 
 export default function securityHeaderDuplicates(req, res, next) {
-  if (process.env.NODE_ENV === 'production') {
-    return next();
-  }
-
   const seen = new Set();
   const seenCookies = new Set();
   const originalSetHeader = res.setHeader.bind(res);

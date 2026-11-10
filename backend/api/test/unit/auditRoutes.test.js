@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 vi.mock('../../src/middleware/auth.js', () => ({
   authenticate: (req, _res, next) => next(),
+  requireRole: () => (_req, _res, next) => next(),
 }));
 
 vi.mock('../../src/middleware/rateLimiter.js', () => ({

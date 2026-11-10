@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 class PwaInstallPrompt extends StatefulWidget {
-  const PwaInstallPrompt({Key? key}) : super(key: key);
+  const PwaInstallPrompt({super.key});
 
   @override
   State<PwaInstallPrompt> createState() => _PwaInstallPromptState();

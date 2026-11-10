@@ -98,24 +98,35 @@ void main() {
 
     test('cancelling one subscriber keeps the other alive (ref-counted channel)',
         () async {
-      final repo = MarketplaceRepository(
-        client: SupabaseClient('https://example.supabase.co', 'test-anon-key'),
-      );
+      // Note: the previous version awaited the survivor's onDone AFTER
+      // cancelling it — impossible by Dart stream semantics (cancel()
+      // suppresses onDone). The real contract: after one subscriber cancels,
+      // the surviving subscriber still receives events.
+      final fakeClient = FakeSupabaseClient();
+      final repo = MarketplaceRepository(client: fakeClient);
 
       final first = repo.subscribeToNewLoads();
       final second = repo.subscribeToNewLoads();
 
-      final secondActive = Completer<void>();
-      final subSecond = second.listen(
-        (_) {},
-        onDone: () => secondActive.complete(),
-      );
+      final receivedFirst = <LoadOffer>[];
+      final receivedSecond = <LoadOffer>[];
+      final subFirst = first.listen(receivedFirst.add);
+      final subSecond = second.listen(receivedSecond.add);
 
-      await first.listen((_) {}).cancel();
-
+      await subFirst.cancel();
       expect(subSecond.isPaused, isFalse);
+      expect(fakeClient.removeChannelCalled, isFalse);
+
+      fakeClient.fakeChannel.emitPostgresInsert(
+          <String, dynamic>{'id': 'load-after-cancel', 'status': 'available'});
+      await Future<void>.delayed(Duration.zero);
+
+      expect(receivedFirst, isEmpty);
+      expect(receivedSecond, hasLength(1));
+
       await subSecond.cancel();
-      await secondActive.future.timeout(const Duration(seconds: 2));
+      // Last listener gone — the shared channel is torn down.
+      expect(fakeClient.removeChannelCalled, isTrue);
     });
 
     test(

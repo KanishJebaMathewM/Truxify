@@ -1,8 +1,9 @@
-import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:truxify_driver/services/battery_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('BatteryInfo', () {
     test('isLow returns true when level is 20 or below', () {
       expect(const BatteryInfo(level: 20, isCharging: false).isLow, isTrue);

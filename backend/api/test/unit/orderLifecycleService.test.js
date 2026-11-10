@@ -195,6 +195,41 @@ describe('OrderLifecycleService.cancelOrder (transactional outbox)', () => {
 
     await expect(service.cancelOrder('ord-1', 'cust-1', 'why')).rejects.toMatchObject({ status: 500 });
   });
+
+  it('orchestrates cancelOrder with SagaCoordinator and persists saga checkpoints', async () => {
+    const funded = { ...baseOrder, escrow_status: 'funded', escrow_amount_wei: '1000000000000000000' };
+    orderRepository.findOrderByAnyId.mockResolvedValue({ data: funded, error: null });
+    orderRepository.executeRpc
+      .mockResolvedValueOnce({ data: [{ ...funded, status: 'cancelled', escrow_status: 'refund_pending' }], error: null })
+      .mockResolvedValueOnce({ data: [{ ...funded, status: 'cancelled', escrow_status: 'refunded' }], error: null });
+    submitEscrowCancelWithPenalty.mockResolvedValue({
+      txHash: '0xabc',
+      waitForConfirmation: () => Promise.resolve({ hash: '0xabc' }),
+    });
+    orderRepository.updateOrder.mockResolvedValue({ error: null });
+
+    const mockPersister = {
+      persistState: vi.fn().mockResolvedValue(true),
+    };
+
+    const sagaService = new OrderLifecycleService({
+      orderRepository,
+      orderTimelineService,
+      bidAcceptanceService: {},
+      deliveryVerificationService: {},
+      trackingTokenService: null,
+      sagaPersister: mockPersister,
+    });
+
+    const result = await sagaService.cancelOrder('ord-1', 'cust-1', 'changed mind');
+
+    expect(result.status).toBe(200);
+    expect(mockPersister.persistState).toHaveBeenCalled();
+    const calls = mockPersister.persistState.mock.calls;
+    expect(calls.some(([arg]) => arg.status === 'RUNNING')).toBe(true);
+    expect(calls.some(([arg]) => arg.status === 'COMPLETED')).toBe(true);
+  });
+
   it('rejects null or undefined orderId when updating milestone', async () => {
     await expect(
         service.updateMilestone(null, 'In Transit', 'driver-1')
@@ -203,7 +238,7 @@ describe('OrderLifecycleService.cancelOrder (transactional outbox)', () => {
     await expect(
         service.updateMilestone(undefined, 'In Transit', 'driver-1')
     ).rejects.toThrow('orderId is required.');
-});
+  });
 });
 
 describe('OrderLifecycleService.getOrderHistory', () => {

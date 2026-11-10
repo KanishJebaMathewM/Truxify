@@ -137,7 +137,7 @@ class _BlindSpotArScreenState extends State<BlindSpotArScreen> {
                 width: 50,
                 height: 150,
                 decoration: BoxDecoration(
-                  color: (isCritical ? Colors.red : Colors.orange).withOpacity(0.4),
+                  color: (isCritical ? Colors.red : Colors.orange).withValues(alpha: 0.4),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: isCritical ? Colors.red : Colors.orange, width: 2),
                 ),

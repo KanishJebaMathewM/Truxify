@@ -29,7 +29,7 @@ class DeadheadRecommendation {
   factory DeadheadRecommendation.fromJson(Map<String, dynamic> json) {
     // The ML API may emit numeric fields as JSON numbers or as numeric
     // strings ('12.5'); accept both instead of crashing on a strict cast.
-    num _n(String key, [num fallback = 0]) {
+    num numOr(String key, [num fallback = 0]) {
       final value = json[key];
       if (value is num) return value;
       if (value is String) return num.tryParse(value) ?? fallback;
@@ -37,10 +37,10 @@ class DeadheadRecommendation {
     }
     return DeadheadRecommendation(
       loadId: (json['load_id'] ?? '').toString(),
-      distanceToPickupKm: _n('distance_to_pickup_km').toDouble(),
-      matchScore: _n('match_score').toDouble(),
-      detourKm: _n('detour_km').toDouble(),
-      estimatedEarnings: _n('estimated_earnings').toDouble(),
+      distanceToPickupKm: numOr('distance_to_pickup_km').toDouble(),
+      matchScore: numOr('match_score').toDouble(),
+      detourKm: numOr('detour_km').toDouble(),
+      estimatedEarnings: numOr('estimated_earnings').toDouble(),
       route: (json['route'] ?? '').toString(),
       goodsType: (json['goods_type'] ?? '').toString(),
       pickup: (json['pickup'] ?? json['pickup_address'] ?? '').toString(),

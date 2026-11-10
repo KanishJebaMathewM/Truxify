@@ -47,7 +47,7 @@ describe('OrderLifecycleService - verifyDeliveryFn', () => {
 
     const orderId = 'order-123';
     const driverId = 'driver-456';
-    const otp = '123456';
+    const otp = '654321';
     const mockUserClient = { rpc: vi.fn() };
 
     const result = await service.verifyDeliveryFn(orderId, driverId, otp, mockUserClient);
@@ -63,12 +63,12 @@ describe('OrderLifecycleService - verifyDeliveryFn', () => {
 
     const orderId = 'order-123';
     
-    await expect(service.verifyDeliveryFn(orderId, 'driver-456', '123456'))
+    await expect(service.verifyDeliveryFn(orderId, 'driver-456', '654321'))
       .rejects
       .toThrow(DomainError);
       
     try {
-      await service.verifyDeliveryFn(orderId, 'driver-456', '123456');
+      await service.verifyDeliveryFn(orderId, 'driver-456', '654321');
     } catch (err) {
       expect(err.status).toBe(409);
       expect(err.payload.error).toMatch(/currently being processed/);
@@ -86,7 +86,7 @@ describe('OrderLifecycleService - verifyDeliveryFn', () => {
 
     const orderId = 'order-123';
 
-    await expect(service.verifyDeliveryFn(orderId, 'driver-456', '123456'))
+    await expect(service.verifyDeliveryFn(orderId, 'driver-456', '654321'))
       .rejects
       .toThrow('Internal verification failed');
 

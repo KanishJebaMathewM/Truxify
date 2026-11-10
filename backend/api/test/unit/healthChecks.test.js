@@ -344,8 +344,16 @@ describe('polygonHealth', () => {
   it('uses timeout of 4000ms for RPC probe', async () => {
     process.env.POLYGON_RPC_URL = 'https://polygon-rpc.com';
 
-    // Never resolves — will hit timeout
-    const mockFetch = vi.fn(() => new Promise(() => {}));
+    // Never resolves on its own but rejects once the probe abort signal fires,
+    // mirroring a real fetch backed by AbortSignal.timeout.
+    const mockFetch = vi.fn(
+      (_url, opts) =>
+        new Promise((_resolve, reject) => {
+          opts?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted', 'AbortError'));
+          });
+        }),
+    );
     vi.stubGlobal('fetch', mockFetch);
 
     const result = await polygonHealth();

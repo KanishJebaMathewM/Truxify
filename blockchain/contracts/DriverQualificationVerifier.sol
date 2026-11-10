@@ -51,6 +51,22 @@ contract DriverQualificationVerifier is Verifier {
         authorizedAuditors[msg.sender] = true;
     }
 
+    // The shared placeholder Verifier (verifier.sol) declares uint[2] public
+    // inputs — the KYC circuit. This circuit has 4 public inputs, so the
+    // inherited 2-input placeholder cannot be called with them. Fail closed
+    // with a dedicated reason until the real Groth16 verifier is generated,
+    // so callers can distinguish an unavailable verifier from an invalid
+    // proof. When the real verifier lands, replace the revert with the
+    // pairing check and the require(isValid, ...) below resumes its role.
+    function verifyProof4(
+        uint[2] memory a,
+        uint[2][2] memory b,
+        uint[2] memory c,
+        uint[4] memory input
+    ) internal pure returns (bool) {
+        revert("DriverQualificationVerifier: 4-input verifier not implemented");
+    }
+
     /**
      * @notice Verifies a driver's Groth16 zero-knowledge proof and records qualification attestation.
      * @param a Groth16 proof point A
@@ -82,7 +98,7 @@ contract DriverQualificationVerifier is Verifier {
         pubInputs[2] = input[2];
         pubInputs[3] = input[3];
 
-        bool isValid = verifyProof(a, b, c, input);
+        bool isValid = verifyProof4(a, b, c, input);
         require(isValid, "DriverQualificationVerifier: invalid ZK proof");
 
         uint8 verifiedCategory = uint8(input[2]);

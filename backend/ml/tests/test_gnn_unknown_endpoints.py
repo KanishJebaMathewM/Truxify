@@ -59,4 +59,4 @@ def test_build_road_network_accepts_edges_with_declared_endpoints():
     graph = builder.build_road_network(_nodes(), [_edge()])
 
     assert set(graph.nodes) == {'A', 'B'}
-    assert list(graph.edges) == [('A', 'B')]
+    assert [(u, v) for u, v, *_ in graph.edges] == [('A', 'B')]

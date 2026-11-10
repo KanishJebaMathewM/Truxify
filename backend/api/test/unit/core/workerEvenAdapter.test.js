@@ -17,7 +17,7 @@ describe('WorkerEventAdapter', () => {
 
   it('should connect successfully', async () => {
     await expect(adapter.connect()).resolves.not.toThrow();
-    expect(adapter.isConnected()).toBe(true);
+    expect(adapter.isConnected).toBe(true);
   });
 
   it('should disconnect and cleanup workers', async () => {
@@ -26,25 +26,31 @@ describe('WorkerEventAdapter', () => {
 
     await adapter.disconnect();
     
-    expect(adapter.isConnected()).toBe(false);
+    expect(adapter.isConnected).toBe(false);
     expect(mockWorker.terminate).toHaveBeenCalled();
   });
 
-  it('should register and unregister workers correctly', () => {
+  it('should register and remove workers correctly', async () => {
+    await adapter.connect();
     adapter.registerWorker('worker-1', mockWorker);
-    expect(adapter.getWorker('worker-1')).toBe(mockWorker);
+    adapter.removeWorker('worker-1');
 
-    adapter.unregisterWorker('worker-1');
-    expect(adapter.getWorker('worker-1')).toBeUndefined();
+    await adapter.publish({ eventType: 'TEST_EVENT', payload: { data: 1 } });
+
+    expect(mockWorker.postMessage).not.toHaveBeenCalled();
   });
 
   it('should publish events through registered workers', async () => {
     await adapter.connect();
     adapter.registerWorker('worker-1', mockWorker);
 
-    const event = { type: 'TEST_EVENT', payload: { data: 123 } };
+    const event = { eventType: 'TEST_EVENT', payload: { data: 123 } };
     await adapter.publish(event);
 
-    expect(mockWorker.postMessage).toHaveBeenCalledWith(event);
+    expect(mockWorker.postMessage).toHaveBeenCalledWith({
+      eventType: 'TEST_EVENT',
+      payload: { data: 123 },
+      metadata: undefined,
+    });
   });
 });

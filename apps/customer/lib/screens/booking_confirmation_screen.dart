@@ -13,6 +13,7 @@ import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../core/api_client.dart';
 import '../utils/upi_link_validator.dart';
+import '../widgets/net_profit_breakdown_card.dart';
 
 /// Payment pipeline:
 ///   1. createOrder()  → orderId returned
@@ -51,13 +52,12 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
   late final PaymentRepository _paymentRepo;
   late final AddressRepository _addressRepo;
   late final ApiClient _apiClient;
-  bool _isPassengerMode = false;
+  final bool _isPassengerMode = false;
   bool _isAwaitingUpi = false;
   bool _showSuccess = false;
   bool _isLoading = true;
   bool _isSubmitting = false;
   String? _createdOrderId;
-  String? _createdOrderDisplayId;
   String? _upiDeepLink;
   String? _amountInr;
   String? _upiIntentError;
@@ -214,7 +214,6 @@ final orderId = _createdOrderId ?? await _orderService.createOrder(
         setState(() {
           _upiDeepLink = body['deep_link']?.toString();
           _amountInr = body['amount_inr']?.toString();
-          _createdOrderDisplayId = body['order_ref']?.toString();
           _isAwaitingUpi = true;
         });
       }
@@ -453,6 +452,28 @@ final orderId = _createdOrderId ?? await _orderService.createOrder(
               ],
             ),
           ),
+          if (widget.truck.profitBreakdown != null) ...[
+            const SizedBox(height: 16),
+            InfoCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Estimated net profit',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 12),
+                  NetProfitBreakdownCard(
+                    breakdown: widget.truck.profitBreakdown!,
+                    initiallyExpanded: true,
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           InfoCard(
             child: Column(
@@ -465,7 +486,7 @@ final orderId = _createdOrderId ?? await _orderService.createOrder(
                         ?.copyWith(fontWeight: FontWeight.w800)),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<PaymentMethod>(
-                  value: _selectedPayment,
+                  initialValue: _selectedPayment,
                   decoration: InputDecoration(
                     labelText: 'Select payment method',
                     helperText: _isLoading
@@ -492,7 +513,7 @@ final orderId = _createdOrderId ?? await _orderService.createOrder(
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<SavedAddress>(
-                  value: _selectedAddress,
+                  initialValue: _selectedAddress,
                   decoration: InputDecoration(
                     labelText: 'Select saved address',
                     helperText: _isLoading
@@ -556,8 +577,8 @@ final orderId = _createdOrderId ?? await _orderService.createOrder(
                                           : _createOrderAndInitiatePayment,
                                     ),
                 ),
-              ),
             ],
+            ),
           ),
         ],
       ),
@@ -626,6 +647,27 @@ class _UpiPaymentSheet extends StatelessWidget {
                             color: TruxifyColors.adaptiveSecondaryText(
                                 context))),
                   ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          // The action row was dropped by a merge — the required callbacks
+          // went unused and the sheet was a dead end. Restore it.
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onLaunchUpi,
+                  icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                  label: const Text('Open UPI App'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: PrimaryButton(
+                  label: "I've Paid",
+                  onPressed: onConfirmPaid,
                 ),
               ),
             ],
@@ -862,7 +904,7 @@ class _UpiPaymentMockDialogState extends State<_UpiPaymentMockDialog> {
                   ),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<String>(
-                    value: _selectedApp,
+                    initialValue: _selectedApp,
                     decoration: InputDecoration(
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),

@@ -6,12 +6,15 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Mock Supabase client
-const mockSupabase = {
-    from: vi.fn(() => mockSupabase),
-    select: vi.fn(() => mockSupabase),
-    eq: vi.fn(() => mockSupabase),
-    maybeSingle: vi.fn()
-};
+const { mockSupabase } = vi.hoisted(() => {
+    const mockSupabase = {
+        from: vi.fn(() => mockSupabase),
+        select: vi.fn(() => mockSupabase),
+        eq: vi.fn(() => mockSupabase),
+        maybeSingle: vi.fn()
+    };
+    return { mockSupabase };
+});
 
 vi.mock('../../../src/config/db.js', () => ({
     supabaseAdmin: mockSupabase,

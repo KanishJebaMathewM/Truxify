@@ -23,8 +23,14 @@ void main() {
   group('Issue #6557 regression tests', () {
     test('_confirmOtp issues exactly one confirm-otp POST', () {
       final source = sourcePath.readAsStringSync();
+      // Scope to _confirmOtp — the file legitimately has a second POST in
+      // _geofenceConfirm (different endpoint). The reported #6557 bug was a
+      // duplicated post INSIDE _confirmOtp.
+      final confirmSection =
+          source.substring(source.indexOf('Future<void> _confirmOtp()'),
+              source.indexOf('// ── Geofence Auto-Confirm ──'));
       final confirmOtpCalls =
-          RegExp(r"final body = await _apiClient\.post\(").allMatches(source);
+          RegExp(r"final body = await _apiClient\.post\(").allMatches(confirmSection);
       expect(confirmOtpCalls.length, 1,
           reason: 'Duplicated _apiClient.post statements were the reported bug');
 

@@ -111,7 +111,7 @@ class DAOService {
 
             const tx = await this.dao.createProposal(
                 description || title || '',
-                parseInt(duration) || this.proposalDuration,
+                parseInt(duration, 10) || this.proposalDuration,
                 { gasLimit: 300000 }
             );
             const receipt = await tx.wait();

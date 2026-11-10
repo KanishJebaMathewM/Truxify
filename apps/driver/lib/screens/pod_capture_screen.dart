@@ -49,14 +49,16 @@ class _PodCaptureScreenState extends State<PodCaptureScreen> {
       return;
     }
 
-    setState(() {
-      _saving = true;
-      _uploadStatus = 'Saving proof of delivery...';
-    });
-
+    // Capture the messenger BEFORE the async gaps — the confirmation shows on
+    // the parent route after the sheet closes (the pop would otherwise discard
+    // the snackbar with the sheet's context), and looking it up after an await
+    // can throw if the sheet was dismissed meanwhile.
+    final messenger = ScaffoldMessenger.of(context);
     try {
       String? savedSignaturePath;
       if (_signatureController.isNotEmpty) {
+        // Capture BEFORE the saving spinner swaps the body out — otherwise the
+        // Signature widget is disposed while toPngBytes is still reading it.
         final signatureImage = await _signatureController.toPngBytes();
         if (signatureImage != null) {
           final directory = await getApplicationDocumentsDirectory();
@@ -66,6 +68,11 @@ class _PodCaptureScreenState extends State<PodCaptureScreen> {
           savedSignaturePath = path;
         }
       }
+
+      setState(() {
+        _saving = true;
+        _uploadStatus = 'Saving proof of delivery...';
+      });
 
       String? savedPhotoPath;
       if (_photoPath != null) {
@@ -106,12 +113,17 @@ class _PodCaptureScreenState extends State<PodCaptureScreen> {
           await podStorageService.markAsSynced(podId);
           setState(() => _uploadStatus = 'Upload complete!');
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
+            Navigator.pop(context);
+            messenger.showSnackBar(
               const SnackBar(
                 content: Text('Proof of Delivery uploaded successfully'),
                 backgroundColor: Colors.green,
               ),
             );
+            // The trailing pop below also fires in this same synchronous run
+            // (the State is not disposed until the frame ends) — return so a
+            // successful online save pops exactly once.
+            return;
           }
         } catch (e) {
           debugPrint('Immediate upload failed, will retry in background: $e');

@@ -105,7 +105,7 @@ vi.mock('../../../../src/core/performanceMetrics.js', () => ({
   measureExecution: (name, fn) => fn(),
 }));
 
-import KeyRotationService from '../../../../src/services/security/keyRotationService.js';
+const { default: KeyRotationService } = await import('../../../../src/services/security/keyRotationService.js');
 
 describe('KeyRotationService', () => {
   let service;

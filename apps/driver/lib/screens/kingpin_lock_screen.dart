@@ -166,7 +166,7 @@ class _KingpinLockScreenState extends State<KingpinLockScreen> {
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
         trailing: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+          decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
           child: Text(status, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12)),
         ),
       ),

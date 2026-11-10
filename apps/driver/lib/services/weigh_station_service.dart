@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:truxify_shared/src/services/api_client.dart';
-import 'location_service.dart';
 
 class WeighStationEvent {
   final String action; // 'BYPASS', 'PULL_IN' or 'UNSUPPORTED'

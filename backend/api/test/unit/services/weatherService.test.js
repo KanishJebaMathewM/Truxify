@@ -1,15 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { WeatherService } from '../../../src/services/weatherService.js';
 
-// Mock the external HTTP client or API dependency used by WeatherService
-const mockApiClient = {
-  get: vi.fn(),
-};
-
-// Mock the cache client if cache is handled internally or injected
-const mockCacheStore = {
-  get: vi.fn(),
-  set: vi.fn(),
+const mockLogger = {
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
 };
 
 describe('WeatherService', () => {
@@ -17,68 +13,40 @@ describe('WeatherService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    weatherService = new WeatherService(mockApiClient, mockCacheStore);
+    weatherService = new WeatherService({ logger: mockLogger });
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  describe('Coordinate Validation', () => {
-    it('should throw an error for out-of-bounds latitude or longitude', async () => {
-      const invalidLat = 100.0; // Valid latitude is between -90 and 90
-      const validLon = 78.0;
-
-      await expect(weatherService.getWeather(invalidLat, validLon)).rejects.toThrow(
-        /invalid coordinates/i
-      );
-      expect(mockApiClient.get).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('Caching Behavior', () => {
-    it('should return cached weather data if available and avoid API calls', async () => {
-      const lat = 13.0827;
-      const lon = 80.2707;
-      const cachedData = { temp: 32, condition: 'Sunny' };
-
-      mockCacheStore.get.mockResolvedValue(JSON.stringify(cachedData));
-
-      const result = await weatherService.getWeather(lat, lon);
-
-      expect(mockCacheStore.get).toHaveBeenCalled();
-      expect(mockApiClient.get).not.toHaveBeenCalled();
-      expect(result).toEqual(cachedData);
+  describe('getWeatherForecast (mock forecast contract)', () => {
+    it('returns the warm default for in-band latitudes', async () => {
+      // Chennai sits inside the +/-40 band, so the mock forecast is warm.
+      const result = await weatherService.getWeatherForecast(13.0827, 80.2707);
+      expect(result.condition).toBe('clear');
+      expect(result.temperature_c).toBe(15);
+      expect(result.forecast_time).toEqual(expect.any(String));
     });
 
-    it('should fetch from API and cache the result on cache miss', async () => {
-      const lat = 13.0827;
-      const lon = 80.2707;
-      const apiData = { temp: 30, condition: 'Cloudy' };
+    it('returns snow below -5 degrees for high and low latitudes', async () => {
+      const north = await weatherService.getWeatherForecast(55.0, 37.0);
+      expect(north.temperature_c).toBe(-5);
+      expect(north.condition).toBe('snow');
 
-      mockCacheStore.get.mockResolvedValue(null);
-      mockApiClient.get.mockResolvedValue({ data: apiData });
-
-      const result = await weatherService.getWeather(lat, lon);
-
-      expect(mockCacheStore.get).toHaveBeenCalled();
-      expect(mockApiClient.get).toHaveBeenCalled();
-      expect(mockCacheStore.set).toHaveBeenCalled();
-      expect(result).toEqual(apiData);
+      const south = await weatherService.getWeatherForecast(-55.0, 77.0);
+      expect(south.temperature_c).toBe(-5);
+      expect(south.condition).toBe('snow');
     });
-  });
 
-  describe('API Unavailability & Failure Handling', () => {
-    it('should handle external API failures gracefully', async () => {
-      const lat = 13.0827;
-      const lon = 80.2707;
+    it('falls back to the warm default instead of snow on non-finite coordinates', async () => {
+      // NaN comparisons are always false, so the guard must catch bad input
+      // explicitly rather than silently matching the snow band.
+      const result = await weatherService.getWeatherForecast('abc', 80.2707);
+      expect(result.condition).toBe('clear');
+      expect(result.temperature_c).toBe(15);
+    });
 
-      mockCacheStore.get.mockResolvedValue(null);
-      mockApiClient.get.mockRejectedValue(new Error('API Service Unavailable'));
-
-      await expect(weatherService.getWeather(lat, lon)).rejects.toThrow(
-        /api service unavailable/i
-      );
+    it('treats numeric strings as coordinates', async () => {
+      const result = await weatherService.getWeatherForecast('55', '37');
+      expect(result.temperature_c).toBe(-5);
+      expect(result.condition).toBe('snow');
     });
   });
 });

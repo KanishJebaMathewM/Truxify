@@ -3,7 +3,56 @@ import path from 'path';
 import { OpenAI } from 'openai';
 import axios from 'axios';
 import logger from '../../middleware/logger.js';
+// backend/api/src/services/voice/VoiceAiService.js
 
+import axios from 'axios';
+import logger from '../../middleware/logger.js';
+
+export class VoiceServiceError extends Error {
+  constructor(message, code) {
+    super(message);
+    this.name = 'VoiceServiceError';
+    this.code = code;
+  }
+}
+
+const ELEVENLABS_TIMEOUT_MS = 10000; // 10 seconds
+
+/**
+ * Synthesizes voice audio using the ElevenLabs API.
+ * @param {Object} payload - Synthesis request payload.
+ * @param {Object} headers - Authentication and content headers.
+ * @returns {Promise<Buffer>} Audio buffer response.
+ */
+export async function synthesizeVoice(payload, headers) {
+  try {
+    const response = await axios.post(process.env.ELEVENLABS_API_URL, payload, {
+      headers,
+      responseType: 'arraybuffer',
+      timeout: ELEVENLABS_TIMEOUT_MS // Explicit timeout configuration
+    });
+
+    return Buffer.from(response.data);
+  } catch (err) {
+    // Check specifically for Axios timeout / connection abort errors
+    if (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT' || err.message?.includes('timeout')) {
+      logger.error('ElevenLabs voice synthesis request timed out', { 
+        timeoutMs: ELEVENLABS_TIMEOUT_MS, 
+        error: err.message 
+      });
+      throw new VoiceServiceError(
+        `ElevenLabs voice synthesis timed out after ${ELEVENLABS_TIMEOUT_MS}ms`, 
+        'VOICE_TIMEOUT'
+      );
+    }
+
+    logger.error('ElevenLabs voice synthesis API failed', { 
+      status: err.response?.status, 
+      error: err.message 
+    });
+    throw new VoiceServiceError('Voice synthesis service failure', 'VOICE_API_ERROR');
+  }
+}
 const DEFAULT_LLM_MAX_OUTPUT_TOKENS = 120;
 const DEFAULT_TTS_MAX_RESPONSE_CHARS = 800;
 
@@ -30,9 +79,10 @@ const TTS_MAX_RESPONSE_CHARS = loadPositiveIntegerEnv(
 
 class VoiceAiService {
   constructor() {
-    this.openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
+    // The OpenAI SDK throws when no API key is configured, so the client is
+    // created on first use. Constructing it here made importing this module
+    // (and therefore booting the API) fail whenever OPENAI_API_KEY was unset.
+    this._openai = null;
     this.elevenLabsApiKey = process.env.ELEVENLABS_API_KEY;
     
     // Voice IDs for different languages
@@ -41,6 +91,22 @@ class VoiceAiService {
       hi: 'pNInz6obpgDQGcFmaJgB', // Example Voice ID (Adam is multilingual)
       ta: 'pNInz6obpgDQGcFmaJgB'  // Example Voice ID
     };
+  }
+
+  /**
+   * Lazily created OpenAI client.
+   * @returns {OpenAI}
+   * @throws {Error} If OPENAI_API_KEY is not configured
+   */
+  get openai() {
+    if (!this._openai) {
+      const apiKey = (process.env.OPENAI_API_KEY || '').trim();
+      if (!apiKey) {
+        throw new Error('VoiceAiService: OPENAI_API_KEY is not configured');
+      }
+      this._openai = new OpenAI({ apiKey });
+    }
+    return this._openai;
   }
 
   /**

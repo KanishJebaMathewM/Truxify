@@ -4,6 +4,9 @@ import { ethers } from 'ethers';
 process.env.PRIVATE_KEY = '0x0000000000000000000000000000000000000000000000000000000000000001';
 process.env.POLYGON_RPC_URL = 'http://127.0.0.1:8545';
 process.env.MEV_ESCROW_ADDRESS = '0x0000000000000000000000000000000000000001';
+// Required at import time by flashbots_relayer.js; the encoding tests never
+// submit bundles, so a dummy key keeps the import side effect free.
+process.env.RELAYER_WALLET_PRIVATE_KEY = '0x1111111111111111111111111111111111111111111111111111111111111111';
 
 let toPreimageBytes32;
 beforeAll(async () => {
@@ -16,6 +19,7 @@ describe('toPreimageBytes32 (issue #10182)', () => {
     delete process.env.PRIVATE_KEY;
     delete process.env.POLYGON_RPC_URL;
     delete process.env.MEV_ESCROW_ADDRESS;
+    delete process.env.RELAYER_WALLET_PRIVATE_KEY;
   });
 
   it('always returns a fixed 32-byte value for arbitrary secrets', () => {

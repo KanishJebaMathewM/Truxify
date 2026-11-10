@@ -73,9 +73,10 @@ describe('paginated', () => {
     expect(result.pagination.totalPages).toBe(3);
   });
 
-  it('clamps limit to minimum of 1', () => {
+  it('defaults limit to 10 when limit is zero', () => {
     const result = paginated([], 1, 0, 0);
-    expect(result.pagination.limit).toBe(1);
+    expect(result.pagination.limit).toBe(10);
+    expect(Number.isFinite(result.pagination.totalPages)).toBe(true);
   });
 
   it('handles zero total', () => {
@@ -101,9 +102,11 @@ describe('paginated', () => {
     expect(firstPage.pagination.hasNextPage).toBe(true);
   });
 
-  it('returns false for hasNextPage on the last 0-based page', () => {
+  it('clamps a 0-based page input to page 1', () => {
     const result = paginated([], 0, 10, 10);
-
+    // page 0 normalizes to page 1 (deliberate clamp, 21442ebf5); with a
+    // single page of results there is no next page.
+    expect(result.pagination.page).toBe(1);
     expect(result.pagination.hasNextPage).toBe(false);
   });
   it('coerces page and limit to numbers', () => {

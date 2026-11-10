@@ -6,6 +6,7 @@ import 'package:truxify_driver/services/sync_service.dart';
 import 'package:truxify_driver/services/api_client.dart';
 import 'package:truxify_driver/services/local_db_service.dart';
 import 'package:truxify_driver/services/trip_service.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'setup.dart';
 
 /// A [TripService] whose [markStopCompleted] fails on the first call and
@@ -42,6 +43,10 @@ void main() {
 
     setUpAll(() async {
       TestWidgetsFlutterBinding.ensureInitialized();
+      // LocalDbService uses sqflite — point the factory at ffi for VM tests
+      // (same as sync_engine_test / sync_service_test).
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
       await setupTests();
       tempDir = await Directory.systemTemp.createTemp('pod_idem_');
     });

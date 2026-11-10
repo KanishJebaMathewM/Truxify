@@ -7,6 +7,9 @@ const m = createSupabaseMock();
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
+  // The upload controllers probe the service-role client first; a missing
+  // mock export makes vitest throw on access instead of yielding undefined.
+  supabaseAdmin: m.supabase,
   firebaseAdmin: null,
   redisClient: null,
   mongoDb: null,

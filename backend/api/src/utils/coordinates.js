@@ -1,14 +1,50 @@
 /**
- * Returns an error message if the lat/lng pair is out of bounds, or null when valid.
+ * Validates a single coordinate component (latitude or longitude) against geographic bounds.
+ *
+ * @param {any} value - The coordinate value to validate
+ * @param {'lat'|'latitude'|'lng'|'lon'|'longitude'} [type='lat'] - Coordinate axis
+ * @param {string} [fieldName] - Field name to use in error messages
+ * @returns {{ valid: boolean, value?: number, error?: string }}
  */
-export function validateCoordinateRange(lat, lng) {
-  if (lat < -90 || lat > 90) return 'lat must be between -90 and 90';
-  if (lng < -180 || lng > 180) return 'lng must be between -180 and 180';
+export function validateCoordinate(value, type = 'lat', fieldName = type) {
+  if (value === null || value === undefined) {
+    return { valid: false, error: `${fieldName} is required` };
+  }
+  if (typeof value === 'boolean' || Array.isArray(value) || (typeof value === 'object' && value !== null)) {
+    return { valid: false, error: `${fieldName} must be a valid number` };
+  }
+  if (typeof value === 'string' && value.trim() === '') {
+    return { valid: false, error: `${fieldName} cannot be empty` };
+  }
+
+  const num = Number(value);
+  if (!Number.isFinite(num)) {
+    return { valid: false, error: `${fieldName} must be a finite number` };
+  }
+
+  const isLat = type === 'lat' || type === 'latitude';
+  const min = isLat ? -90 : -180;
+  const max = isLat ? 90 : 180;
+
+  if (num < min || num > max) {
+    return { valid: false, error: `${fieldName} must be between ${min} and ${max}` };
+  }
+
+  return { valid: true, value: num };
+}
+
+/**
+ * Returns an error message if the lat/lng pair is out of bounds or invalid, or null when valid.
+ */
+export function validateCoordinateRange(lat, lng, latName = 'lat', lngName = 'lng') {
+  const latRes = validateCoordinate(lat, 'lat', latName);
+  if (!latRes.valid) return latRes.error;
+  const lngRes = validateCoordinate(lng, 'lng', lngName);
+  if (!lngRes.valid) return lngRes.error;
   return null;
 }
 
 const EARTH_RADIUS_KM = 6371;
-const KM_PER_LAT_DEGREE = 111.32;
 
 /**
  * Calculates exact spherical distance between two geographic coordinates using Haversine formula.
@@ -39,6 +75,7 @@ export function haversineDistance(lat1, lon1, lat2, lon2, unit = 'km') {
 
 /**
  * Computes a rectangular bounding box around a center coordinate for fast pre-filtering.
+ * A longitude interval with minLng > maxLng crosses the antimeridian.
  *
  * @param {number} centerLat Center latitude
  * @param {number} centerLng Center longitude
@@ -46,15 +83,24 @@ export function haversineDistance(lat1, lon1, lat2, lon2, unit = 'km') {
  * @returns {{ minLat: number, maxLat: number, minLng: number, maxLng: number }}
  */
 export function getBoundingBox(centerLat, centerLng, radiusKm) {
-  const latDelta = radiusKm / KM_PER_LAT_DEGREE;
+  const angle = Math.min(Math.PI, radiusKm / EARTH_RADIUS_KM);
+  const latDelta = angle * 180 / Math.PI;
   const latRad = (centerLat * Math.PI) / 180;
-  const lngDelta = radiusKm / (KM_PER_LAT_DEGREE * Math.max(0.0001, Math.cos(latRad)));
+  const minLat = Math.max(-90, centerLat - latDelta);
+  const maxLat = Math.min(90, centerLat + latDelta);
+
+  // A spherical cap touching either pole can contain every longitude.
+  if (minLat <= -90 || maxLat >= 90) {
+    return { minLat, maxLat, minLng: -180, maxLng: 180 };
+  }
+  const lngDelta = Math.asin(Math.min(1, Math.sin(angle) / Math.cos(latRad))) * 180 / Math.PI;
+  const wrapLongitude = (lng) => ((lng + 540) % 360) - 180;
 
   return {
-    minLat: Math.max(-90, centerLat - latDelta),
-    maxLat: Math.min(90, centerLat + latDelta),
-    minLng: Math.max(-180, centerLng - lngDelta),
-    maxLng: Math.min(180, centerLng + lngDelta),
+    minLat,
+    maxLat,
+    minLng: wrapLongitude(centerLng - lngDelta),
+    maxLng: wrapLongitude(centerLng + lngDelta),
   };
 }
 
@@ -70,11 +116,15 @@ export function isWithinBoundingBox(point, box) {
   const lng = point.lng ?? point.longitude;
   if (lat == null || lng == null) return false;
 
+  // +180 and -180 describe the same meridian, including zero-radius boxes.
+  const longitude = lng === 180 ? -180 : lng;
+  const withinLongitude = box.minLng <= box.maxLng
+    ? longitude >= box.minLng && longitude <= box.maxLng
+    : longitude >= box.minLng || longitude <= box.maxLng;
   return (
     lat >= box.minLat &&
     lat <= box.maxLat &&
-    lng >= box.minLng &&
-    lng <= box.maxLng
+    withinLongitude
   );
 }
 
@@ -144,6 +194,7 @@ export function filterCoordinatesByRadius(candidates, center, radiusKm, opts = {
 }
 
 export default {
+  validateCoordinate,
   validateCoordinateRange,
   haversineDistance,
   getBoundingBox,

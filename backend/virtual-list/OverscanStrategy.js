@@ -197,9 +197,12 @@ class OverscanStrategy extends EventEmitter {
     // ============ Monitoring ============
     
     startMonitoring() {
+        // unref: this is idle-decay housekeeping — it must never keep a host
+        // process (CLI script, test runner, one-off job) alive on its own.
         this.monitoringInterval = setInterval(() => {
             this.checkIdle();
         }, 1000);
+        this.monitoringInterval.unref?.();
     }
     
     checkIdle() {

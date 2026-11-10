@@ -29,11 +29,11 @@ export async function findExpiringDocuments() {
           driver_id,
           document_type,
           document_number,
-          expiry_date,
+          valid_until,
           driver:profiles(full_name, phone)
         `)
-                .eq('status', 'verified')
-                .eq('expiry_date', targetDateStr)
+                .eq('status', 'approved')
+                .eq('valid_until', targetDateStr)
                 .eq('alert_sent_' + days + '_days', false);
 
             if (error) {
@@ -67,10 +67,14 @@ export async function markAlertSent(documentId, thresholdDays) {
     const column = `alert_sent_${thresholdDays}_days`;
 
     try {
-        await supabaseAdmin
+        const { error } = await supabaseAdmin
             .from('driver_documents')
             .update({ [column]: true, last_alert_sent_at: new Date().toISOString() })
             .eq('id', documentId);
+
+        if (error) {
+            logger.error({ err: error, documentId }, 'Failed to mark alert as sent');
+        }
     } catch (err) {
         logger.error({ err, documentId }, 'Failed to mark alert as sent');
     }
@@ -89,10 +93,10 @@ export async function getExpiredDocuments(driverId) {
     try {
         const { data, error } = await supabaseAdmin
             .from('driver_documents')
-            .select('id, document_type, document_number, expiry_date')
+            .select('id, document_type, document_number, valid_until')
             .eq('driver_id', driverId)
-            .eq('status', 'verified')
-            .lt('expiry_date', now);
+            .eq('status', 'approved')
+            .lt('valid_until', now);
 
         if (error) throw error;
 
@@ -129,19 +133,24 @@ export async function runExpiryCheckJob(sendAlertFn) {
 
     logger.info({ count: expiringDocs.length }, 'Found expiring documents');
 
+    if (typeof sendAlertFn !== 'function') {
+        // Marking alerts as sent without a sender permanently suppresses them,
+        // so the job must fail loudly instead of silently consuming the queue.
+        logger.error('Expiry check job requires a sendAlertFn; refusing to mark alerts as sent');
+        return;
+    }
+
     for (const doc of expiringDocs) {
         try {
-            if (sendAlertFn && typeof sendAlertFn === 'function') {
-                await sendAlertFn({
-                    driverId: doc.driver_id,
-                    driverName: doc.driver?.full_name || 'Driver',
-                    driverPhone: doc.driver?.phone,
-                    documentType: doc.document_type,
-                    documentNumber: doc.document_number,
-                    expiryDate: doc.expiry_date,
-                    daysUntilExpiry: doc.alertThreshold
-                });
-            }
+            await sendAlertFn({
+                driverId: doc.driver_id,
+                driverName: doc.driver?.full_name || 'Driver',
+                driverPhone: doc.driver?.phone,
+                documentType: doc.document_type,
+                documentNumber: doc.document_number,
+                expiryDate: doc.valid_until,
+                daysUntilExpiry: doc.alertThreshold
+            });
 
             await markAlertSent(doc.id, doc.alertThreshold);
 

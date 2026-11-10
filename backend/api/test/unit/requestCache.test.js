@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { RequestCache, attachResponseCleanup } from '../../src/lib/requestCache.js';
 const mockLogger = vi.hoisted(() => ({

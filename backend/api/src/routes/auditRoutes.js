@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { supabaseAdmin } from '../config/db.js';
@@ -7,9 +7,11 @@ import { auditLogService } from '../services/auditLogService.js';
 import { validateQuery } from '../middleware/validate.js';
 import logger from '../middleware/logger.js';
 import { z } from 'zod';
+import { queryAuditLogs, exportAuditLogsJSON } from '../services/auditService.js';
+import { verifyLogBatch } from '../lib/logSigner.js';
+import { getAuditSigningSecret } from '../config/auditSigningSecret.js';
 
 const router = express.Router();
-router.use(userLimiter);
 
 const auditQuerySchema = z.object({
   actor_id: z.string().uuid().optional(),
@@ -263,19 +265,11 @@ router.get('/:id', authenticate, userLimiter, requirePolicy('admin:view-audit-lo
  * @fileoverview Admin endpoints for querying and exporting audit logs.
  */
 
-import express from 'express';
-import { authenticate, requireRole } from '../middleware/auth.js';
-import { queryAuditLogs, exportAuditLogsJSON } from '../services/auditService.js';
-import { verifyLogBatch } from '../lib/logSigner.js';
-import logger from '../middleware/logger.js';
-
-const SIGNING_SECRET = process.env.AUDIT_SIGNING_SECRET || 'truxify-audit-signing-secret';
-
 /**
  * GET /api/audit/logs
  * Queries audit logs with filtering and pagination.
  */
-router.get('/logs', authenticate, requireRole(['admin', 'compliance']), async (req, res) => {
+router.get('/logs', authenticate, userLimiter, requireRole(['admin', 'compliance']), async (req, res) => {
   try {
     const {
       userId,
@@ -316,7 +310,7 @@ router.get('/logs', authenticate, requireRole(['admin', 'compliance']), async (r
  * GET /api/audit/export
  * Exports audit logs to JSON file download.
  */
-router.get('/export', authenticate, requireRole(['admin', 'compliance']), async (req, res) => {
+router.get('/export', authenticate, userLimiter, requireRole(['admin', 'compliance']), async (req, res) => {
   try {
     const { startDate, endDate, eventType, userId } = req.query;
 
@@ -340,7 +334,7 @@ router.get('/export', authenticate, requireRole(['admin', 'compliance']), async 
  * POST /api/audit/verify
  * Verifies the HMAC signature of a batch of logs.
  */
-router.post('/verify', authenticate, requireRole(['admin', 'compliance']), async (req, res) => {
+router.post('/verify', authenticate, userLimiter, requireRole(['admin', 'compliance']), async (req, res) => {
   try {
     const { logs, signature } = req.body;
 
@@ -348,7 +342,7 @@ router.post('/verify', authenticate, requireRole(['admin', 'compliance']), async
       return res.status(400).json({ error: 'logs and signature are required' });
     }
 
-    const isValid = verifyLogBatch(logs, signature, SIGNING_SECRET);
+    const isValid = verifyLogBatch(logs, signature, getAuditSigningSecret());
 
     res.json({
       success: true,
@@ -365,7 +359,7 @@ router.post('/verify', authenticate, requireRole(['admin', 'compliance']), async
  * GET /api/audit/stats
  * Returns aggregate statistics about audit events.
  */
-router.get('/stats', authenticate, requireRole(['admin', 'compliance']), async (req, res) => {
+router.get('/stats', authenticate, userLimiter, requireRole(['admin', 'compliance']), async (req, res) => {
   try {
     // Simple stats query - in production, use materialized views
     const { data, error } = await supabaseAdmin

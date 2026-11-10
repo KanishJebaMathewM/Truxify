@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import threading
 import time
@@ -11,13 +12,15 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 from .base import (
     save_model,
-    load_model,
+    load_model_snapshot,
+    _get_write_lock,
     model_exists,
     get_model_meta,
     get_active_generation,
     restore_previous_model,
 )
 from ..execution import is_training_cancelled, TrainingCancelled
+from .demand_promotion import admit_mae, meets_threshold
 
 logger = logging.getLogger(__name__)
 
@@ -26,16 +29,21 @@ MODEL_NAME = "demand_forecast"
 # Module-level cache to avoid reloading from disk on every call
 _model_cache = None
 
-# Serializes training + cache mutation for this model across executor threads
-# (e.g. an HTTP-triggered retrain racing a lazy auto-train from a prediction).
-# RLock so predict_demand() may hold it while training, which also acquires it.
+# Serializes training and rollback publication across executor threads.
+# Reentrant so publication helpers can share the same model lifecycle lock.
 _cache_lock = threading.RLock()
+# Short state critical sections are separate from long-running training.
+_cache_state_lock = threading.Lock()
+_cache_load_lock = threading.Lock()
+_cache_generation = 0
 
 
 def reset_model_cache():
     """Reset the in-memory model cache so the next prediction loads from disk."""
-    global _model_cache
-    _model_cache = None
+    global _model_cache, _cache_generation
+    with _cache_state_lock:
+        _cache_generation += 1
+        _model_cache = None
 
 # NOTE: This module currently trains on synthetic (randomly generated) data
 # as a placeholder. Replace generate_synthetic_demand_data() with a real
@@ -44,14 +52,15 @@ def reset_model_cache():
 
 
 def generate_synthetic_demand_data(n_samples: int = 2000) -> tuple:
-    np.random.seed(42)
-    hour = np.random.randint(0, 24, n_samples)
-    day_of_week = np.random.randint(0, 7, n_samples)
+    # Own the stream per invocation while preserving legacy seed42 draws.
+    rng = np.random.RandomState(42)
+    hour = rng.randint(0, 24, n_samples)
+    day_of_week = rng.randint(0, 7, n_samples)
     is_weekend = (day_of_week >= 5).astype(int)
-    temperature = np.random.normal(25, 10, n_samples)
-    precipitation = np.random.exponential(2, n_samples)
-    historical_volume = np.random.poisson(50, n_samples)
-    nearby_drivers = np.random.poisson(15, n_samples)
+    temperature = rng.normal(25, 10, n_samples)
+    precipitation = rng.exponential(2, n_samples)
+    historical_volume = rng.poisson(50, n_samples)
+    nearby_drivers = rng.poisson(15, n_samples)
 
     demand = (
         20
@@ -61,7 +70,7 @@ def generate_synthetic_demand_data(n_samples: int = 2000) -> tuple:
         - 2 * precipitation
         + 0.3 * historical_volume
         + 1.5 * nearby_drivers
-        + np.random.normal(0, 5, n_samples)
+        + rng.normal(0, 5, n_samples)
     )
     demand = np.maximum(demand, 0)
 
@@ -88,7 +97,7 @@ FEATURE_NAMES = [
 #
 # Configurable via the PROMOTION_MAE_IMPROVEMENT_THRESHOLD env var so the
 # gate can be tuned per-environment without a code change; falls back to
-# the 0.01 default if unset, unparsable, or negative.
+# the 0.01 default if unset, unparsable, non-finite, or negative.
 DEFAULT_PROMOTION_MAE_IMPROVEMENT_THRESHOLD = 0.01
 
 
@@ -103,9 +112,9 @@ def _load_promotion_mae_improvement_threshold() -> float:
         )
         return DEFAULT_PROMOTION_MAE_IMPROVEMENT_THRESHOLD
 
-    if value < 0:
+    if not math.isfinite(value) or value < 0:
         logger.warning(
-            "PROMOTION_MAE_IMPROVEMENT_THRESHOLD=%s is negative; falling back to default %.4f.",
+            "PROMOTION_MAE_IMPROVEMENT_THRESHOLD=%s must be finite and nonnegative; falling back to default %.4f.",
             value, DEFAULT_PROMOTION_MAE_IMPROVEMENT_THRESHOLD,
         )
         return DEFAULT_PROMOTION_MAE_IMPROVEMENT_THRESHOLD
@@ -151,50 +160,67 @@ def train_demand_forecast_model() -> dict:
             "feature_names": FEATURE_NAMES,
         }
 
-        # Gate deployment: only overwrite the production model if the new one is
-        # actually better than what's currently deployed. Without this, every
-        # retraining run silently replaced production regardless of quality,
-        # and the README's "auto-rollback" claim had nothing to roll back to
-        # even if it were wired up correctly.
-        current_meta = get_model_meta(MODEL_NAME)
-        current_mae = (current_meta or {}).get("metrics", {}).get("mae")
+        # Fit/evaluate privately. This process-local owner also protects direct
+        # artifact writers and rollbacks; our training mutex alone does not.
+        with _get_write_lock(MODEL_NAME):
+            # Gate deployment: only overwrite the production model if the new one is
+            # actually better than what's currently deployed. Without this, every
+            # retraining run silently replaced production regardless of quality,
+            # and the README's "auto-rollback" claim had nothing to roll back to
+            # even if it were wired up correctly.
+            current_meta = get_model_meta(MODEL_NAME)
+            if current_meta is None and model_exists(MODEL_NAME):
+                raise ValueError("Current demand generation has no readable metric metadata")
+            current_metrics = (current_meta or {}).get("metrics", {})
+            if not isinstance(current_metrics, dict):
+                raise ValueError("Current demand metric metadata must be a mapping")
+            current_mae = current_metrics.get("mae")
+            mae = admit_mae(mae)
+            if current_mae is not None:
+                current_mae = admit_mae(current_mae)
 
-        promoted = True
-        reason = "No existing production model; first training run promoted."
-        if current_mae is not None:
-            improvement = (current_mae - mae) / current_mae if current_mae else 0.0
-            if improvement >= PROMOTION_MAE_IMPROVEMENT_THRESHOLD:
-                reason = f"New model MAE {mae:.4f} improved on production MAE {current_mae:.4f} by {improvement:.2%}."
+            promoted = True
+            reason = "No existing production model; first training run promoted."
+            if current_mae is not None:
+                if meets_threshold(current_mae, mae, PROMOTION_MAE_IMPROVEMENT_THRESHOLD):
+                    reason = f"New model MAE {mae:.4f} improved on production MAE {current_mae:.4f} by the required threshold."
+                else:
+                    promoted = False
+                    reason = (
+                        f"New model MAE {mae:.4f} did not improve on production MAE {current_mae:.4f} "
+                        f"by the required {PROMOTION_MAE_IMPROVEMENT_THRESHOLD:.0%} threshold; "
+                        "keeping existing production model."
+                    )
+
+            metrics["promoted"] = promoted
+            metrics["promotion_reason"] = reason
+
+            if promoted:
+                # Publish only after evaluation succeeds; save_model preserves the
+                # previous active generation for a later rollback.
+                training_meta = {
+                    "source": "module_trained",
+                    "training_timestamp": time.time(),
+                    "feature_hash": str(hash(tuple(FEATURE_NAMES))),
+                }
+                save_model((model, scaler), MODEL_NAME, metrics, training_meta=training_meta)
+                reset_model_cache()
+                logger.info("Demand forecast model trained and PROMOTED. R2: %.3f, MAE: %.3f", r2, mae)
             else:
-                promoted = False
-                reason = (
-                    f"New model MAE {mae:.4f} did not improve on production MAE {current_mae:.4f} "
-                    f"by the required {PROMOTION_MAE_IMPROVEMENT_THRESHOLD:.0%} threshold "
-                    f"(delta {improvement:.2%}); keeping existing production model."
-                )
+                logger.info("Demand forecast model trained but NOT promoted. %s", reason)
 
-        metrics["promoted"] = promoted
-        metrics["promotion_reason"] = reason
-
-        if promoted:
-            # Publish only after evaluation succeeds; save_model preserves the
-            # previous active generation for a later rollback.
-            training_meta = {
-                "source": "module_trained",
-                "training_timestamp": time.time(),
-                "feature_hash": str(hash(tuple(FEATURE_NAMES))),
-            }
-            save_model((model, scaler), MODEL_NAME, metrics, training_meta=training_meta)
-            reset_model_cache()
-            logger.info("Demand forecast model trained and PROMOTED. R2: %.3f, MAE: %.3f", r2, mae)
-        else:
-            logger.info("Demand forecast model trained but NOT promoted. %s", reason)
-
-        metrics["production_version"] = get_active_generation(MODEL_NAME) or "production"
-        return metrics
+            metrics["production_version"] = get_active_generation(MODEL_NAME) or "production"
+            return metrics
 
 
 def rollback_demand_forecast_model() -> dict:
+    """Restore the previous model and invalidate cache under the training lock."""
+    # Keep restoration and invalidation ordered with training publication.
+    with _cache_lock, _get_write_lock(MODEL_NAME):
+        return _rollback_demand_forecast_model()
+
+
+def _rollback_demand_forecast_model() -> dict:
     """Roll back the demand-forecast model to its previously-promoted version.
 
     Returns a dict describing whether a rollback actually happened, so the
@@ -223,30 +249,53 @@ def rollback_demand_forecast_model() -> dict:
     }
 
 
+def _load_demand_tuple():
+    if not model_exists(MODEL_NAME):
+        raise RuntimeError(
+            "Demand model artifact missing. Refusing to serve synthetic forecasts. "
+            "Run the training endpoint on real booking data and ship the artifact."
+        )
+    snapshot = load_model_snapshot(MODEL_NAME)
+    if snapshot is None or snapshot.model is None:
+        raise RuntimeError("Corrupt demand model artifact: failed to load model from disk.")
+
+    # Admission metadata belongs to this exact immutable model observation.
+    meta = snapshot.metadata or {}
+    training_meta = meta.get("training_meta", {})
+    if training_meta.get("source") == "synthetic":
+        raise RuntimeError("Refusing to serve a demand model trained on synthetic data.")
+
+    return snapshot.model
+
+
+def _cached_demand_tuple():
+    global _model_cache
+    with _cache_state_lock:
+        cached = _model_cache
+    if cached is not None:
+        return cached
+    # One loader at a time; followers recheck after the owner's publication.
+    # A failed load releases the lock so a later call can retry.
+    with _cache_load_lock:
+        while True:
+            with _cache_state_lock:
+                if _model_cache is not None:
+                    return _model_cache
+                generation = _cache_generation
+            loaded = _load_demand_tuple()
+            with _cache_state_lock:
+                if generation == _cache_generation:
+                    _model_cache = loaded
+                    return loaded
+            # Reset superseded this load. Reload without publishing its result.
+
+
 def predict_demand(features: List[float]) -> Optional[float]:
     if len(features) != len(FEATURE_NAMES):
         raise ValueError(f"Invalid input tensor shape. Expected {len(FEATURE_NAMES)} features, got {len(features)}")
 
-    global _model_cache
-    if _model_cache is None:
-        if not model_exists(MODEL_NAME):
-            raise RuntimeError(
-                "Demand model artifact missing. Refusing to serve synthetic forecasts. "
-                "Run the training endpoint on real booking data and ship the artifact."
-            )
-        loaded = load_model(MODEL_NAME)
-        if loaded is None:
-            raise RuntimeError("Corrupt demand model artifact: failed to load model from disk.")
-
-        # Verify the loaded model is not a synthetic-trained artifact.
-        meta = get_model_meta(MODEL_NAME) or {}
-        training_meta = meta.get("training_meta", {})
-        if training_meta.get("source") == "synthetic":
-            raise RuntimeError("Refusing to serve a demand model trained on synthetic data.")
-
-        _model_cache = loaded
-
-    model, scaler = _model_cache
+    # Capture once: a concurrent reset cannot turn the tuple into None.
+    model, scaler = _cached_demand_tuple()
     X = np.array(features).reshape(1, -1)
     X_scaled = scaler.transform(X)
     pred = model.predict(X_scaled)[0]

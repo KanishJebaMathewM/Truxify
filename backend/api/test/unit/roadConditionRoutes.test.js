@@ -193,14 +193,14 @@ describe('roadConditionRoutes', () => {
         .query({ lng: 72.8777 });
 
       expect(res1.status).toBe(400);
-      expect(res1.body.error).toContain('Latitude (lat) and longitude (lng) are required');
+      expect(res1.body.error).toContain('Invalid lat');
 
       const res2 = await request(app)
         .get('/api/road-conditions/grip/nearby')
         .query({ lat: 19.076 });
 
       expect(res2.status).toBe(400);
-      expect(res2.body.error).toContain('Latitude (lat) and longitude (lng) are required');
+      expect(res2.body.error).toContain('Invalid lng');
     });
 
     it('returns 400 when latitude is invalid or out of range', async () => {
@@ -209,7 +209,7 @@ describe('roadConditionRoutes', () => {
         .query({ lat: 120, lng: 72.8777 });
 
       expect(res.status).toBe(400);
-      expect(res.body.error).toContain('Invalid latitude');
+      expect(res.body.error).toContain('Invalid lat');
     });
 
     it('returns 400 when longitude is invalid or out of range', async () => {
@@ -218,7 +218,7 @@ describe('roadConditionRoutes', () => {
         .query({ lat: 19.076, lng: -200 });
 
       expect(res.status).toBe(400);
-      expect(res.body.error).toContain('Invalid longitude');
+      expect(res.body.error).toContain('Invalid lng');
     });
 
     it('returns 400 when radius_miles is invalid', async () => {

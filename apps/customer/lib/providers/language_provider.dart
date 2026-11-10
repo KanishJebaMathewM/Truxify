@@ -15,10 +15,14 @@ class LanguageProvider extends ChangeNotifier {
     if (scope != null && scope.notifier != null) {
       return scope.notifier!;
     }
-    return _defaultInstance;
+    // The app wraps its root in LanguageProviderScope (app.dart) — a missing
+    // scope is a wiring bug, so fail loudly instead of silently diverging
+    // state across a shared default instance.
+    throw FlutterError(
+      'LanguageProvider.of() called with a context that does not contain a '
+      'LanguageProviderScope.',
+    );
   }
-
-  static final LanguageProvider _defaultInstance = LanguageProvider();
 }
 
 class LanguageProviderScope extends InheritedNotifier<LanguageProvider> {

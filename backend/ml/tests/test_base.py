@@ -382,19 +382,33 @@ class TestRestorePreviousModel:
 
 
 class TestModelIntegrity:
-    def test_save_writes_sha256_sidecar(self, tmp_path, monkeypatch):
+    @staticmethod
+    def _artifact_paths(tmp_path, model_name):
+        """All persisted artifact paths for a model (generation layout)."""
+        return sorted(tmp_path.glob(f"generations/{model_name}/*/model.pkl"))
+
+    def test_save_writes_signature_sidecar(self, tmp_path, monkeypatch):
+        from app.models import base as base_module
+
         monkeypatch.setattr("app.models.base.MODEL_STORAGE_DIR", str(tmp_path))
         save_model({"data": 1}, "hash_test")
-        assert (tmp_path / "hash_test.sha256").exists()
+        artifacts = self._artifact_paths(tmp_path, "hash_test")
+        assert artifacts, "expected a generation artifact"
+        for artifact in artifacts:
+            assert os.path.exists(base_module._artifact_signature_path(str(artifact)))
 
     def test_load_rejects_tampered_pkl(self, tmp_path, monkeypatch):
         monkeypatch.setattr("app.models.base.MODEL_STORAGE_DIR", str(tmp_path))
         save_model({"data": 42}, "integrity_test")
-        # Tamper with the persisted artifact without updating its hash.
-        pkl = tmp_path / "integrity_test.pkl"
-        with open(pkl, "ab") as f:
-            f.write(b"malicious")
-        # Integrity check must refuse to unpickle the tampered artifact (#13095).
+        # Tamper with every persisted copy without updating its signature —
+        # the generation artifact and the signed legacy flat mirror alike.
+        targets = self._artifact_paths(tmp_path, "integrity_test") + [
+            tmp_path / "integrity_test.pkl"
+        ]
+        for artifact in targets:
+            with open(artifact, "ab") as f:
+                f.write(b"malicious")
+        # Integrity check must refuse to unpickle the tampered artifacts (#13095).
         assert load_model("integrity_test") is None
 
     def test_restore_rejects_tampered_previous(self, tmp_path, monkeypatch):
@@ -402,10 +416,14 @@ class TestModelIntegrity:
         save_model({"version": "A"}, "restore_integrity")
         save_model({"version": "B"}, "restore_integrity")
 
-        # Tamper with the previous artifact that would be restored.
-        prev = get_previous_model_path("restore_integrity")
-        with open(prev, "ab") as f:
-            f.write(b"tampered")
+        # Tamper with every copy of the previous generation that a rollback
+        # could restore from (generation artifact and its flat mirror).
+        artifacts = self._artifact_paths(tmp_path, "restore_integrity")
+        assert len(artifacts) == 2
+        targets = [artifacts[0], tmp_path / "restore_integrity_previous.pkl"]
+        for target in targets:
+            with open(target, "ab") as f:
+                f.write(b"tampered")
 
         assert restore_previous_model("restore_integrity") is False
         # Production artifact stays intact and loadable.

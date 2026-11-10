@@ -1,15 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { applyPriceObfuscation } from '../priceObfuscation.js';
 
-const mockSupabase = {
-    from: vi.fn().mockReturnThis(),
-    select: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    gte: vi.fn().mockReturnThis(),
-    single: vi.fn()
-};
+const { mockSupabase } = vi.hoisted(() => {
+    const mockSupabase = {
+        from: vi.fn().mockReturnThis(),
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        gte: vi.fn().mockReturnThis(),
+        single: vi.fn()
+    };
+    return { mockSupabase };
+});
 
-vi.mock('../../config/supabase.js', () => ({
+vi.mock('../../config/db.js', () => ({
     supabase: mockSupabase
 }));
 

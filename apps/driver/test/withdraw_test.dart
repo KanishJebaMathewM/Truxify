@@ -5,6 +5,8 @@ import 'package:http/http.dart' as http;
 import 'package:truxify_driver/services/api_client.dart';
 import 'package:truxify_driver/services/driver_earnings_service.dart';
 
+import 'driver_earnings_service_test.dart'
+    show FakeSupabaseClient, MockGoTrueClient, FakeUser;
 import 'setup.dart';
 
 /// A mock [http.Client] that returns a fixed response for every request.
@@ -39,7 +41,12 @@ void main() {
         httpClient: httpClient,
         baseUrl: 'http://localhost:5000',
       );
-      service = DriverEarningsService(apiClient: apiClient);
+      service = DriverEarningsService(
+        apiClient: apiClient,
+        client: FakeSupabaseClient(
+          auth: MockGoTrueClient(mockUser: FakeUser('driver-1')),
+        ),
+      );
     }
 
     tearDown(() {

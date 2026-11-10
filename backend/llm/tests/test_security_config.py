@@ -15,6 +15,7 @@ def run_security_import(env):
         capture_output=True,
         text=True,
         check=False,
+        timeout=300,
     )
 
 

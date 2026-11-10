@@ -15,7 +15,23 @@
 
 import crypto from "crypto";
 import logger from "../middleware/logger.js";
+// backend/api/src/cache/CacheEvent.js
 
+import logger from '../middleware/logger.js'; // Adjust path per module structure
+
+export function handleCacheEvent(eventName, payload) {
+  try {
+    // Existing cache event dispatch and synchronization logic
+    dispatchToListeners(eventName, payload);
+  } catch (e) {
+    // Log the caught error with event context
+    logger.warn('Failed to dispatch cache event', { 
+      event: eventName, 
+      error: e.message,
+      stack: e.stack 
+    });
+  }
+}
 export const CacheEventType = Object.freeze({
   INVALIDATE_KEY: "INVALIDATE_KEY",
   INVALIDATE_PATTERN: "INVALIDATE_PATTERN",
@@ -38,6 +54,7 @@ const VALID_EVENT_TYPES = new Set(Object.values(CacheEventType));
  * @param {string} [opts.subKey] — sub-entity key
  * @param {string} [opts.originInstanceId] — ID of the instance that originated the event
  * @param {number} [opts.timestamp] — event creation time (auto-set if omitted)
+ * @param {object} [opts.metadata] — optional caller metadata, carried through untouched
  * @returns {object} serialized event ready for JSON.stringify
  */
 export function createCacheEvent(type, opts = {}) {
@@ -88,6 +105,7 @@ export function createCacheEvent(type, opts = {}) {
     subKey: opts.subKey ?? null,
     originInstanceId: opts.originInstanceId ?? null,
     timestamp: opts.timestamp ?? Date.now(),
+    metadata: opts.metadata ?? null,
   };
 }
 

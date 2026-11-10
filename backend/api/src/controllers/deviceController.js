@@ -5,7 +5,37 @@ import { AppError, UnauthorizedError, ValidationError } from '../utils/errors.js
 import notificationService from '../services/notificationService.js';
 
 const VALID_PLATFORMS = ['android', 'ios', 'web'];
+// backend/api/src/controllers/deviceController.js (Excerpt)
 
+async function registerDevice(req, res, next) {
+  try {
+    const { userId, fcmToken, deviceInfo } = req.body;
+
+    if (!userId || !fcmToken) {
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_REQUEST',
+        message: 'userId and fcmToken are required.'
+      });
+    }
+
+    // 1. Save or update device in user_devices table
+    await deviceService.saveUserDevice(userId, fcmToken, deviceInfo);
+
+    // 2. Synchronize fcm_token in profiles table BEFORE sending response
+    await profileService.updateProfileFcmToken(userId, fcmToken);
+
+    // 3. Return success response only after both operations succeed
+    return res.status(200).json({
+      success: true,
+      message: 'Device registered and profile synchronized successfully.'
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export { registerDevice };
 function validateFcmToken(token) {
   if (!token || typeof token !== 'string') return 'fcmToken must be a non-empty string';
   if (token.length < 10 || token.length > 4096) return 'fcmToken length must be between 10 and 4096';
@@ -62,7 +92,7 @@ export async function registerDeviceToken(req, res, next) {
   try {
     const userId = req.user?.id;
     // Support both 'fcmToken' (original) and 'fcm_token' (new snippet)
-    const { fcmToken, fcm_token, platform, device_type, device_model, metadata, deviceId } = req.body;
+    const { fcmToken, fcm_token, platform, device_type, metadata, deviceId } = req.body;
     
     const finalToken = fcmToken || fcm_token;
 
@@ -126,8 +156,6 @@ export async function registerDeviceToken(req, res, next) {
       p_prev_user_id: previousUserId ?? null,
       p_device_id:    deviceId ?? null,
       p_last_seen:    new Date().toISOString(),
-      // Pass additional fields if the RPC supports them, otherwise they are ignored
-      p_device_model: device_model ?? null, 
     });
 
     if (rpcError) {
@@ -429,6 +457,9 @@ export async function syncLocations(req, res, next) {
     let newestTimestamp = 0;
 
     for (const loc of locations) {
+      if (!loc || typeof loc !== 'object' || Array.isArray(loc)) {
+        continue;
+      }
       const lat = parseFloat(loc.latitude);
       const lng = parseFloat(loc.longitude);
       if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
@@ -437,7 +468,13 @@ export async function syncLocations(req, res, next) {
       
       const parsedHeading = Number.isFinite(parseFloat(loc.heading)) ? parseFloat(loc.heading) : null;
       const parsedSpeed   = Number.isFinite(parseFloat(loc.speed))   ? parseFloat(loc.speed)   : null;
-      const recordedAt    = loc.recorded_at ? new Date(loc.recorded_at).toISOString() : new Date().toISOString();
+      const capturedAt = loc.recorded_at ? new Date(loc.recorded_at) : new Date();
+      // Match invalid-coordinate handling: a malformed point must not abort
+      // the other valid captures in an offline replay batch.
+      if (!Number.isFinite(capturedAt.getTime())) {
+        continue;
+      }
+      const recordedAt = capturedAt.toISOString();
 
       validLocations.push({
         driver_id: userId,

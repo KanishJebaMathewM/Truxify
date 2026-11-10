@@ -281,7 +281,7 @@ describe('PoD Storage Helpers (#10277)', () => {
             );
 
             expect(path).not.toContain('..');
-            expect(path).not.toContain('/');  // Sanitized to empty or underscore
+            expect(path.split('/')).toHaveLength(2);  // only the structural separator survives
         });
 
         it('should sanitize malicious characters in orderId', () => {

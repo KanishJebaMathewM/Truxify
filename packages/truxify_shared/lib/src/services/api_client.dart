@@ -111,12 +111,23 @@ class ApiClient {
 
   static String _getBaseUrl(String? overrideUrl) {
     final url = overrideUrl ?? defaultBaseUrl;
-    if (!url.startsWith('https://')) {
+
+    if (kReleaseMode && !url.startsWith('https://')) {
       throw StateError(
-        'TRUXIFY_API_BASE_URL must use the https:// scheme; '
-        'cleartext http:// is not allowed and would expose bearer tokens: $url',
+        'TRUXIFY_API_BASE_URL must use the https:// scheme in release mode: $url',
       );
     }
+
+    if (!kReleaseMode &&
+        !url.startsWith('https://') &&
+        !url.startsWith('http://localhost:') &&
+        !url.startsWith('http://10.0.2.2:')) {
+      throw StateError(
+        'Development API URL must use https://, '
+        'http://localhost:<port>, or http://10.0.2.2:<port>: $url',
+      );
+    }
+
     return url;
   }
 
@@ -154,7 +165,12 @@ class ApiClient {
       // Firebase not initialised; fall through to Supabase session
     }
     _cachedFirebaseToken = null;
-    return _supabase.auth.currentSession?.accessToken;
+    try {
+      return _supabase.auth.currentSession?.accessToken;
+    } catch (_) {
+      // Supabase not initialised (tests, headless) — no token.
+      return null;
+    }
   }
 
   String? get _accessToken {
@@ -268,14 +284,14 @@ Future<http.Response> _execute(
     return retryResponse;
   }
 
-  // Handle rate limiting (429)
-  if (response.statusCode == 429 && !isRetry) {
-    final retryAfterHeader = response.headers['retry-after'];
-
-    int retrySeconds = int.tryParse(retryAfterHeader ?? '') ?? 1;
-
-    // Cap maximum wait time to 30 seconds
-    retrySeconds = retrySeconds.clamp(1, 30).toInt();
+  // Handle rate limiting (429) via the configured RetryPolicy
+  if (response.statusCode == 429 && !isRetry && _retryPolicy.retryOnRateLimit) {
+    // RetryPolicy.parseRetryAfter supports both integer-seconds and HTTP-date
+    // formats; the cap comes from the policy, not a hardcoded constant.
+    final retrySeconds = _retryPolicy
+        .parseRetryAfter(response.headers)
+        .clamp(1, _retryPolicy.maxRetryAfterSeconds)
+        .toInt();
 
     await Future.delayed(Duration(seconds: retrySeconds));
 

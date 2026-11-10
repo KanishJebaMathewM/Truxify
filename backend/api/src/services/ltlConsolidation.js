@@ -10,6 +10,24 @@ export const HAZMAT_INCOMPATIBILITY_RULES = {
     PHARMACEUTICAL: ['POISON_6', 'CORROSIVE_8'],
 };
 
+// Upper bound for one consolidation request. The optimizer is recursive, so
+// accepting an unbounded candidate list would let one request consume the
+// event loop. Callers must split larger batches.
+export const MAX_LTL_PARTIAL_LOADS = 100;
+
+function assertBatchSize(partialLoads) {
+    if (!Array.isArray(partialLoads)) {
+        throw new TypeError('partialLoads must be an array');
+    }
+    if (partialLoads.length > MAX_LTL_PARTIAL_LOADS) {
+        const error = new RangeError(
+            `partialLoads must contain at most ${MAX_LTL_PARTIAL_LOADS} loads per request.`
+        );
+        error.statusCode = 413;
+        throw error;
+    }
+}
+
 /**
  * Checks if candidate loads have conflicting HAZMAT or sanitary requirements.
  * @param {Array<string>} commodityTypes
@@ -39,6 +57,7 @@ export function validateCommodityCompatibility(commodityTypes = []) {
  * @returns {Object} Matching results ranked by profitability and compatibility
  */
 export function matchLtlPartialLoads(truck, partialLoads = []) {
+    assertBatchSize(partialLoads);
     const {
         remainingLinearFeet = 0,
         remainingWeightLbs = 0,
@@ -112,9 +131,7 @@ export function optimizeLtlConsolidationKnapsack(truck, partialLoads = [], optio
     if (!truck || typeof truck !== 'object') {
         throw new TypeError('Valid truck object is required');
     }
-    if (!Array.isArray(partialLoads)) {
-        throw new TypeError('partialLoads must be an array');
-    }
+    assertBatchSize(partialLoads);
 
     const {
         id: truckId = 'UNKNOWN',

@@ -41,6 +41,10 @@ export function calculateCompletionRate(completedTrips, totalTrips) {
   return completedTrips / totalTrips;
 }
 
+function isTripRecord(trip) {
+  return trip !== null && typeof trip === 'object' && !Array.isArray(trip);
+}
+
 /**
  * Aggregate earnings and counts from a list of trips.
  *
@@ -48,7 +52,7 @@ export function calculateCompletionRate(completedTrips, totalTrips) {
  * @returns {object}
  */
 export function aggregateTripEarnings(trips = []) {
-  const rows = Array.isArray(trips) ? trips : [];
+  const rows = Array.isArray(trips) ? trips.filter(isTripRecord) : [];
   let totalEarnings = 0;
   let netEarnings = 0;
   let completedCount = 0;
@@ -58,7 +62,7 @@ export function aggregateTripEarnings(trips = []) {
     const nEarn = toAmount(trip.net_earnings);
     totalEarnings += tEarn;
     netEarnings += nEarn;
-    if (trip.status === 'completed' || trip.status === undefined) {
+    if (trip.status === 'completed') {
       completedCount += 1;
     }
   }
@@ -103,7 +107,7 @@ export const calculateEarningsAggregation = (trips, allCompletedTrips, lifetimeT
   let totalNetEarnings = 0;
   let grossEarnings = 0;
   let completedTripsCount = 0;
-  const tripList = Array.isArray(trips) ? trips : [];
+  const tripList = Array.isArray(trips) ? trips.filter(isTripRecord) : [];
 
   tripList.forEach((trip) => {
     const tEarnings = toAmount(trip.total_earnings);
@@ -128,7 +132,7 @@ export const calculateEarningsAggregation = (trips, allCompletedTrips, lifetimeT
       totalKm += distanceNum;
     }
 
-    if (trip.status === 'completed' || trip.status === undefined) {
+    if (trip.status === 'completed') {
       completedTripsCount += 1;
     }
 
@@ -143,6 +147,8 @@ export const calculateEarningsAggregation = (trips, allCompletedTrips, lifetimeT
     for (let i = 1; i < allCompletedTrips.length; i++) {
       const prevTrip = allCompletedTrips[i - 1];
       const currTrip = allCompletedTrips[i];
+      // Preserve adjacency: an unknown trip cannot establish a saved deadhead.
+      if (!isTripRecord(prevTrip) || !isTripRecord(currTrip)) continue;
 
       const prevRoute = (prevTrip.route_label || '').split(' → ');
       const currRoute = (currTrip.route_label || '').split(' → ');

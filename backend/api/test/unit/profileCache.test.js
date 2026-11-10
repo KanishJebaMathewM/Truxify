@@ -5,7 +5,7 @@ import {
   isValidProfile,
   getCacheStats,
   resetCacheStats,
-} from '../../../backend/api/src/lib/profileCache.js';
+} from '../../src/lib/profileCache.js';
 
 describe('profileCache - Validation & Null Guards', () => {
   beforeEach(() => {

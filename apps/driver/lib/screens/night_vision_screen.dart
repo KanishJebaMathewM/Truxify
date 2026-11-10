@@ -59,7 +59,7 @@ class _NightVisionScreenState extends State<NightVisionScreen> {
           backgroundColor: isNight ? Colors.black : Colors.blueGrey[900],
           foregroundColor: isNight ? Colors.redAccent[700] : Colors.white,
           elevation: isNight ? 0 : 4,
-          shadowColor: isNight ? Colors.redAccent.withOpacity(0.2) : Colors.black,
+          shadowColor: isNight ? Colors.redAccent.withValues(alpha: 0.2) : Colors.black,
         ),
       ),
       child: Scaffold(
@@ -69,7 +69,7 @@ class _NightVisionScreenState extends State<NightVisionScreen> {
             Switch(
               value: isNight,
               onChanged: _service.toggleNightVision,
-              activeColor: Colors.red,
+              activeThumbColor: Colors.red,
               activeTrackColor: Colors.red[900],
             ),
             const SizedBox(width: 16),

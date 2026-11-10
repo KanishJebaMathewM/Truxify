@@ -158,7 +158,7 @@ class _NotificationBatchingScreenState extends State<NotificationBatchingScreen>
       ),
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: iconColor.withOpacity(0.2),
+          backgroundColor: iconColor.withValues(alpha: 0.2),
           child: Icon(icon, color: iconColor),
         ),
         title: Text(n.title, style: TextStyle(fontWeight: FontWeight.bold, color: n.isUrgent && !isBatched ? Colors.red[900] : Colors.black87)),

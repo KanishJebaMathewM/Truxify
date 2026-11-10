@@ -11,12 +11,15 @@ const { from, loggerMock, contractMock } = vi.hoisted(() => ({
 }));
 
 vi.mock('ethers', () => ({
-  JsonRpcProvider: class {},
-  Wallet: class {},
-  Contract: class {
-    constructor() {
-      return contractMock;
-    }
+  // The service imports { ethers } (named) — the classes live under it.
+  ethers: {
+    JsonRpcProvider: class {},
+    Wallet: class {},
+    Contract: class {
+      constructor() {
+        return contractMock;
+      }
+    },
   },
 }));
 
@@ -26,7 +29,7 @@ vi.mock('../../src/config/db.js', () => ({
   upstashRedisClient: global.mockRedis,
   supabase: { from } }));
 
-const { TraceabilityService } = await import('../../../traceability/trace.service.js');
+const { TraceabilityService } = await import('../../../../traceability/trace.service.js');
 
 process.env.POLYGON_RPC_URL = 'http://localhost:8545';
 process.env.PRIVATE_KEY = '0x' + '1'.repeat(64);
@@ -55,7 +58,9 @@ describe('TraceabilityService.createShipment', () => {
     });
     contractMock.interface.parseLog.mockReturnValue({
       name: 'ShipmentCreated',
-      args: { shipmentId: 7n },
+      // ethers parsed args are both positional and named — the service reads
+      // positionally.
+      args: { 0: 7n, shipmentId: 7n, length: 1 },
     });
 
     const result = await service.createShipment(1, '0xreceiver', 'Loc');
@@ -90,10 +95,13 @@ describe('TraceabilityService.createShipment', () => {
       wait: async () =>
         makeReceipt([{ topic: 'x' }]),
     }));
-    contractMock.interface.parseLog.mockImplementation(() => ({
-      name: 'ShipmentCreated',
-      args: { shipmentId: BigInt(++call) },
-    }));
+    contractMock.interface.parseLog.mockImplementation(() => {
+      const v = BigInt(++call);
+      return {
+        name: 'ShipmentCreated',
+        args: { 0: v, shipmentId: v, length: 1 },
+      };
+    });
 
     const a = await service.createShipment(1, '0xr', 'Loc');
     const b = await service.createShipment(1, '0xr', 'Loc');

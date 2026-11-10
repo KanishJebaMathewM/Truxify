@@ -60,8 +60,39 @@ import { validateBody, validateParams, validateQuery } from '../middleware/valid
 import { paramIdSchema } from '../validation/requestSchemas.js';
 import { escapeLike } from '../lib/escapeLike.js';
 import { invalidateBookingCaches } from '../utils/cacheInvalidation.js';
+// backend/api/src/routes/loadRoutes.js
+// (Snippet illustrating removal of dead sanitizeLoadFilters helper)
 import { formatPaginationMeta } from '../utils/pagination.js';
+import { estimateTripProfit } from '../services/tripProfitEstimator.js';
 
+import express from 'express';
+import { authenticateToken } from '../middleware/auth.js';
+import logger from '../middleware/logger.js';
+
+const router = express.Router();
+
+/**
+ * GET /api/loads
+ * Retrieves active loads matching query filters.
+ */
+router.get('/', authenticateToken, async (req, res) => {
+  try {
+    // Active load filtering logic directly utilizing validated query parameters
+    const { status, origin, destination, page = 1, limit = 20 } = req.query;
+    
+    // ... active controller execution ...
+
+    return res.json({
+      success: true,
+      data: []
+    });
+  } catch (err) {
+    logger.error('Failed to retrieve loads', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+export default router;
 
 const router = express.Router();
 
@@ -453,7 +484,11 @@ router.get('/stats', authenticate, userLimiter, requirePolicy('load-offer:browse
       });
 
       if (!error && data) {
-        statsData = typeof data === 'string' ? JSON.parse(data) : data;
+        try {
+          statsData = typeof data === 'string' ? JSON.parse(data) : data;
+        } catch (parseErr) {
+          logger.warn({ err: parseErr.message }, 'Failed to parse load stats from Supabase RPC');
+        }
       }
     }
 
@@ -522,6 +557,130 @@ router.get('/stats', authenticate, userLimiter, requirePolicy('load-offer:browse
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
+
+
+// ============================================================================
+// 2.5 GET PROFIT ESTIMATE FOR A LOAD (DRIVER)
+// GET /api/loads/:id/profit-estimate
+// ============================================================================
+/**
+ * @openapi
+ * /api/loads/{id}/profit-estimate:
+ *   get:
+ *     tags: [Loads]
+ *     summary: Estimated net profit breakdown for a load offer
+ *     description: >
+ *       Returns a deterministic, driver-facing profit estimate for a specific
+ *       load offer before the driver accepts it. All values are estimates and
+ *       `isEstimate` is always `true`. Query parameters override the default
+ *       cost configuration (fuel price, truck mileage, toll rate, other costs).
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Load offer UUID
+ *       - in: query
+ *         name: distance_km
+ *         schema:
+ *           type: number
+ *         description: Override route distance in km (uses load's extra_distance_km if not provided)
+ *       - in: query
+ *         name: fuel_price_per_litre
+ *         schema:
+ *           type: number
+ *         description: Diesel price per litre in ₹
+ *       - in: query
+ *         name: truck_km_per_litre
+ *         schema:
+ *           type: number
+ *         description: Truck mileage in km/litre
+ *       - in: query
+ *         name: toll_rate_per_km
+ *         schema:
+ *           type: number
+ *         description: Toll rate per km in ₹
+ *       - in: query
+ *         name: other_cost_per_km
+ *         schema:
+ *           type: number
+ *         description: Other trip expenses per km in ₹
+ *     responses:
+ *       200:
+ *         description: Estimated profit breakdown
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 freightAmount:
+ *                   type: number
+ *                 estimatedFuelCost:
+ *                   type: number
+ *                 estimatedTollCost:
+ *                   type: number
+ *                 otherCosts:
+ *                   type: number
+ *                 estimatedNetProfit:
+ *                   type: number
+ *                 profitPerKm:
+ *                   type: number
+ *                 distanceKm:
+ *                   type: number
+ *                 isEstimate:
+ *                   type: boolean
+ *                   enum: [true]
+ *       404:
+ *         description: Load offer not found or no longer available
+ */
+router.get('/:id/profit-estimate', authenticate, userLimiter, requirePolicy('load-offer:browse'), validateParams(paramIdSchema), async (req, res) => {
+  try {
+    const { data: load, error } = await supabaseAdmin
+      .from('load_offers')
+      .select('freight_value, extra_distance_km')
+      .eq('id', req.params.id)
+      .eq('status', 'available')
+      .maybeSingle();
+
+    if (error) {
+      logger.error('Failed to fetch load offer for profit estimate:', error);
+      return res.status(500).json({ error: 'Failed to fetch load offer.' });
+    }
+    if (!load) {
+      return res.status(404).json({ error: 'Load offer not found or no longer available.' });
+    }
+
+    // Resolve distance: explicit query param > load's extra_distance_km > 0
+    const distanceKm =
+      parseFloat(req.query.distance_km) ||
+      parseFloat(load.extra_distance_km) ||
+      0;
+
+    const freightAmountInr = (Number(load.freight_value) || 0) / 100;
+
+    const configOverrides = {};
+    if (req.query.fuel_price_per_litre)  configOverrides.fuelPricePerLitre = parseFloat(req.query.fuel_price_per_litre);
+    if (req.query.truck_km_per_litre)    configOverrides.truckKmPerLitre   = parseFloat(req.query.truck_km_per_litre);
+    if (req.query.toll_rate_per_km)      configOverrides.tollRatePerKm     = parseFloat(req.query.toll_rate_per_km);
+    if (req.query.other_cost_per_km)     configOverrides.otherCostPerKm    = parseFloat(req.query.other_cost_per_km);
+
+    const breakdown = estimateTripProfit({
+      freightAmountInr,
+      distanceKm,
+      config: configOverrides,
+    });
+
+    return res.json(breakdown);
+  } catch (err) {
+    logger.error('Internal Server Error in GET /api/loads/:id/profit-estimate:', err);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 
 // ============================================================================
 // 2. GET SINGLE LOAD OFFER BY ID (DRIVER)

@@ -230,7 +230,7 @@ export const isValidPlanId = (planId) => {
  *       401:
  *         description: Authentication is required.
  *       429:
- *         description: Rate limit exceeded.
+ *         description: Rate limit or loading plan registry capacity exceeded.
  *       500:
  *         description: Failed to optimize the AR container loading plan.
  */
@@ -280,7 +280,9 @@ router.post('/optimize', authenticate, userLimiter, async (req, res) => {
       plan
     });
   } catch (err) {
-    return res.status(500).json({ error: err.message || 'Failed to optimize AR container loading plan' });
+    return res.status(err.statusCode === 429 ? 429 : 500).json({
+      error: err.message || 'Failed to optimize AR container loading plan'
+    });
   }
 });
 
@@ -305,7 +307,7 @@ router.post('/optimize', authenticate, userLimiter, async (req, res) => {
  *         description: Loading plan identifier.
  *         schema:
  *           type: string
- *         example: AR-PLAN-1710000000000
+ *         example: PLAN-59db5c9a-1203-4e3f-a6ab-5f3fc7e7d623
  *     responses:
  *       200:
  *         description: AR loading plan.

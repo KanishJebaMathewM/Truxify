@@ -1,5 +1,6 @@
 import 'dart:async';
 import '../models/yard_management_model.dart';
+import '../models/yard_assignment_model.dart';
 
 class YardManagementService {
   final _sessionController = StreamController<YardManagementSession>.broadcast();
@@ -7,7 +8,7 @@ class YardManagementService {
   Stream<YardManagementSession> get yardStream => _sessionController.stream;
 
   List<YardTrailer> _trailers = [];
-  List<YardInstruction> _instructions = [];
+  final List<YardInstruction> _instructions = [];
 
   void initializeYard() {
     _trailers = [
@@ -56,6 +57,24 @@ class YardManagementService {
     }
 
     _emitState('Yard Grid Synchronized', false);
+  }
+
+  /// Streams a (simulated) yard navigation assignment for a facility.
+  /// yard_navigation_screen.dart listens to this; the service is currently a
+  /// simulation, so the stream emits a fixed assignment once.
+  Stream<YardAssignment> streamYardNavigation(String facilityName) {
+    return Stream.value(
+      YardAssignment(
+        facilityName: facilityName,
+        assignmentType: 'Live Load',
+        targetId: 'Dock 3',
+        latitude: 41.8781,
+        longitude: -87.6298,
+        status: 'Navigating Yard',
+        distanceToTargetMeters: 120,
+        instructions: 'Proceed to Dock 3 and check in with the yard marshal.',
+      ),
+    );
   }
 
   void _emitState(String status, bool isSyncing) {

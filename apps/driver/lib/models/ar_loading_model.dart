@@ -35,3 +35,38 @@ class ArLoadingSession {
     required this.completedPallets,
   });
 }
+
+/// A pallet instruction for the AR loading optimizer (the optimizer service's
+/// newer model; distinct from the AR projection screen's PalletDirective).
+class PalletInstruction {
+  final String palletId;
+  final String cargoType;
+  final int weightLbs;
+  final String targetZone; // e.g. "Over Axle - Center", "Nose - Left"
+  final bool isLoaded;
+
+  const PalletInstruction({
+    required this.palletId,
+    required this.cargoType,
+    required this.weightLbs,
+    required this.targetZone,
+    required this.isLoaded,
+  });
+}
+
+/// Streamed trailer load state from the AR loading optimizer.
+class TrailerLoadState {
+  final int maxWeightLbs;
+  final int currentWeightLbs;
+  final double balanceScorePct;
+  final List<PalletInstruction> pendingPallets;
+  final PalletInstruction? activeInstruction;
+
+  const TrailerLoadState({
+    required this.maxWeightLbs,
+    required this.currentWeightLbs,
+    required this.balanceScorePct,
+    required this.pendingPallets,
+    required this.activeInstruction,
+  });
+}

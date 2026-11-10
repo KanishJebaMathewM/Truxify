@@ -119,7 +119,7 @@ export async function dispatchPayout({ driverId, withdrawal }) {
     };
   }
 
-  logger.error(`[PayoutProvider] Provider "${provider}" is not wired up. Configure WITHDRAWAL_PAYOUT_WEBHOOK_URL.`);
+  logger.error({ event: 'PAYOUT_PROVIDER_NOT_CONFIGURED', provider }, 'Provider is not wired up. Configure WITHDRAWAL_PAYOUT_WEBHOOK_URL.');
   throw new Error(`Withdrawal payout provider "${provider}" is not supported yet.`);
 }
 

@@ -1,7 +1,45 @@
 import { Kafka } from 'kafkajs';
 import { context, propagation } from '@opentelemetry/api';
 import logger from '../../api/src/middleware/logger.js';
+// backend/kafka/config/kafka.config.js (Excerpt)
 
+import { Kafka } from 'kafkajs';
+import logger from '../middleware/logger.js';
+
+// ... existing Kafka instance configuration ...
+
+export async function resetConsumerOffsets(groupId, topicPartitions) {
+  const admin = kafka.admin();
+  
+  try {
+    await admin.connect();
+    logger.info({ groupId }, 'Kafka admin client connected for offset reset');
+
+    const currentOffsets = await admin.fetchOffsets({ groupId, topics: topicPartitions.map(tp => tp.topic) });
+    
+    // Perform offset adjustments / resets...
+    for (const tp of topicPartitions) {
+      await admin.setConsumerGroupOffsets({
+        groupId,
+        topics: [{ topic: tp.topic, partitions: [{ partition: tp.partition, offset: tp.offset }] }],
+      });
+    }
+
+    logger.info({ groupId }, 'Consumer group offsets successfully reset');
+    return { success: true };
+  } catch (err) {
+    logger.error({ err, groupId }, 'Failed to reset consumer group offsets');
+    throw err;
+  } finally {
+    // ✅ Fixed: Guaranteed disconnection in finally block to prevent resource leaks on error
+    try {
+      await admin.disconnect();
+      logger.info({ groupId }, 'Kafka admin client disconnected safely');
+    } catch (disconnectErr) {
+      logger.error({ err: disconnectErr }, 'Error while disconnecting Kafka admin client');
+    }
+  }
+}
 const kafka = new Kafka({
   clientId: 'truxify',
   brokers: process.env.KAFKA_BROKERS ? process.env.KAFKA_BROKERS.split(',') : ['localhost:9092'],
@@ -154,11 +192,11 @@ class KafkaConfig {
         topic,
         messages: [
           {
-            key: key || event.eventId || event.orderId,
+            key: key || event.aggregateId || event.orderId || event.eventId,
             value: JSON.stringify({
               ...event,
               timestamp: event.timestamp || new Date().toISOString(),
-              version: '1.0',
+              version: event.version || '1.0',
             }),
             headers: traceHeaders,
             timestamp: Date.now(),
@@ -186,11 +224,11 @@ class KafkaConfig {
         topic,
         messages: [
           {
-            key: key || event.eventId,
+            key: key || event.aggregateId || event.orderId || event.eventId,
             value: JSON.stringify({
               ...event,
               timestamp: event.timestamp || new Date().toISOString(),
-              version: '1.0',
+              version: event.version || '1.0',
             }),
             headers: traceHeaders,
             timestamp: Date.now(),
@@ -318,7 +356,7 @@ export default new KafkaConfig();
 // === Spec 32: ===
 // === Spec 32: connection leak ===
 export async function recreateConsumer(oldC, factory) {
-  try { if (oldC?.disconnect) await oldC.disconnect(); } catch (_) {}
+  try { if (oldC?.disconnect) await oldC.disconnect(); } catch (err) { logger.debug('Failed to disconnect old Kafka client:', err); }
   return factory();
 }
 

@@ -1,12 +1,71 @@
+/**
+ * Validation Middleware
+ * 
+ * Inspects express-validator validation results on incoming requests.
+ * If validation errors exist, logs a structured warning with request tracing 
+ * and field details before returning a 400 Bad Request response.
+ */
+
+import { validationResult } from 'express-validator';
 import logger from './logger.js';
 
-export function formatValidationIssues(error) {
-  return error.issues.map((issue) => ({
-    field: issue.path.length > 0 ? issue.path.join(".") : "body",
-    message: issue.message,
-  }));
-}
+export const validate = (req, res, next) => {
+  const errors = validationResult(req);
+  
+  if (!errors.isEmpty()) {
+    const formattedErrors = errors.array().map((err) => ({
+      field: err.path || err.param || 'unknown',
+      message: err.msg,
+      value: err.value,
+    }));
 
+    const failingFields = formattedErrors.map((err) => err.field);
+
+    logger.warn(
+      {
+        requestId: req.requestId || req.id,
+        event: 'VALIDATION_ERROR',
+        fields: failingFields,
+        errors: formattedErrors,
+        path: req.originalUrl || req.url,
+        method: req.method,
+      },
+      'Request validation failed'
+    );
+
+    return res.status(400).json({
+      success: false,
+      error: 'Validation failed',
+      errors: formattedErrors,
+    });
+  }
+
+  next();
+};
+
+export default validate;
+
+/**
+ * Formats Zod validation issues into a clean, structured array.
+ * Exported for consistent error formatting across handlers and tests.
+ */
+export function formatValidationIssues(error) {
+  const issues = Array.isArray(error?.issues)
+    ? error.issues
+    : Array.isArray(error)
+      ? error
+      : [];
+  return issues.map((issue) => {
+    const field =
+      Array.isArray(issue.path) && issue.path.length > 0
+        ? issue.path.join('.')
+        : 'body';
+    return {
+      field,
+      message: issue.message,
+    };
+  });
+}
 export function validateArray(schema) {
   return (req, res, next) => {
     if (!Array.isArray(req.body)) {
@@ -158,3 +217,4 @@ export function validateQuery(schema) {
     }
   };
 }
+

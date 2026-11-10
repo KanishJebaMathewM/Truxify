@@ -1,7 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:truxify_shared/truxify_shared.dart';
-import 'package:truxify_shared/src/models/notification_payload.dart';
-import 'package:truxify_shared/src/services/notification_router.dart';
 
 void main() {
   group('payment_released routing consistency', () {

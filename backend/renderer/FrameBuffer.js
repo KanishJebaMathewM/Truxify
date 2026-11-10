@@ -90,22 +90,28 @@ class FrameBuffer {
         return changed;
     }
     
-    addDirtyRect(x, y, width, height) {
+       addDirtyRect(x, y, width, height) {
         const rect = { x, y, width, height };
-        
-        // Merge with existing rects
-        let merged = false;
-        for (const existing of this.dirtyRects) {
-            if (this.rectsOverlap(existing, rect)) {
-                this.mergeRects(existing, rect);
-                merged = true;
-                break;
-            }
-        }
-        
-        if (!merged) {
+        const overlapping = this.dirtyRects.filter(r => this.rectsOverlap(r, rect));
+
+        if (overlapping.length === 0) {
             this.dirtyRects.push(rect);
+            return;
         }
+
+        // Merge the new rect with every rect it overlaps, not just the first one.
+        let merged = rect;
+        for (const existing of overlapping) {
+            merged = {
+                x: Math.min(merged.x, existing.x),
+                y: Math.min(merged.y, existing.y),
+                width: Math.max(merged.x + merged.width, existing.x + existing.width) - Math.min(merged.x, existing.x),
+                height: Math.max(merged.y + merged.height, existing.y + existing.height) - Math.min(merged.y, existing.y)
+            };
+        }
+
+        this.dirtyRects = this.dirtyRects.filter(r => !overlapping.includes(r));
+        this.dirtyRects.push(merged);
     }
     
     rectsOverlap(a, b) {

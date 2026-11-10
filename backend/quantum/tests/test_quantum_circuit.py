@@ -22,7 +22,9 @@ CONFLICT_MARKERS = ("<<<<<<<", "=======", ">>>>>>>")
 def _selected_edges(formatter, result):
     """Map a solver result back to the set of selected graph edges."""
     selected = set()
-    for var_name, value in zip(formatter.variables, result.x):
+    # solve_qubo returns a dict ({'variables', 'solution', ...}) — the
+    # formatter.variables / result.x access predates that contract.
+    for var_name, value in zip(result['variables'], result['solution']):
         if value is not None and abs(value - 1) < 1e-6:
             _, u, v = var_name.split('_')
             selected.add((u, v))
@@ -81,10 +83,14 @@ def test_module_parses_and_has_single_solve_qubo():
     module = ast.parse(source)
 
     # Exactly one solve_qubo definition (no duplicate-merge signatures).
+    # It is a QUBOFormatter method — scan class bodies, not just the module
+    # top level.
     solve_defs = [
         n
-        for n in module.body
-        if isinstance(n, ast.FunctionDef) and n.name == "solve_qubo"
+        for node in ast.walk(module)
+        if isinstance(node, ast.ClassDef)
+        for n in node.body
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "solve_qubo"
     ]
     assert len(solve_defs) == 1, (
         f"expected exactly one solve_qubo definition, found {len(solve_defs)}"

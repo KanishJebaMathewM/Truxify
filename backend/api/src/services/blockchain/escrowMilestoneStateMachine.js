@@ -36,7 +36,12 @@ export class EscrowMilestoneStateMachine {
       signature,
     } = params;
 
-    const milestoneId = ESCROW_MILESTONES[milestoneType] || 1;
+    const milestoneId = ESCROW_MILESTONES[milestoneType];
+    if (milestoneId === undefined) {
+      // Never silently fall back to a milestone: an unrecognized type must not
+      // release the 30% loading advance (previous `|| 1` did exactly that).
+      throw new Error(`Unknown milestone type: ${milestoneType}. Expected one of: ${Object.keys(ESCROW_MILESTONES).join(', ')}`);
+    }
 
     logger.info(
       { bookingId, milestoneType, milestoneId, amountWei: amountWei.toString() },

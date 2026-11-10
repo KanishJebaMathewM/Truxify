@@ -440,4 +440,3 @@ describe('smartEbol Service', () => {
     });
   });
 });
-```

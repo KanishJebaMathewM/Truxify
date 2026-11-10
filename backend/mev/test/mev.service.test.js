@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 
 const mockRelayer = vi.hoisted(() => ({
     assemblePrivateBundle: vi.fn(),
@@ -46,6 +46,7 @@ vi.mock('../../api/src/config/db.js', () => ({
     supabase: {
         from: vi.fn().mockReturnThis(),
         update: vi.fn().mockReturnThis(),
+        insert: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
         select: vi.fn().mockReturnThis(),
         single: vi.fn().mockResolvedValue({ data: null })
@@ -61,6 +62,7 @@ describe('MEVService - Flashbots Relayer Integration', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         process.env.MEV_PRIVATE_RELAY = 'true';
+        process.env.RELAYER_WALLET_PRIVATE_KEY = '0x' + '2'.repeat(64);
         // Mock updateEscrowStatus since it calls supabase and might fail if not mocked perfectly
         mevService.updateEscrowStatus = vi.fn().mockResolvedValue(true);
     });
@@ -71,12 +73,11 @@ describe('MEVService - Flashbots Relayer Integration', () => {
         } else {
             process.env.MEV_PRIVATE_RELAY = originalPrivateRelay;
         }
+        delete process.env.RELAYER_WALLET_PRIVATE_KEY;
     });
 
-    it('should use flashbots_relayer to send private bundle during releaseEscrow', async () => {
+    it('should use flashbots_relayer to send private bundle during bundle submission', async () => {
         // Setup mocks for the relayer
-        const mockBundle = { signedBundle: ['0xmockTx'], targetBlock: 1001 };
-        mockRelayer.assemblePrivateBundle.mockResolvedValue(mockBundle);
         mockRelayer.sendPrivateBundle.mockResolvedValue({
             success: true,
             bundleHash: '0xbundlehash',
@@ -84,24 +85,18 @@ describe('MEVService - Flashbots Relayer Integration', () => {
         });
 
         // Act
-        const result = await mevService.releaseEscrow('123', 'secret-string');
+        const result = await mevService.submitFlashbotsBundle('escrow-1', [{ to: '0xabc', value: 1 }]);
 
         // Assert
         expect(getMevRelayer).toHaveBeenCalled();
-        expect(mockRelayer.assemblePrivateBundle).toHaveBeenCalledWith(
-            mevService.escrowAddress,
-            mevService.escrowABI,
-            'releaseDepositPrivate',
-            ['123', '0xhash'], // preimage is toPreimageBytes32(secret), mocked to '0xhash'
-            1001 // target block (1000 + 1)
-        );
-        expect(mockRelayer.sendPrivateBundle).toHaveBeenCalledWith(mockBundle);
+        expect(mockRelayer.sendPrivateBundle).toHaveBeenCalledWith({
+            signedBundle: ['0xsignedTx'],
+            targetBlock: 1001 // target block (1000 + 1)
+        });
         expect(result).toEqual({
             success: true,
-            txHash: '0xbundlehash',
             bundleHash: '0xbundlehash',
-            targetBlock: 1001,
-            private: true
+            targetBlock: 1001
         });
     });
 });

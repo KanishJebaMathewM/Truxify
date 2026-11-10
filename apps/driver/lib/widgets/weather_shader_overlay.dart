@@ -6,10 +6,10 @@ class WeatherShaderOverlay extends StatefulWidget {
   final Offset hazardCenter;
 
   const WeatherShaderOverlay({
-    Key? key,
+    super.key,
     this.dangerRadius = 0.2,
     this.hazardCenter = const Offset(0.5, 0.5),
-  }) : super(key: key);
+  });
 
   @override
   State<WeatherShaderOverlay> createState() => _WeatherShaderOverlayState();

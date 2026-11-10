@@ -44,13 +44,17 @@ export async function getDashboardMetrics(fleetManagerId, startDate, endDate) {
     // Calculate summary metrics
     const totalDistance = utilization.reduce((sum, d) => sum + d.totalDistanceKm, 0);
     const totalActiveHours = utilization.reduce((sum, d) => sum + d.activeHours, 0);
+    const totalIdleHours = utilization.reduce((sum, d) => sum + d.idleHours, 0);
+    const observedHours = totalActiveHours + totalIdleHours;
     const totalRevenue = routeEfficiency.reduce((sum, r) => sum + r.revenue, 0);
     const totalFuelCost = routeEfficiency.reduce((sum, r) => sum + r.fuelCostPaisa, 0);
 
     const rawMetrics = {
         totalDrivers: utilization.length,
         activeDrivers: utilization.filter(d => d.activeHours > 0).length,
-        utilizationPct: deliveryPerf.onTimePct, // Simplified for dashboard
+        utilizationPct: observedHours > 0
+            ? Math.round((totalActiveHours / observedHours) * 100)
+            : 0,
         onTimePct: deliveryPerf.onTimePct,
         averageRating: deliveryPerf.averageRating,
         totalTrips: deliveryPerf.total,

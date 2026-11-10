@@ -1,6 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:http/http.dart' as http;
 
@@ -10,6 +11,8 @@ import 'battery_service.dart';
 import 'location_replay_service.dart';
 import 'offline_location_queue.dart';
 import 'secure_storage.dart';
+/// WebSocket connection lifecycle for the driver location channel.
+enum WsConnectionStatus { connecting, connected, disconnected }
 
 /// Outcome of a location ping attempt.
 ///
@@ -136,16 +139,20 @@ class LocationService {
     if (_isTracking) return;
 
     // Check location permission before starting tracking (fixes #1491)
-    final permission = await Permission.location.request();
+    // Use geolocator instead of permission_handler — geolocator works on web too.
+    LocationPermission geoPermission = await Geolocator.checkPermission();
+    if (geoPermission == LocationPermission.denied) {
+      geoPermission = await Geolocator.requestPermission();
+    }
 
-    if (permission.isDenied) {
+    if (geoPermission == LocationPermission.denied) {
       debugPrint('[LocationService] Location permission denied');
       throw Exception('Location permission is required to start tracking');
     }
 
-    if (permission.isPermanentlyDenied) {
+    if (geoPermission == LocationPermission.deniedForever) {
       debugPrint('[LocationService] Location permission permanently denied');
-      openAppSettings();
+      if (!kIsWeb) await Geolocator.openAppSettings();
       throw Exception('Location permissions are permanently denied. Please open app settings.');
     }
 
@@ -189,7 +196,8 @@ class LocationService {
         // 409 = milestone already completed server-side: idempotent success.
         return response.statusCode >= 200 && response.statusCode < 300 ||
             response.statusCode == 409;
-      } catch (_) {
+      } catch (e) {
+        debugPrint('[LocationService] milestone sync failed: $e');
         return false;
       }
     };
@@ -206,7 +214,8 @@ class LocationService {
           body: jsonEncode({'locations': locations}),
         );
         return response.statusCode >= 200 && response.statusCode < 300;
-      } catch (_) {
+      } catch (e) {
+        debugPrint('[LocationService] location sync failed: $e');
         return false;
       }
     };
@@ -264,13 +273,31 @@ class LocationService {
     });
   }
 
+  /// Fallback heartbeat: re-send the last known position when nothing went
+  /// out within [_maxInterval]. Serialized with position-stream sends and
+  /// re-checks the throttle so it never duplicates a recent ping (#13955).
+  Future<void> _sendFallbackPing() async {
+    await _serializeSend(() async {
+      if (!_isTracking) return;
+      final last = _lastSentPosition;
+      if (last == null) return;
+      final lastTime = _lastSentTime;
+      if (lastTime != null && DateTime.now().difference(lastTime) < _maxInterval) return;
+      final result = await _sendLocationPing(last);
+      if (result == LocationDelivery.delivered ||
+          result == LocationDelivery.queued) {
+        _lastSentTime = DateTime.now();
+      }
+    });
+  }
+
 
   Future<void> _handleLocationUpdate(Position position) async {
     // Drop stale/cached fixes: Geolocator routinely re-emits the last-known
     // position with an old `timestamp` (after startup, GPS loss, or waking from
     // background). Forwarding it would show the truck where it no longer is.
     if (position.timestamp != null &&
-        DateTime.now().difference(position.timestamp!) > _maxLocationAge) {
+        DateTime.now().difference(position.timestamp) > _maxLocationAge) {
       debugPrint('[LocationService] Stale GPS fix dropped');
       return;
     }
@@ -626,7 +653,7 @@ class LocationService {
         _wsAuthenticated = false;
         final token = await _resolveAuthToken();
         if (token != null && token.isNotEmpty) {
-          ws.send({'event': 'auth', 'data': {'token': token}});
+          _resilientWs?.send({'event': 'auth', 'data': {'token': token}});
         }
       },
       urlFactory: () => _buildWsUri().toString(),
@@ -661,7 +688,9 @@ class LocationService {
               }
             }
           }
-        } catch (_) {}
+        } catch (e) {
+          debugPrint('[LocationService] Failed to process WebSocket message: $e');
+        }
       },
       onError: (error) {
         debugPrint('[LocationService] WebSocket error: $error');

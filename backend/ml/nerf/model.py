@@ -1,10 +1,15 @@
+from threading import RLock
+from foundation.optimizer_transition import operation_owned, optimizer_transition
+from .point_training import admit_adam, own_points
+import logging
 import math
+from typing import Dict, List, Optional, Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from typing import Dict, List, Tuple, Optional
-import logging
+from nerf.ray_training import fit_rays
+from nerf.image_rendering import render_image, scene_policy
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +44,7 @@ class NeRFNetwork(nn.Module):
         
         self.num_frequencies = num_frequencies
         self.num_dir_frequencies = num_dir_frequencies
+        self.skip_layer = skip_layer
         
         # Position encoding
         self.pos_encoder = PositionalEncoding(num_frequencies)
@@ -90,14 +96,11 @@ class NeRFNetwork(nn.Module):
         # Density computation
         x = encoded_pos
         for i, layer in enumerate(self.density_layers):
-            if i == 0:
-                x = layer(x)
-            elif i == 4:  # Skip connection
+            # Sequential interleaves Linear/ReLU; configuration counts Linears.
+            if isinstance(layer, nn.Linear) and i // 2 == self.skip_layer and i != 0:
                 x = torch.cat([x, encoded_pos], dim=-1)
-                x = layer(x)
-            else:
-                x = layer(x)
-        
+            x = layer(x)
+
         density = self.density_head(x)
         
         # Color computation
@@ -117,6 +120,10 @@ class NeRFRenderer:
         num_samples: int = 64,
         device: str = "cuda" if torch.cuda.is_available() else "cpu"
     ):
+        if not math.isfinite(near) or not math.isfinite(far) or near < 0 or far <= near:
+            raise ValueError("ray interval requires finite 0 <= near < far")
+        if isinstance(num_samples, bool) or not isinstance(num_samples, int) or num_samples <= 0:
+            raise ValueError("num_samples must be a positive integer")
         self.model = model.to(device)
         self.near = near
         self.far = far
@@ -125,18 +132,38 @@ class NeRFRenderer:
         
         logger.info(f"✅ NeRF Renderer initialized on {device}")
     
-    def render_rays(
-        self,
-        ray_origins: torch.Tensor,
-        ray_directions: torch.Tensor,
-        num_samples: Optional[int] = None
-    ) -> Dict:
+    def render_rays(self, ray_origins: torch.Tensor, ray_directions: torch.Tensor,
+                    num_samples: Optional[int] = None, *, differentiable: bool = False) -> Dict:
+        """Opt into the actual native render graph; ordinary inference stays detached."""
+        if not isinstance(differentiable, bool):
+            raise ValueError('differentiable must be a boolean')  # noqa: TRY004 - uniform native admission
+        with torch.set_grad_enabled(differentiable and torch.is_grad_enabled()):
+            return self._render_rays(ray_origins, ray_directions, num_samples)
+
+    def _render_rays(self, ray_origins: torch.Tensor, ray_directions: torch.Tensor,
+                     num_samples: Optional[int] = None) -> Dict:
         """Render rays through the scene"""
         if num_samples is None:
             num_samples = self.num_samples
         
-        # Sample points along rays
-        t_values = torch.linspace(self.near, self.far, num_samples, device=self.device)
+        if isinstance(num_samples, bool) or not isinstance(num_samples, int) or num_samples <= 0:
+            raise ValueError("num_samples must be a positive integer")
+        if (ray_origins.ndim != 3 or ray_origins.shape != ray_directions.shape
+                or ray_origins.shape[-1] != 3 or not ray_origins.shape[0] or not ray_origins.shape[1]):
+            raise ValueError("rays require matching nonempty [batch, rays, 3] tensors")
+        parameter = next(self.model.parameters())
+        if (ray_origins.dtype != parameter.dtype or ray_directions.dtype != parameter.dtype
+                or ray_origins.device != parameter.device or ray_directions.device != parameter.device
+                or not torch.isfinite(ray_origins).all() or not torch.isfinite(ray_directions).all()):
+            raise ValueError("rays must be finite and match model dtype/device")
+        ray_lengths = torch.linalg.vector_norm(ray_directions, dim=-1, keepdim=True)
+        if not torch.isfinite(ray_lengths).all() or (ray_lengths == 0).any():
+            raise ValueError("ray directions require finite nonzero lengths")
+
+        # Sample the ray parameter, preserving the input floating precision.
+        scalar_dtype = torch.float32 if parameter.dtype in (torch.float16, torch.bfloat16) else parameter.dtype
+        t_values = torch.linspace(self.near, self.far, num_samples,
+                                  device=parameter.device, dtype=scalar_dtype)
         t_values = t_values.unsqueeze(0).unsqueeze(0).expand(
             ray_origins.shape[0], ray_origins.shape[1], -1
         )
@@ -149,28 +176,32 @@ class NeRFRenderer:
         dirs = dirs.unsqueeze(-2).expand(-1, -1, num_samples, -1)
         
         # Reshape for network
-        points_flat = points.reshape(-1, 3)
-        dirs_flat = dirs.reshape(-1, 3)
+        points_flat = points.reshape(-1, 3).to(parameter.dtype)
+        dirs_flat = dirs.reshape(-1, 3).to(parameter.dtype)
+        if not torch.isfinite(points_flat).all():
+            raise ValueError("sampled ray points must be representable finitely")
         
         # Query network
-        with torch.no_grad():
-            densities, colors = self.model(points_flat, dirs_flat)
+        densities, colors = self.model(points_flat, dirs_flat)
         
         # Reshape back
         densities = densities.reshape(ray_origins.shape[0], ray_origins.shape[1], num_samples, 1)
         colors = colors.reshape(ray_origins.shape[0], ray_origins.shape[1], num_samples, 3)
         
-        # Volume rendering
+        # Scalar sample axes [B, R, S]; color alone has a trailing RGB axis.
         delta = t_values[..., 1:] - t_values[..., :-1]
-        delta = torch.cat([delta, torch.full_like(delta[..., -1:], 1e10)], dim=-1)
-        
-        alpha = 1 - torch.exp(-densities * delta)
-        weights = alpha * torch.cumprod(1 - alpha + 1e-10, dim=-2)
-        
-        # Compute RGB
-        rgb = (weights * colors).sum(dim=-2)
-        depth = (weights * t_values).sum(dim=-2)
-        
+        delta = torch.cat([delta, torch.full_like(t_values[..., :1], 1e10)], dim=-1)
+        delta = delta * ray_lengths
+        sigma = densities.squeeze(-1).to(scalar_dtype).clamp_min(0)
+        optical_depth = sigma * delta
+        alpha = -torch.expm1(-optical_depth)
+        # Exclusive transmittance: an opaque front sample receives full weight.
+        previous_depth = torch.cat([torch.zeros_like(optical_depth[..., :1]),
+                                    optical_depth[..., :-1].cumsum(dim=-1)], dim=-1)
+        weights = alpha * torch.exp(-previous_depth)
+        rgb = (weights.unsqueeze(-1) * colors).sum(dim=-2)
+        depth = (weights * t_values).sum(dim=-1)
+
         return {
             'rgb': rgb,
             'depth': depth,
@@ -181,26 +212,11 @@ class NeRFRenderer:
     def render_image(
         self,
         camera_rays: Dict,
-        image_size: Tuple[int, int] = (256, 256)
+        image_size: Tuple[int, int] = (256, 256),
+        *, include_samples: bool = True,
     ) -> Dict:
-        """Render full image"""
-        ray_origins = camera_rays['origins']
-        ray_directions = camera_rays['directions']
-        
-        # Render all rays
-        result = self.render_rays(ray_origins, ray_directions)
-        
-        # Reshape to image
-        h, w = image_size
-        rgb = result['rgb'].reshape(h, w, 3)
-        depth = result['depth'].reshape(h, w)
-        
-        return {
-            'rgb': rgb,
-            'depth': depth,
-            'weights': result['weights'].reshape(h, w, -1),
-            'alpha': result['alpha'].reshape(h, w, -1)
-        }
+        """Render one admitted image; retain legacy sample outputs by default."""
+        return render_image(self, camera_rays, image_size, include_samples=include_samples)
     
     def render_video(
         self,
@@ -208,6 +224,9 @@ class NeRFRenderer:
         image_size: Tuple[int, int] = (256, 256)
     ) -> List[Dict]:
         """Render video from camera poses"""
+        if not camera_poses:
+            return []
+        scene_policy(len(camera_poses), image_size, self.num_samples)
         frames = []
         for pose in camera_poses:
             frame = self.render_image(pose, image_size)
@@ -226,31 +245,40 @@ class NeRFTrainer:
         self.model = model.to(device)
         self.device = device
         self.optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        self._operation_lock = RLock()
         
         logger.info(f"✅ NeRF Trainer initialized on {device}")
     
+    @operation_owned
     def train_step(
         self,
         points: torch.Tensor,
         directions: torch.Tensor,
         target_rgb: torch.Tensor
     ) -> float:
-        """Single training step"""
-        self.model.train()
-        self.optimizer.zero_grad()
-        
-        # Forward pass
-        densities, colors = self.model(points, directions)
-        
-        # Compute loss
-        loss = F.mse_loss(colors, target_rgb)
-        
-        # Backward pass
-        loss.backward()
-        self.optimizer.step()
-        
-        return loss.item()
-    
+        """One checked native pointwise RGB/Adam update (not ray learning)."""
+        if not torch.is_grad_enabled():
+            raise ValueError("pointwise fitting requires native autograd")
+        points, directions, target_rgb = own_points(points, directions, target_rgb, self.model)
+        if type(self.optimizer) is not torch.optim.Adam:
+            raise ValueError("pointwise transition requires native Adam")
+        with optimizer_transition(self.model, self.optimizer):
+            self.model.train()
+            self.optimizer.zero_grad()
+            densities, colors = self.model(points, directions)
+            if not torch.isfinite(densities).all() or not torch.isfinite(colors).all():
+                raise ValueError("native pointwise field outputs must be finite")
+            loss = F.mse_loss(colors, target_rgb)
+            if not torch.isfinite(loss):
+                raise ValueError("native pointwise objective must be finite")
+            loss.backward()
+            if any(p.grad is not None and not torch.isfinite(p.grad).all() for p in self.model.parameters()):
+                raise ValueError("native pointwise derivatives must be finite")
+            self.optimizer.step()
+            result = loss.item()
+        return result
+
+    @operation_owned
     def train(
         self,
         train_data: Dict,
@@ -260,9 +288,13 @@ class NeRFTrainer:
         """Train NeRF model"""
         losses = []
         
-        points = train_data['points']
-        directions = train_data['directions']
-        rgb = train_data['rgb']
+        if not isinstance(train_data, dict) or not {'points', 'directions', 'rgb'} <= train_data.keys():
+            raise ValueError("pointwise collection requires points, directions and rgb")
+        if not torch.is_grad_enabled():
+            raise ValueError("pointwise fitting requires native autograd")
+        points, directions, rgb = own_points(train_data['points'], train_data['directions'],
+                                            train_data['rgb'], self.model, epochs, batch_size)
+        admit_adam(self.model, self.optimizer)
         
         for epoch in range(epochs):
             total_loss = 0
@@ -288,8 +320,10 @@ class NeRFTrainer:
             if (epoch + 1) % 10 == 0:
                 logger.info(f"Epoch {epoch + 1}/{epochs} - Loss: {avg_loss:.4f}")
         
-        return {'losses': losses, 'final_loss': losses[-1]}
+        return {'losses': losses, 'final_loss': losses[-1], 'objective': 'pointwise_rgb',
+                'density_gradient_path': False}
     
+    @operation_owned
     def save(self, path: str = "models/nerf.pth"):
         """Save model"""
         torch.save({
@@ -298,9 +332,16 @@ class NeRFTrainer:
         }, path)
         logger.info(f"✅ Model saved to {path}")
     
+    @operation_owned
     def load(self, path: str = "models/nerf.pth"):
         """Load model"""
         checkpoint = torch.load(path, map_location=self.device)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         logger.info(f"✅ Model loaded from {path}")
+
+    @operation_owned
+    def train_rays(self, ray_data: Dict, epochs: int = 100, batch_size: int = 256,
+                   num_samples: int = 64, near: float = 0.1, far: float = 10.0) -> Dict:
+        """Fit explicit pixel/ray observations through density-sensitive rendering."""
+        return fit_rays(self, ray_data, epochs, batch_size, num_samples, near, far, NeRFRenderer)

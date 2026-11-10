@@ -1,7 +1,60 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import crypto from 'crypto'
 import { TrackingTokenService } from '../../src/services/trackingTokenService.js'
+// backend/api/test/unit/trackingTokenService.test.js
 
+import { describe, it, expect } from 'vitest';
+import { TrackingTokenService } from '../../src/services/trackingTokenService.js';
+
+describe('TrackingTokenService', () => {
+  const tokenService = new TrackingTokenService();
+
+  describe('getExpiryDate', () => {
+    it('should return a date approximately 7 days in the future', () => {
+      const now = new Date();
+      const expiry = tokenService.getExpiryDate();
+      
+      expect(expiry).toBeInstanceOf(Date);
+      
+      const diffTime = expiry.getTime() - now.getTime();
+      const diffDays = diffTime / (1000 * 60 * 60 * 24);
+      
+      // Verify expiry is set to 7 days (+/- 1 minute tolerance for test execution time)
+      expect(diffDays).toBeCloseTo(7, 1);
+    });
+  });
+
+  describe('hashToken', () => {
+    it('should produce a deterministic SHA-256 hex string for a given raw token', () => {
+      const rawToken = 'test-raw-tracking-token-xyz';
+      const hash1 = tokenService.hashToken(rawToken);
+      const hash2 = tokenService.hashToken(rawToken);
+
+      expect(typeof hash1).toBe('string');
+      // SHA-256 hex string length is 64 characters
+      expect(hash1).toHaveLength(64);
+      expect(hash1).toBe(hash2);
+    });
+
+    it('should produce different hashes for different raw tokens', () => {
+      const hashA = tokenService.hashToken('token-alpha');
+      const hashB = tokenService.hashToken('token-beta');
+
+      expect(hashA).not.toBe(hashB);
+    });
+  });
+
+  describe('generateRawToken', () => {
+    it('should produce a non-empty base64url string', () => {
+      const rawToken = tokenService.generateRawToken();
+
+      expect(typeof rawToken).toBe('string');
+      expect(rawToken.length).toBeGreaterThan(10);
+      // Ensure base64url format characters only (no padding '=' or unsafe chars like '+' '/')
+      expect(rawToken).not.toMatch(/[+=/\s]/);
+    });
+  });
+});
 function createMockSupabase(store = {}) {
   const calls = []
   return {
@@ -72,7 +125,7 @@ function createMockSupabase(store = {}) {
                 }
                 const deleted = initialLen - remaining.length
                 store[this._table] = remaining
-                return resolve({ data: Array(deleted).fill({ id: 'deleted' }), error: null })
+                return resolve({ data: Array.from({ length: deleted }, () => ({ id: 'deleted' })), error: null })
               }
 
               // select

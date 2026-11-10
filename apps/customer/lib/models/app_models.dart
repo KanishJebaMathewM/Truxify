@@ -127,6 +127,7 @@ class TruckResultData {
     this.driverId,
     this.truckId,
     this.isAiEstimate = false,
+    this.profitBreakdown,
   });
 
   factory TruckResultData.fromJson(Map<String, dynamic> json) {
@@ -138,7 +139,7 @@ class TruckResultData {
     final etaMinutes = json['etaMinutes'];
     final etaStr = etaMinutes != null
         ? (etaMinutes < 60
-            ? '${etaMinutes} mins'
+            ? '$etaMinutes mins'
             : '${(etaMinutes / 60).toStringAsFixed(1)} hrs')
         : '—';
 
@@ -169,6 +170,10 @@ class TruckResultData {
   final String? driverId;
   final String? truckId;
   final bool isAiEstimate;
+
+  /// Optional estimated net profit breakdown. `null` means not yet fetched
+  /// or unavailable (e.g. distance data missing for this load offer).
+  final NetProfitBreakdown? profitBreakdown;
 }
 
 class ActiveOrderData {
@@ -281,6 +286,60 @@ class ProfileMenuData {
   final String title;
   final String? subtitle;
   final bool isDanger;
+}
+
+/// Estimated net profit breakdown for a load offer.
+///
+/// All monetary fields are in ₹. [isEstimate] is always `true` and must be
+/// displayed to the driver so they understand these are not guaranteed values.
+class NetProfitBreakdown {
+  const NetProfitBreakdown({
+    required this.freightAmount,
+    required this.estimatedFuelCost,
+    required this.estimatedTollCost,
+    required this.otherCosts,
+    required this.estimatedNetProfit,
+    required this.profitPerKm,
+    required this.distanceKm,
+    this.isEstimate = true,
+  });
+
+  factory NetProfitBreakdown.fromJson(Map<String, dynamic> json) {
+    return NetProfitBreakdown(
+      freightAmount:      (json['freightAmount'] as num?)?.toDouble() ?? 0.0,
+      estimatedFuelCost:  (json['estimatedFuelCost'] as num?)?.toDouble() ?? 0.0,
+      estimatedTollCost:  (json['estimatedTollCost'] as num?)?.toDouble() ?? 0.0,
+      otherCosts:         (json['otherCosts'] as num?)?.toDouble() ?? 0.0,
+      estimatedNetProfit: (json['estimatedNetProfit'] as num?)?.toDouble() ?? 0.0,
+      profitPerKm:        (json['profitPerKm'] as num?)?.toDouble() ?? 0.0,
+      distanceKm:         (json['distanceKm'] as num?)?.toDouble() ?? 0.0,
+      isEstimate:         json['isEstimate'] as bool? ?? true,
+    );
+  }
+
+  /// Total freight amount in ₹.
+  final double freightAmount;
+
+  /// Estimated diesel/fuel cost in ₹.
+  final double estimatedFuelCost;
+
+  /// Estimated toll cost in ₹.
+  final double estimatedTollCost;
+
+  /// Other estimated trip expenses (allowances, loading help, etc.) in ₹.
+  final double otherCosts;
+
+  /// Estimated net profit (freight − all costs) in ₹.
+  final double estimatedNetProfit;
+
+  /// Estimated profit per kilometre in ₹/km.
+  final double profitPerKm;
+
+  /// Estimated trip distance in km.
+  final double distanceKm;
+
+  /// Always `true`. UI must display an "Estimated" label when rendering this.
+  final bool isEstimate;
 }
 
 class LiveTruckTabData {

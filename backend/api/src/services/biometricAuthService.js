@@ -22,6 +22,14 @@ const DEFAULT_THRESHOLD_PAISA = Number(process.env.BIOMETRIC_FREIGHT_THRESHOLD_P
 // Challenge time-to-live in milliseconds.
 const CHALLENGE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+// Maximum number of challenge sessions retained in memory. The store is
+// process-local, so this bounds memory use under repeated challenge creation.
+export const MAX_BIOMETRIC_CHALLENGE_SESSIONS = 1000;
+
+// How long verified challenges remain queryable for status checks after
+// verification. Pending challenges are pruned as soon as they expire.
+export const CHALLENGE_TERMINAL_RETENTION_MS = 5 * 60 * 1000; // 5 minutes
+
 // Number of OTP fallback digits.
 const FALLBACK_OTP_DIGITS = 6;
 
@@ -45,12 +53,46 @@ function generateNonce() {
 }
 
 function generateFallbackOtp() {
-    const digits = Math.floor(Math.random() * 10 ** FALLBACK_OTP_DIGITS);
+    const digits = crypto.randomInt(10 ** (FALLBACK_OTP_DIGITS - 1), 10 ** FALLBACK_OTP_DIGITS);
     return String(digits).padStart(FALLBACK_OTP_DIGITS, '0');
 }
 
 function isExpired(session) {
     return Date.now() > session.expiresAt;
+}
+
+function shouldPruneSession(session, now) {
+    if (session.status === 'verified') {
+        const verifiedAt = Date.parse(session.verifiedAt);
+        const retentionStart = Number.isFinite(verifiedAt) ? verifiedAt : session.expiresAt;
+        return now > retentionStart + CHALLENGE_TERMINAL_RETENTION_MS;
+    }
+
+    return now > session.expiresAt;
+}
+
+/**
+ * Remove expired pending sessions and verified sessions past their retention
+ * window. Returns the number of entries removed.
+ */
+export function pruneChallengeSessions(now = Date.now()) {
+    let pruned = 0;
+    for (const [challengeId, session] of challengeSessions) {
+        if (shouldPruneSession(session, now)) {
+            challengeSessions.delete(challengeId);
+            pruned += 1;
+        }
+    }
+    return pruned;
+}
+
+function challengeCapacityError() {
+    const error = new Error(
+        `Biometric challenge capacity reached (${MAX_BIOMETRIC_CHALLENGE_SESSIONS} sessions).`
+    );
+    error.statusCode = 429;
+    error.code = 'BIOMETRIC_CHALLENGE_CAPACITY';
+    return error;
 }
 
 /**
@@ -165,6 +207,12 @@ export function updateBiometricThreshold(userId, thresholdPaisa) {
  * signing), and the set of supported authentication methods.
  */
 export function createChallenge(userId, shipmentId, freightValuePaisa) {
+    pruneChallengeSessions();
+
+    if (challengeSessions.size >= MAX_BIOMETRIC_CHALLENGE_SESSIONS) {
+        throw challengeCapacityError();
+    }
+
     const challengeId = generateChallengeId();
     const nonce = generateNonce();
     const fallbackOtp = generateFallbackOtp();

@@ -77,8 +77,15 @@ class EarningsExportService {
     try {
       await file.writeAsString(csvContent);
     } catch (e) {
-      // If write fails, delete file if created and rethrow original error
-      await file.delete().catchError((_) {});
+      // If write fails, delete file if created and rethrow original error.
+      // (catchError((_) {}) returns null from the handler, but delete()
+      // completes with a File — a type error that would REPLACE the original
+      // exception. Use try/catch instead.)
+      try {
+        await file.delete();
+      } catch (deleteErr) {
+        debugPrint('EarningsExportService: could not delete partial export file: $deleteErr');
+      }
       rethrow;
     }
 
@@ -86,8 +93,13 @@ class EarningsExportService {
     try {
       await _shareXFiles([XFile(file.path)], text: 'Earnings Statement');
     } catch (e) {
-      // If share invocation throws prior to/during presentation, clean up immediately and rethrow
-      await file.delete().catchError((_) {});
+      // If share invocation throws prior to/during presentation, clean up
+      // immediately and rethrow (same catchError type-error fix as above).
+      try {
+        await file.delete();
+      } catch (deleteErr) {
+        debugPrint('EarningsExportService: could not delete export file after share failure: $deleteErr');
+      }
       rethrow;
     }
 

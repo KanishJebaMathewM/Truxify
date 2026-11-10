@@ -2,6 +2,8 @@ import { supabaseAdmin } from '../../config/db.js';
 import logger from '../../middleware/logger.js';
 import crypto from 'crypto';
 
+const DEAD_LETTER_BATCH_SIZE = 200;
+
 /**
  * Transactional Outbox Service
  *
@@ -82,21 +84,14 @@ export class OutboxService {
   }
 
   /**
-   * Atomically claim a batch of pending outbox events via the
-   * claim_outbox_events RPC (supabase/migrations/20260810000000_...). The RPC
-   * uses SELECT ... FOR UPDATE SKIP LOCKED and moves the claimed rows to
-   * 'publishing' with `attempts` incremented and a 1-minute visibility
-   * timeout, so concurrent relay replicas can never claim the same row and
-   * publish it twice (issue #14680).
-   *
-   * `workerId`/`leaseMs` are accepted for call-site compatibility but are not
-   * used: event_outbox tracks the lease via next_attempt_at, not owner columns.
+   * Claim due rows with a server-side lease. attempts is the generation token;
+   * completions must return the token from this exact claim.
    */
-  async claimBatch({ batchSize = 50 } = {}) {
-    const { data, error } = await supabaseAdmin.rpc('claim_outbox_events', {
+  async claimBatch({ batchSize = 50, leaseMs = 300000 } = {}) {
+    const { data, error } = await supabaseAdmin.rpc('claim_leased_outbox_events', {
       p_limit: batchSize,
+      p_lease_ms: leaseMs,
     });
-
     if (error) {
       logger.error('[OutboxService] Failed to claim outbox batch:', error.message);
       return [];
@@ -104,62 +99,46 @@ export class OutboxService {
     return data ?? [];
   }
 
-  /**
-   * Reset 'publishing' rows whose lease expired (crashed worker) back to
-   * 'pending' so any replica can reclaim them.
-   */
-  async markPublished(eventId) {
-    const { data, error } = await supabaseAdmin
-      .from('event_outbox')
-      .update({ status: 'published', published_at: new Date().toISOString() })
-      .eq('event_id', eventId);
-
+  async renewClaim(eventId, claimAttempt, leaseMs = 300000) {
+    if (!eventId || !Number.isSafeInteger(claimAttempt) || claimAttempt < 1) return false;
+    const { data, error } = await supabaseAdmin.rpc('renew_leased_outbox_event', {
+      p_event_id: eventId, p_claim_attempt: claimAttempt, p_lease_ms: leaseMs,
+    });
     if (error) {
-      logger.error('[OutboxService] Failed to mark event published:', error.message, { eventId });
+      logger.error('[OutboxService] Failed to renew outbox claim:', error.message, { eventId, claimAttempt });
+      return false;
     }
-    return Boolean(data && data.length > 0);
+    return data === true;
   }
 
-  /**
-   * Mark an event as failed and increment the attempt counter.
-   *
-   * `event_outbox` has no `failed` status (its check constraint only allows
-   * pending/publishing/published). A non-delivered event is returned to
-   * `pending` with `last_error` + `attempts` bumped so the relay reclaims it
-   * (next_attempt_at is already managed by the claim RPC).
-   */
-  async markFailed(eventId, workerId, errorMessage) {
-    if (!eventId || !workerId) {
-      logger.warn('[OutboxService] Skipping markFailed — missing eventId or workerId');
+  async settleClaim(eventId, claimAttempt, published, errorMessage, retryMs = 1000) {
+    if (!eventId || !Number.isSafeInteger(claimAttempt) || claimAttempt < 1) {
+      logger.warn('[OutboxService] Refusing completion without a valid claim generation');
       return false;
     }
-
-    const { data: current, error: fetchError } = await supabaseAdmin
-      .from('event_outbox')
-      .select('attempts')
-      .eq('event_id', eventId)
-      .single();
-
-    if (fetchError) {
-      logger.warn('[OutboxService] Failed to read attempts:', fetchError.message, { eventId });
-    }
-
-    const currentAttempts = Number.isFinite(current?.attempts) ? current.attempts : 0;
-
-    const { error } = await supabaseAdmin
-      .from('event_outbox')
-      .update({
-        status: 'pending',
-        last_error: String(errorMessage).slice(0, 1000),
-        attempts: currentAttempts + 1,
-        next_attempt_at: new Date().toISOString(),
-      })
-      .eq('event_id', eventId);
+    const { data, error } = await supabaseAdmin.rpc('settle_leased_outbox_event', {
+      p_event_id: eventId,
+      p_claim_attempt: claimAttempt,
+      p_published: published,
+      p_error: errorMessage == null ? null : String(errorMessage).slice(0, 1000),
+      p_retry_ms: retryMs,
+    });
     if (error) {
-      logger.error('[OutboxService] Failed to mark event failed:', error.message, { eventId });
+      logger.error('[OutboxService] Failed to settle outbox claim:', error.message, { eventId, claimAttempt });
       return false;
     }
-    return true;
+    return data === true;
+  }
+
+  async markPublished(eventId, claimAttempt) {
+    return this.settleClaim(eventId, claimAttempt, true, null);
+  }
+
+  async markFailed(eventId, workerId, errorMessage, claimAttempt) {
+    if (!workerId) return false;
+    // Attempts increment only at claim time; completion schedules the retry.
+    const retryMs = Math.min(300000, 1000 * 2 ** Math.min(18, Math.max(0, claimAttempt - 1)));
+    return this.settleClaim(eventId, claimAttempt, false, errorMessage, retryMs);
   }
 
   /**
@@ -173,7 +152,8 @@ export class OutboxService {
       .from('outbox_events')
       .select('*')
       .eq('status', 'failed')
-      .gte('retry_count', maxRetries);
+      .gte('retry_count', maxRetries)
+      .limit(DEAD_LETTER_BATCH_SIZE);
 
     if (fetchError) {
       logger.error('[OutboxService] Failed to fetch exhausted events:', fetchError.message);
@@ -223,6 +203,12 @@ export class OutboxService {
       count: exhausted.length,
       eventIds: ids,
     });
+
+    if (exhausted.length >= DEAD_LETTER_BATCH_SIZE) {
+      logger.warn(
+        `[OutboxService] Dead-letter batch limit (${DEAD_LETTER_BATCH_SIZE}) reached; remaining events will be processed next cycle.`,
+      );
+    }
   }
 
   /**
@@ -230,14 +216,15 @@ export class OutboxService {
    * Clears any stale claim metadata so the row can be re-claimed.
    * If a delay is specified, awaits a Promise-based timeout before requeueing.
    */
-  async requeueFailedEvents(maxRetries = 5, delay = 0) {
-    if (delay > 0) {
-      await new Promise((resolve) => setTimeout(resolve, delay));
+  async requeueFailedEvents(maxRetries = 5, delayMs = 0) {
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
     const { error } = await supabaseAdmin
       .from('event_outbox')
       .update({ status: 'pending' })
       .eq('status', 'publishing')
+      .lte('next_attempt_at', new Date().toISOString())
       .lt('attempts', maxRetries);
 
     if (error) {

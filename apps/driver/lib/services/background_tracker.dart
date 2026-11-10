@@ -46,7 +46,9 @@ class BackgroundTrackerService {
     _receiveSubscription = null;
     _mainReceivePort?.close();
     _mainReceivePort = null;
-    _locationController?.close();
-    _locationController = null;
+    // Do NOT close _locationController: subscribers listen on the service's
+    // stream, not a per-cycle one — closing it here would orphan every
+    // listener on the next start (the recreated controller is a different
+    // stream). The ports/isolate above are what a cycle must release.
   }
 }

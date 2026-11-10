@@ -19,7 +19,8 @@ export class Eip712Signer {
    */
   constructor(options = {}) {
     this.verifyingContract = options.verifyingContract || process.env.FREIGHT_ESCROW_CONTRACT_ADDRESS || ethers.ZeroAddress;
-    this.chainId = options.chainId || parseInt(process.env.POLYGON_CHAIN_ID || '137', 10);
+    const configuredChainId = parseInt(process.env.POLYGON_CHAIN_ID, 10);
+    this.chainId = options.chainId || (Number.isFinite(configuredChainId) && configuredChainId > 0 ? configuredChainId : 137);
   }
 
   /**

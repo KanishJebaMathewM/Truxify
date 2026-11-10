@@ -47,7 +47,7 @@ describe('backend/api source tree parser integrity', () => {
     const files = collectJsFiles(ROOT_DIR).filter(f => f.startsWith(BACKEND_API_DIR));
     expect(files.length).toBeGreaterThan(100);
 
-    failed: {
+    {
       const failures = files
         .map(f => ({ rel: path.relative(BACKEND_API_DIR, f), error: parseCheck(f) }))
         .filter(({ error }) => error !== null);

@@ -10,12 +10,8 @@ import 'app.dart';
 import 'core/firebase_config.dart';
 import 'package:truxify_driver/config/env.dart';
 import 'providers/text_scale_provider.dart';
-import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'providers/language_provider.dart';
 import 'services/background_sync_service.dart';
-
-import 'package:provider/provider.dart';
-import 'providers/network_provider.dart';
 
 Future<void> main() async {
   // Ensure Flutter engine is initialized.
@@ -64,7 +60,7 @@ Future<void> main() async {
   try {
     await Supabase.initialize(
       url: Env.supabaseUrl,
-      anonKey: Env.supabaseAnonKey,
+      publishableKey: Env.supabaseAnonKey,
     );
   } catch (e) {
     debugPrint('Supabase initialization failed: $e');

@@ -75,20 +75,25 @@ describe('lookupRoutes', () => {
   describe('in-flight de-duplication', () => {
     it('coalesces concurrent requests for the same key into one fetch', async () => {
       let resolveFetch;
+      const selectMock = vi.fn().mockImplementation(
+        () => new Promise((resolve) => { resolveFetch = resolve; }),
+      );
       dbMock.supabase.from.mockReturnValue({
-        select: vi.fn().mockImplementation(
-          () => new Promise((resolve) => { resolveFetch = resolve; }),
-        ),
+        select: selectMock,
       });
 
       const app = await makeApp();
       const p1 = request(app).get('/lookup/vehicle-types');
       const p2 = request(app).get('/lookup/vehicle-types');
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      // Subscribing starts both requests; awaiting comes after the fetch.
+      const pending = Promise.all([p1, p2]);
+      // Wait until the first request actually reaches the fetch: a fixed
+      // sleep loses to socket I/O and leaves resolveFetch unset.
+      await vi.waitFor(() => expect(selectMock).toHaveBeenCalled());
 
       resolveFetch({ data: [{ id: 1, name: 'Truck' }], error: null });
 
-      const [r1, r2] = await Promise.all([p1, p2]);
+      const [r1, r2] = await pending;
       expect(r1.status).toBe(200);
       expect(r2.status).toBe(200);
       expect(dbMock.supabase.from).toHaveBeenCalledTimes(1);
@@ -96,18 +101,20 @@ describe('lookupRoutes', () => {
 
     it('removes the in-flight entry on rejection so retries can occur', async () => {
       let rejectFetch;
+      const selectMock = vi.fn().mockImplementation(
+        () => new Promise((_, reject) => { rejectFetch = reject; }),
+      );
       dbMock.supabase.from.mockReturnValue({
-        select: vi.fn().mockImplementation(
-          () => new Promise((_, reject) => { rejectFetch = reject; }),
-        ),
+        select: selectMock,
       });
 
       const app = await makeApp();
       const p1 = request(app).get('/lookup/vehicle-types');
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      const pending = p1.then((res) => res);
+      await vi.waitFor(() => expect(selectMock).toHaveBeenCalled());
 
       rejectFetch(new Error('db down'));
-      const r1 = await p1;
+      const r1 = await pending;
       expect(r1.status).toBe(500);
 
       dbMock.supabase.from.mockReturnValue({

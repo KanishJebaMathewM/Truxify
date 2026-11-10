@@ -48,7 +48,7 @@ describe('BatchCallBuilder', () => {
   })
 
   describe('buildPaymentStatusCall', () => {
-    it('encodes getBooking and decodes the booking status', () => {
+    it('encodes getBooking and decodes the full booking struct', () => {
       const call = builder.buildPaymentStatusCall(7)
       expect(call.target).toBe(process.env.ESCROW_CONTRACT_ADDRESS)
       expect(call.callData.startsWith(ESCROW_IFACE.encodeFunctionData('getBooking', [7]).slice(0, 10))).toBe(true)
@@ -62,7 +62,14 @@ describe('BatchCallBuilder', () => {
         BOOKING_RESULT.createdAt,
         BOOKING_RESULT.disputedAt,
       ])
-      expect(call.decodeFn(data)).toEqual({ status: 1n })
+      expect(call.decodeFn(data)).toEqual({
+        status: 1n,
+        paid: false,
+        started: true,
+        amount: '1000',
+        customer: '0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC',
+        driver: '0xDDdDddDdDdddDDddDDddDDDDdDdDDdDDdDDDDDDd',
+      })
     })
   })
 
@@ -85,11 +92,11 @@ describe('BatchCallBuilder', () => {
       expect(call.decodeFn(data)).toEqual({ score: '42' })
     })
 
-    it('falls back to the escrow address when no reputation contract is configured', () => {
+    it('refuses to target escrow when no reputation contract is configured', () => {
       process.env.REPUTATION_CONTRACT_ADDRESS = ''
       builder = new BatchCallBuilder({ provider: null })
-      const call = builder.buildReputationCall('0x' + 'b'.repeat(40))
-      expect(call.target).toBe(process.env.ESCROW_CONTRACT_ADDRESS)
+      expect(() => builder.buildReputationCall('0x' + 'b'.repeat(40)))
+        .toThrow('REPUTATION_CONTRACT_ADDRESS is not configured')
     })
   })
 

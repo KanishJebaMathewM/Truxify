@@ -14,7 +14,7 @@ function buildEvaluator() {
   return new PolicyEvaluator(registry);
 }
 
-describe.skip('PolicyEvaluator', () => {
+describe('PolicyEvaluator', () => {
   let evaluator;
 
   beforeEach(() => {
@@ -22,7 +22,9 @@ describe.skip('PolicyEvaluator', () => {
   });
 
   it('allows a role in the allow-list', () => {
-    const result = evaluator.evaluate({ id: 'u1', role: 'customer' }, 'order:read');
+    // The permission declares an ownership callback, so a resource must be
+    // supplied (fail-closed 'missing_resource' otherwise).
+    const result = evaluator.evaluate({ id: 'u1', role: 'customer' }, 'order:read', { customerId: 'u1' });
     expect(result.allowed).toBe(true);
     expect(result.permission.action).toBe('order:read');
   });
@@ -63,9 +65,12 @@ describe.skip('PolicyEvaluator', () => {
     expect(stranger.reason).toContain('ownership');
   });
 
-  it('skips the ownership check when no resource is supplied', () => {
+  it('fails closed when an ownership-checked action supplies no resource', () => {
+    // Deliberate: a permission with an ownership callback must not grant
+    // access without a resource to check against.
     const result = evaluator.evaluate({ id: 'u2', role: 'customer' }, 'order:read');
-    expect(result.allowed).toBe(true);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toBe('missing_resource');
   });
 
   it('authorize throws AuthorizationError on denial', () => {

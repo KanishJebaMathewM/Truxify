@@ -2,6 +2,7 @@
 
 Run with: python3 -m pytest tests/test_ab_testing_model.py -v --no-header
 """
+
 from services.ab_testing import ABTestModel
 
 
@@ -12,43 +13,15 @@ def make_model(threshold=0.95):
     return model
 
 
-def test_evaluation_uses_persisted_production_generation():
-    """A test must compare metrics against the generation it routed to."""
-    model = make_model()
-    model._test_states = {
-        "demand-test": {
-            "production_version": "gen_current",
-            "shadow_version": "gen_candidate",
-        }
-    }
-    model.get_production_version = lambda: "gen_current"
-
-    class Metric:
-        def __init__(self, version, name, value):
-            self.model_version = version
-            self.metric_name = name
-            self.metric_value = value
-
-    class Query:
-        def filter(self, *_args):
-            return self
-
-        def all(self):
-            return [
-                Metric("gen_current", "mae", 10.0),
-                Metric("gen_candidate", "mae", 5.0),
-            ]
-
-    class Session:
-        def query(self, *_args):
-            return Query()
-
-        def close(self):
-            pass
-
-    model.Session = lambda: Session()
-    result = model.evaluate_test("demand-test")
-
+def test_evaluation_uses_persisted_production_generation(tmp_path, monkeypatch):
+    """A native restart must compare the generations actually admitted."""
+    model = ABTestModel(f"sqlite:///{tmp_path / 'pair.db'}")
+    monkeypatch.setattr(model, "get_production_version", lambda: "gen_current")
+    model.log_metrics("demand-test", "gen_current", {"mae": 10.0}, "prod")
+    model.log_metrics("demand-test", "gen_candidate", {"mae": 5.0}, "shadow")
+    restarted = ABTestModel(f"sqlite:///{tmp_path / 'pair.db'}")
+    monkeypatch.setattr(restarted, "get_production_version", lambda: "unrelated")
+    result = restarted.evaluate_test("demand-test")
     assert result["results"]["mae"]["production"] == 10.0
     assert result["results"]["mae"]["shadow"] == 5.0
     assert result["shadow_better"] is True
@@ -112,8 +85,8 @@ class TestIsShadowBetter:
         model = make_model()
         results = {
             "accuracy": {"production": 0.9, "shadow": 0.95},  # shadow better
-            "loss": {"production": 0.5, "shadow": 0.6},       # shadow worse
-            "latency": {"production": 1.0, "shadow": 0.8},    # shadow better
+            "loss": {"production": 0.5, "shadow": 0.6},  # shadow worse
+            "latency": {"production": 1.0, "shadow": 0.8},  # shadow better
         }
         assert model.is_shadow_better(results) is True
 
@@ -123,6 +96,8 @@ class TestIsShadowBetter:
         results = {"accuracy": {"production": 1.0, "shadow": 0.99}}
         # shadow == prod * threshold → not strictly better
         assert model.is_shadow_better(results) is False
+
+
 class TestEvaluateTest:
     """Tests for production vs shadow metric evaluation."""
 
@@ -135,13 +110,17 @@ class TestEvaluateTest:
             test_id="test_1",
             model_version="production",
             metrics={"accuracy": 0.90},
-            request_id="request_1"
+            request_id="request_1",
         )
 
         result = model.evaluate_test("test_1")
 
         assert result["should_rollback"] is False
-        assert result["error"] == "Insufficient metrics for production vs shadow comparison"
+        assert (
+            result["error"]
+            == "Insufficient metrics for production vs shadow comparison"
+        )
+
     def test_trigger_rollback_does_not_promote_without_shadow_metrics(self, tmp_path):
         """Missing shadow metrics must not result in a promote action."""
         db_path = tmp_path / "ab_test.db"
@@ -151,13 +130,17 @@ class TestEvaluateTest:
             test_id="test_rollback",
             model_version="production",
             metrics={"accuracy": 0.90},
-            request_id="request_1"
+            request_id="request_1",
         )
 
         result = model.trigger_rollback("test_rollback")
 
         assert result["action"] == "none"
-        assert result["reason"] == "Insufficient metrics for production vs shadow comparison"
+        assert (
+            result["reason"]
+            == "Insufficient metrics for production vs shadow comparison"
+        )
+
     def test_uses_real_shadow_version(self, tmp_path):
         """Evaluation must use the actual logged shadow model version."""
         db_path = tmp_path / "ab_test.db"
@@ -167,14 +150,14 @@ class TestEvaluateTest:
             test_id="test_2",
             model_version="production",
             metrics={"accuracy": 0.90},
-            request_id="request_1"
+            request_id="request_1",
         )
 
         model.log_metrics(
             test_id="test_2",
             model_version="v2",
             metrics={"accuracy": 0.95},
-            request_id="request_2"
+            request_id="request_2",
         )
 
         result = model.evaluate_test("test_2")

@@ -16,18 +16,6 @@
  */
 
 import logger from '../middleware/logger.js';
-
-// Floor and ceiling for a single freight price in paisa (1 INR = 100 paisa).
-// Negative/NaN/Infinity clamp to the floor (0); the ceiling is ₹10,00,000.
-const MIN_FREIGHT_PAISa = 0;
-const MAX_FREIGHT_PAISa = 100_000_000;
-
-export function sanitizePrice(value) {
-  const num = Number(value);
-  if (!Number.isFinite(num) || num < 0) return MIN_FREIGHT_PAISa;
-  return Math.round(Math.min(MAX_FREIGHT_PAISa, num));
-}
-
 const EARTH_RADIUS_KM = 6371.0088;
 
 // Pricing constants (all amounts in paisa unless noted)
@@ -66,7 +54,7 @@ function parsePositiveFloat(raw, fallback, label) {
   return fallback;
 }
 
-function readRateCard() {
+export function readRateCard() {
   return {
     ratePerTonneKm: parsePositiveInt(process.env.TRUXIFY_RATE_PER_TONNE_KM, DEFAULTS.RATE_PER_TONNE_KM, 'TRUXIFY_RATE_PER_TONNE_KM'),
     fragileMultiplier: parsePositiveFloat(process.env.TRUXIFY_FRAGILE_MULTIPLIER, DEFAULTS.FRAGILE_MULTIPLIER, 'TRUXIFY_FRAGILE_MULTIPLIER'),

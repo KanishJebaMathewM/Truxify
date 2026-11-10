@@ -25,6 +25,18 @@ describe('tire alert reset OpenAPI contract', () => {
     );
   });
 
+  it('documents a truckId pattern that compiles and matches TRUCK_ID_REGEX', () => {
+    const param = spec.paths['/api/tire-analytics/reset/{truckId}'].post.parameters
+      .find((p) => p.name === 'truckId');
+    // A doubled backslash in the YAML yields `\\-:`, an out-of-order range.
+    const documented = new RegExp(param.schema.pattern);
+    expect(documented.source).toBe('^[a-zA-Z0-9_\\-:.]{1,64}$');
+    expect(documented.test('TRUCK-101')).toBe(true);
+    expect(documented.test('truck:a.b_c')).toBe(true);
+    expect(documented.test('TRUCK 101')).toBe(false);
+    expect(documented.test('a'.repeat(65))).toBe(false);
+  });
+
   it('documents authentication, authorization, and response outcomes', () => {
     const operation = spec.paths['/api/tire-analytics/reset/{truckId}'].post;
     expect(operation.security).toEqual([{ BearerAuth: [] }]);

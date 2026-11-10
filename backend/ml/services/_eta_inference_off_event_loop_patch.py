@@ -2,27 +2,19 @@ import asyncio
 import json
 from datetime import datetime, timedelta
 from functools import partial
-import threading
 
 import numpy as np
 
 from app.execution import run_inference
 from . import traffic_pipeline as _traffic_pipeline
+from ._eta_observations import observation_lock
 
 _BaseTrafficPipeline = _traffic_pipeline.TrafficPipeline
-_LOCK_INIT_GUARD = threading.Lock()
 
 
 def _get_predict_eta_lock(pipeline):
     """Return the thread lock used to serialize inference for one pipeline."""
-    lock = getattr(pipeline, "_eta_predict_lock", None)
-    if lock is None:
-        with _LOCK_INIT_GUARD:
-            lock = getattr(pipeline, "_eta_predict_lock", None)
-            if lock is None:
-                lock = threading.RLock()
-                pipeline._eta_predict_lock = lock
-    return lock
+    return observation_lock(pipeline)
 
 
 def _run_serialized_predict_eta(pipeline, features, route_id, route_signature):
@@ -61,9 +53,8 @@ async def update_eta_realtime(self, order_id, current_location, destination):
             if predicted_speed_mps is not None:
                 osrm_data = await self._fetch_osrm_data(current_location, destination)
                 route_distance_m = float(osrm_data.get("distance") or 0)
-                if route_distance_m > 0 and predicted_speed_mps > 0:
-                    eta_seconds = route_distance_m / predicted_speed_mps
-                else:
+                eta_seconds = _traffic_pipeline.eta_seconds_from_speed(route_distance_m, predicted_speed_mps)
+                if eta_seconds is None:
                     eta_seconds = float(osrm_data.get("duration") or 0)
 
                 eta_minutes = eta_seconds / 60

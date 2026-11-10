@@ -1,7 +1,46 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:truxify_driver/models/earnings_statement_model.dart';
 import 'package:truxify_driver/services/earnings_export_service.dart';
+
+
+/// Inflates every Flate-compressed `stream...endstream` block in a PDF and
+/// returns the concatenated decoded text (plus the raw bytes for uncompressed
+/// sections). dart_pdf compresses content streams, so literal text search on
+/// the raw bytes always fails.
+String _inflatePdfStreams(Uint8List bytes) {
+  final buffer = StringBuffer(String.fromCharCodes(bytes));
+  const streamMarker = [115, 116, 114, 101, 97, 109]; // 'stream'
+  const endMarker = [101, 110, 100, 115, 116, 114, 101, 97, 109]; // 'endstream'
+  int i = 0;
+  while (i < bytes.length - streamMarker.length) {
+    bool match = true;
+    for (int j = 0; j < streamMarker.length; j++) {
+      if (bytes[i + j] != streamMarker[j]) { match = false; break; }
+    }
+    if (!match) { i++; continue; }
+    int start = i + streamMarker.length;
+    if (bytes[start] == 13) start++;
+    if (bytes[start] == 10) start++;
+    int end = start;
+    outer:
+    while (end < bytes.length - endMarker.length) {
+      for (int j = 0; j < endMarker.length; j++) {
+        if (bytes[end + j] != endMarker[j]) { end++; continue outer; }
+      }
+      break;
+    }
+    try {
+      final decoded = ZLibCodec().decode(bytes.sublist(start, end));
+      buffer.write(String.fromCharCodes(decoded));
+    } catch (_) {
+      // Not a Flate stream (fonts, images) — ignore.
+    }
+    i = end + endMarker.length;
+  }
+  return buffer.toString();
+}
 
 void main() {
   group('EarningsStatementModel', () {
@@ -245,7 +284,10 @@ void main() {
 
       final pdfBytes = await service.generatePdf(statement);
 
-      final pdfText = String.fromCharCodes(pdfBytes);
+      // dart_pdf Flate-compresses content streams — the raw bytes never
+      // contain literal text. Inflate every stream block and search the
+      // decoded content.
+      final pdfText = _inflatePdfStreams(pdfBytes);
       expect(pdfText, contains('UniqueDriverName123'));
     });
 

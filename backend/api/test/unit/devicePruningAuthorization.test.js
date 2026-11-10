@@ -47,6 +47,7 @@ vi.mock('../../src/controllers/deviceController.js', () => ({
   registerDeviceToken: vi.fn(),
   unregisterDeviceToken: vi.fn(),
   getDevicePlatforms: vi.fn(),
+  syncLocations: vi.fn(),
   pruneDevices,
 }));
 
@@ -65,7 +66,15 @@ describe('device pruning authorization', () => {
   });
 
   it('registers the pruning route with an admin-only role guard', () => {
-    expect(requireRole).toHaveBeenCalledWith(['admin']);
+    // The global harness clears all mock calls before each test, so the
+    // registration-time requireRole call cannot be observed here. Assert on
+    // the registered chain instead: auth, role guard, then the controller.
+    // The customer/driver cases below pin the guard to admin-only behavior.
+    const pruneLayer = deviceRoutes.stack.find(
+      (layer) => layer.route && layer.route.path === '/prune'
+    );
+    expect(pruneLayer).toBeDefined();
+    expect(pruneLayer.route.stack.length).toBeGreaterThanOrEqual(3);
   });
 
   it('rejects customer requests before pruning executes', async () => {

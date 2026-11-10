@@ -13,7 +13,20 @@ import { OrderNotificationService } from '../services/order/orderNotificationSer
 import { BidAcceptanceService } from '../services/order/bidAcceptanceService.js';
 import { DeliveryVerificationService } from '../services/order/deliveryVerificationService.js';
 import { OrderLifecycleService } from '../services/order/orderLifecycleService.js';
+// backend/api/src/core/container.js (Excerpt)
+import {
+  buildDepositTx,
+  submitEscrowRefund, // Keep once
+  recordDepositTx,
+  confirmEscrowRefund,
+} from '../services/escrow.js';
 
+export {
+  buildDepositTx,
+  submitEscrowRefund, // Keep once
+  recordDepositTx,
+  confirmEscrowRefund,
+};
 import {
   buildDepositTx,
   submitEscrowRefund,
@@ -65,11 +78,19 @@ const orderMilestoneService = new OrderMilestoneService({
   trackingTokenService,
 });
 
+import { SagaCoordinator, DatabaseSagaPersister } from './saga/index.js';
+
+const sagaPersister = new DatabaseSagaPersister({
+  supabaseClient: supabaseAdmin ?? repoClient,
+  logger,
+});
+
 const orderLifecycleService = new OrderLifecycleService({
   orderRepository,
   orderTimelineService,
   bidAcceptanceService,
   trackingTokenService,
+  sagaPersister,
 });
 
 export {
@@ -91,6 +112,10 @@ export {
   trackingTokenService,
   deliveryVerificationService,
   orderLifecycleService,
+
+  SagaCoordinator,
+  DatabaseSagaPersister,
+  sagaPersister,
 
   buildDepositTx,
   recordDepositTx,

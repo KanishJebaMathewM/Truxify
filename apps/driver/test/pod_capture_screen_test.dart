@@ -40,6 +40,12 @@ class _FakeHttpOverrides extends HttpOverrides {
 }
 
 class _FakeHttpClient implements HttpClient {
+  // The shared HTTP factory sets this on the intercepted client — the fake
+  // needs a writable field or the assignment throws NoSuchMethodError.
+  @override
+  bool Function(X509Certificate cert, String host, int port)?
+      badCertificateCallback;
+
   @override
   Future<HttpClientRequest> openUrl(String method, Uri url) async =>
       _FakeHttpClientRequest();
@@ -133,8 +139,6 @@ class _FakeHttpClientResponse extends StreamView<List<int>>
   @override
   int get statusCode => 200;
   @override
-  String get reasonPhrase => 'OK';
-  @override
   int get contentLength => 2;
   @override
   HttpHeaders get headers => _FakeHttpHeaders();
@@ -142,6 +146,12 @@ class _FakeHttpClientResponse extends StreamView<List<int>>
   bool get isRedirect => false;
   @override
   bool get persistentConnection => false;
+  @override
+  List<RedirectInfo> get redirects => const [];
+
+  @override
+  String get reasonPhrase => 'OK';
+
   @override
   HttpClientResponseCompressionState get compressionState =>
       HttpClientResponseCompressionState.notCompressed;
@@ -172,7 +182,10 @@ void main() {
     messenger.setMockMethodCallHandler(
       const MethodChannel('plugins.flutter.io/path_provider'),
       (call) async {
-        if (call.method == 'getApplicationDocumentsPath') return tempDir.path;
+        // The app calls getApplicationDocumentsDirectory — the mock's original
+        // method name (getApplicationDocumentsPath) never matched, returning
+        // null and silently killing the save flow.
+        if (call.method == 'getApplicationDocumentsDirectory') return tempDir.path;
         return null;
       },
     );
@@ -201,9 +214,26 @@ void main() {
   testWidgets(
       'online PoD capture marks the inserted row synced and does not re-upload',
       (tester) async {
+    // Push the capture screen over a base route (production usage) — popping
+    // it returns to the base, which hosts the success snackbar.
     await tester.pumpWidget(
-      const MaterialApp(home: PodCaptureScreen(orderId: 'order-1')),
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: ElevatedButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const PodCaptureScreen(orderId: 'order-1'),
+                ),
+              ),
+              child: const Text('Open'),
+            ),
+          ),
+        ),
+      ),
     );
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
 
     // Draw a signature so the save flow is not short-circuited. Drag mostly
     // horizontally so the scroll view's vertical drag recognizer does not
@@ -214,13 +244,17 @@ void main() {
 
     await tester.runAsync(() async {
       await tester.tap(find.text('Save Proof of Delivery'));
-      // Do NOT pump here: pumping would rebuild the body to the progress
-      // spinner and dispose the Signature widget while toPngBytes() is still
-      // running. Let the real async work (signature render, file write,
-      // upload, markAsSynced) complete first.
+      // Pump once to resolve the tap gesture and start _savePod — without it
+      // the tap is stranded until after runAsync exits. Then let the real
+      // async work (signature render, file write, upload, markAsSynced)
+      // complete before pumping again.
+      await tester.pump();
       await Future<void>.delayed(const Duration(milliseconds: 1000));
     });
 
+    // The pop + snackbar entrance were queued during runAsync's frozen frame
+    // window — pump once so the entrance animation starts before settling.
+    await tester.pump();
     await tester.pumpAndSettle();
 
     // The success path is taken: the row is marked synced with the id returned

@@ -1,14 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.hoisted(() => {
-  process.env.WIM_SIGNING_SECRET = 'test-secret-123';
+  // At least 32 characters: shorter secrets are rejected by config/wim.js.
+  process.env.WIM_SIGNING_SECRET = 'test-secret-123-0123456789abcdef0123';
 });
 
 vi.mock('../../src/middleware/logger.js', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
 
-import { evaluateBypassEligibility, createSignedWimPacket } from '../../src/services/wimBypass.js';
+import { evaluateBypassEligibility, createSignedWimPacket, buildCredential } from '../../src/services/wimBypass.js';
+
+const credentialFor = (truckId) =>
+  buildCredential({
+    measurement: { id: 'm1', truckId, orderDisplayId: 'b1', driverId: 'd1', safetyScore: 90, weightLbs: 8000, capacityLbs: 10000 },
+    eligibility: true,
+  });
 
 describe('wimBypass service', () => {
   describe('evaluateBypassEligibility', () => {
@@ -39,18 +46,19 @@ describe('wimBypass service', () => {
 
   describe('createSignedWimPacket', () => {
     it('returns a packet with a timestamp and HMAC signature', () => {
-      const result = createSignedWimPacket({ truckId: 't1', safetyScore: 90, bolId: 'b1', axleWeight: 8000 });
+      const result = createSignedWimPacket(credentialFor('t1'));
       expect(result.packet.truckId).toBe('t1');
       expect(result.packet.timestamp).toBeTypeOf('number');
       expect(result.signature).toMatch(/^[a-f0-9]{64}$/);
     });
 
     it('is deterministic for the same payload within the same timestamp', () => {
-      const a = createSignedWimPacket({ truckId: 't1', safetyScore: 90 });
-      const b = createSignedWimPacket({ truckId: 't1', safetyScore: 90 });
-      // Timestamps differ, so signatures differ unless payload identical
-      expect(a.packet.timestamp).toBeTypeOf('number');
-      expect(b.signature).toMatch(/^[a-f0-9]{64}$/);
+      const credential = credentialFor('t1');
+      const a = createSignedWimPacket(credential);
+      const b = createSignedWimPacket(credential);
+
+      expect(a.packet).toEqual(b.packet);
+      expect(a.signature).toBe(b.signature);
     });
   });
 });

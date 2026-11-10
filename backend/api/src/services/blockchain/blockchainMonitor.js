@@ -358,7 +358,9 @@ class BlockchainMonitor {
           this.processedEventKeys.add(eventKey);
           return true;
         }
-      } catch (_) {}
+      } catch (err) {
+        logger.debug('[BlockchainMonitor] Failed to check whether event was already processed:', err.message);
+      }
     }
 
     return false;
@@ -715,7 +717,9 @@ class BlockchainMonitor {
     if (redisClient?.set) {
       try {
         await redisClient.set('truxify:blockchain:scan_checkpoint', JSON.stringify({ blockNumber, blockHash }));
-      } catch (_) {}
+      } catch (err) {
+        logger.debug('[BlockchainMonitor] Failed to persist checkpoint to Redis:', err.message);
+      }
     }
   }
 
@@ -757,7 +761,9 @@ class BlockchainMonitor {
             };
           }
         }
-      } catch (_) {}
+      } catch (err) {
+        logger.debug('[BlockchainMonitor] Failed to load checkpoint from Redis:', err.message);
+      }
     }
 
     return null;

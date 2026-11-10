@@ -20,6 +20,10 @@ const mockLogger = vi.hoisted(() => {
     child: childFn,
     default: {
       child: childFn,
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
     },
   };
 });

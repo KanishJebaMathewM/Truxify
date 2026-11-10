@@ -4,7 +4,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/notification_item.dart';
 import '../repositories/notification_repository.dart';
-import '../services/notification_router.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({
@@ -118,13 +117,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         ),
       );
     }
-  }
-
-  void _onTileTap(NotificationItem item) async {
-    // Mark as read if unread.
-    if (!item.isRead) await _markRead(item);
-    // Delegate navigation to the parent.
-    widget.onItemTap?.call(item);
   }
 
   int get _unreadCount => _items.where((item) => !item.isRead).length;

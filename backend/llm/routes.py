@@ -3,7 +3,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import json
-import logging
+import logging 
 import os
 import tempfile
 from datetime import datetime
@@ -117,10 +117,10 @@ async def fine_tune_model(
     file: UploadFile = File(...),
     user_id: str = Depends(require_rag_write)
 ):
-    """Fine-tune LLM with custom data"""
+    """Fine-tune LLM with custom data securely with per-request temp paths"""
     tmp_path = None
     try:
-        # Validate upload file
+        # Validate upload file size and type
         content = await validate_upload_file(file)
 
         # Write to a unique per-request path to avoid concurrent clobbering
@@ -140,11 +140,11 @@ async def fine_tune_model(
         logger.error(f"Fine-tuning failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        if tmp_path:
+        if tmp_path and os.path.exists(tmp_path):
             try:
                 os.remove(tmp_path)
-            except OSError:
-                logger.warning(f"Failed to remove temp file {tmp_path}")
+            except OSError as cleanup_err:
+                logger.warning(f"Failed to remove temp file {tmp_path}: {cleanup_err}")
 
 @router.get("/stats")
 async def get_model_stats(

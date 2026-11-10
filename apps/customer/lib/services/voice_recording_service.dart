@@ -1,5 +1,8 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'dart:typed_data';
 
+import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
 /// Platform-agnostic voice recording service.
@@ -21,6 +24,7 @@ class VoiceRecordingService {
     try {
       return await _recorder.hasPermission();
     } catch (e) {
+      debugPrint('[VoiceRecording] permission check failed: $e');
       return false;
     }
   }
@@ -48,12 +52,17 @@ class VoiceRecordingService {
         bitRate: 64000,
       );
 
-      await _recorder.start(config);
+      final dir = await getTemporaryDirectory();
+      final recordingPath =
+          '${dir.path}/voice_note_${DateTime.now().millisecondsSinceEpoch}.opus';
+
+      await _recorder.start(config, path: recordingPath);
 
       _isRecording = true;
 
       return true;
     } catch (e) {
+      debugPrint('[VoiceRecording] start failed: $e');
       return false;
     }
   }
@@ -75,12 +84,12 @@ class VoiceRecordingService {
         return null;
       }
 
-      // The record package handles the platform-specific
-      // audio storage/recording implementation.
-      final audioBytes = await _recorder.read(path);
+      // record v5 removed read(): read the file the recorder wrote.
+      final audioBytes = await File(path).readAsBytes();
 
       return audioBytes;
     } catch (e) {
+      debugPrint('[VoiceRecording] stop failed: $e');
       _isRecording = false;
       return null;
     }

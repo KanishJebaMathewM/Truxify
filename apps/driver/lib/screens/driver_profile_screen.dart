@@ -209,64 +209,6 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                       validator: (v) => v == null || v.trim().isEmpty ? 'Truck type is required' : null,
                     ),
                     const SizedBox(height: 12),
-                    TextFormField(
-                      controller: weightController,
-                      style: GoogleFonts.dmSans(
-                          fontSize: 14,
-                          color: Theme.of(context).colorScheme.onSurface),
-                      decoration: InputDecoration(
-                        labelText: 'Capacity (Tonnes)',
-                        hintText: 'e.g., 15.0',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Capacity is required';
-                        if (double.tryParse(v) == null) return 'Must be a valid number';
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: volumeController,
-                      style: GoogleFonts.dmSans(
-                          fontSize: 14,
-                          color: Theme.of(context).colorScheme.onSurface),
-                      decoration: InputDecoration(
-                        labelText: 'Volume (m³)',
-                        hintText: 'e.g., 45.0',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Volume is required';
-                        if (double.tryParse(v) == null) return 'Must be a valid number';
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: regController,
-                      style: GoogleFonts.dmSans(
-                          fontSize: 14,
-                          color: Theme.of(context).colorScheme.onSurface),
-                      decoration: InputDecoration(
-                        labelText: 'Registration Number',
-                        hintText: 'e.g., MH12PQ9999',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      textCapitalization: TextCapitalization.characters,
-                      validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Registration number is required';
-                        return null;
-                      },
-                    ),
                   ],
                 ),
               ),
@@ -503,7 +445,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                     Switch.adaptive(
                       value: _isOnline,
                       onChanged: _toggleOnlineStatus,
-                      activeColor: TruxifyColors.success,
+                      activeThumbColor: TruxifyColors.success,
                     ),
                   ],
                 ),
@@ -720,7 +662,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                       ),
                       value: scaleProvider.isLargeText,
                       onChanged: (val) => scaleProvider.toggleScale(val),
-                      activeColor: TruxifyColors.accent,
+                      activeThumbColor: TruxifyColors.accent,
                     );
                   },
                 ),

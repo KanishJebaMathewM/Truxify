@@ -9,9 +9,14 @@ vi.mock('../../src/config/db.js', () => ({
   createUserClient: vi.fn(() => ({
     from: vi.fn(() => ({
       select: vi.fn(() => ({
-        in: vi.fn(() => ({
-          limit: vi.fn(() => Promise.resolve({ data: [], error: null })),
-        })),
+        eq: vi.fn().mockReturnThis(),
+        in: vi.fn().mockReturnThis(),
+        gte: vi.fn().mockReturnThis(),
+        lte: vi.fn().mockReturnThis(),
+        order: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockResolvedValue({ data: [], error: null }),
+        // Make the query chainable as a Promise directly if needed
+        then: (resolve) => resolve({ data: [], error: null }),
       })),
     })),
   })),

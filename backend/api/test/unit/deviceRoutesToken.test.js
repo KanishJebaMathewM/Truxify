@@ -20,6 +20,7 @@ vi.mock('../../src/controllers/deviceController.js', () => ({
   unregisterDeviceToken: (req, res) => res.status(200).json({ success: true, message: 'unregistered' }),
   getDevicePlatforms: (req, res) => res.status(200).json({ success: true, data: [] }),
   pruneDevices: (req, res) => res.status(200).json({ success: true, pruned: 0 }),
+  syncLocations: (req, res) => res.status(200).json({ success: true, message: 'synced' }),
 }));
 
 vi.mock('../../src/middleware/logger.js', () => ({

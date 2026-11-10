@@ -1,13 +1,30 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
+// backend/api/test/integration/supportRoutes.test.js (Excerpt)
 
+import { describe, it, expect } from 'vitest';
+import request from 'supertest';
+import app from '../../src/app.js';
+
+describe('Support Routes Module Startup & UUID Validation', () => {
+  it('should load support routes successfully and validate ticket UUID parameters', async () => {
+    const res = await request(app)
+      .get('/api/support/tickets/invalid-uuid-format')
+      .set('Authorization', 'Bearer <valid_token>');
+
+    // Expect validation failure (400) rather than server startup crash (500 ReferenceError)
+    expect(res.statusCode).toEqual(400);
+  });
+});
 const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
 const m = createSupabaseMock();
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
   supabaseAdmin: undefined,
+  // supportRoutes migrated to the getAdminClient accessor — mock it too.
+  getAdminClient: () => m.supabase,
   createUserClient: () => m.supabase,
   firebaseAdmin: null,
   redisClient: null,
@@ -222,7 +239,9 @@ describe('Support Routes', () => {
     expect(res.status).toBe(200);
     expect(res.body.tickets).toHaveLength(1);
     expect(res.body.tickets[0].id).toBe('t2'); // t1 is page 1, t2 is page 2
-    expect(res.body.pagination).toEqual({
+    // Pagination gained hasNextPage/hasPreviousPage (deliberate, richer
+// pagination) — match the asserted fields, not the exact shape.
+expect(res.body.pagination).toMatchObject({
       page: 2,
       limit: 1,
       total: 2,
@@ -473,7 +492,9 @@ describe('Support Routes', () => {
       expect(res.body.tickets).toHaveLength(2);
       expect(res.body.tickets[0].id).toBe('t1'); // descending order
       expect(res.body.tickets[1].id).toBe('t2');
-      expect(res.body.pagination).toEqual({
+      // Pagination gained hasNextPage/hasPreviousPage (deliberate, richer
+// pagination) — match the asserted fields, not the exact shape.
+expect(res.body.pagination).toMatchObject({
         page: 1,
         limit: 2,
         total: 3,

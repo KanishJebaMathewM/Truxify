@@ -298,7 +298,8 @@ class VoiceAIService:
             audio_bytes = io.BytesIO()
             tts.write_to_fp(audio_bytes)
             return audio_bytes.getvalue()
-        except:
+        except Exception as e:
+            logger.error(f"Fallback TTS failed: {e}")
             return b''
     
     async def process_voice_command(self, audio_data: bytes, user_id: str) -> Dict:

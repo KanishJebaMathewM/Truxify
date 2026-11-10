@@ -4,13 +4,15 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 
-import '../core/config.dart';
-import '../l10n/app_localizations.dart';
 import '../theme/app_theme.dart';
 import '../services/trip_service.dart';
 
 class PastTripsScreen extends StatefulWidget {
-  const PastTripsScreen({super.key});
+  const PastTripsScreen({super.key, this.client});
+
+  /// Test seam — defaults to the global Supabase client (same pattern as
+  /// the customer app's screens and TripService's constructor injection).
+  final SupabaseClient? client;
 
   @override
   State<PastTripsScreen> createState() => _PastTripsScreenState();
@@ -21,6 +23,10 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
   final ScrollController _scrollController = ScrollController();
 
   List<Map<String, dynamic>> _trips = [];
+  /// Monotonic token: bumped by every refresh, captured by load-more. A
+  /// load-more that completes after a refresh started is stale and must be
+  /// discarded (refresh/load-more race — duplicates and stale pages).
+  int _tripsRequestToken = 0;
   bool _isLoadingTrips = true;
   bool _isLoadingMoreTrips = false;
   String? _tripsError;
@@ -58,6 +64,7 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
 
   Future<void> _loadTrips() async {
     if (!mounted) return;
+    _tripsRequestToken++;
     setState(() {
       _isLoadingTrips = true;
       _tripsError = null;
@@ -90,6 +97,7 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
   Future<void> _loadMoreTrips() async {
     if (_isLoadingMoreTrips || !_hasMoreTrips || _isLoadingTrips) return;
 
+    final requestToken = _tripsRequestToken;
     setState(() {
       _isLoadingMoreTrips = true;
     });
@@ -104,8 +112,23 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
           (result['trips'] as List?)?.cast<Map<String, dynamic>>() ?? [];
 
       if (!mounted) return;
+      if (requestToken != _tripsRequestToken) {
+        // A refresh started while this page was in flight — the result
+        // belongs to the old list; discard it.
+        setState(() {
+          _isLoadingMoreTrips = false;
+        });
+        return;
+      }
+      // Overlap guard: a racing/refetching page can re-include ids already
+      // shown — never append duplicates.
+      final existingIds =
+          _trips.map((t) => t['id']?.toString()).toSet();
+      final deduped = newTrips
+          .where((t) => !existingIds.contains(t['id']?.toString()))
+          .toList();
       setState(() {
-        _trips.addAll(newTrips);
+        _trips.addAll(deduped);
         _nextTripsCursor = result['nextCursor'] as String?;
         _hasMoreTrips = result['hasMore'] as bool? ?? false;
         _isLoadingMoreTrips = false;
@@ -133,7 +156,7 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
     });
 
     try {
-      final client = Supabase.instance.client;
+      final client = widget.client ?? Supabase.instance.client;
       final driverId = client.auth.currentUser?.id;
       if (driverId == null) {
         if (mounted) {
@@ -211,7 +234,7 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
 
   String _formatPaisa(dynamic amount) {
     if (amount == null) return '₹0';
-    final val = (Number.tryParse(amount.toString()) ?? 0.0) / 100.0;
+    final val = (num.tryParse(amount.toString()) ?? 0.0) / 100.0;
     return '₹${val.toStringAsFixed(0)}';
   }
 
@@ -238,14 +261,14 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
     final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: isDark ? TruxifyColors.backgroundDark : Colors.grey[50],
+      backgroundColor: isDark ? TruxifyColors.darkBackground : Colors.grey[50],
       appBar: AppBar(
         title: Text(
           'Past Trips & Reputation',
           style: GoogleFonts.dmSans(fontWeight: FontWeight.bold, fontSize: 18),
         ),
         elevation: 0,
-        backgroundColor: isDark ? TruxifyColors.backgroundDark : Colors.white,
+        backgroundColor: isDark ? TruxifyColors.darkBackground : Colors.white,
         foregroundColor: isDark ? Colors.white : Colors.black,
       ),
       body: RefreshIndicator(
@@ -326,7 +349,7 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
                         Container(
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
-                            color: TruxifyColors.accent.withOpacity(0.1),
+                            color: TruxifyColors.accent.withValues(alpha: 0.1),
                             shape: BoxShape.circle,
                           ),
                           child: const Icon(Icons.history_rounded, size: 48, color: TruxifyColors.accent),
@@ -394,7 +417,7 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: TruxifyColors.accent.withOpacity(isDark ? 0.1 : 0.2),
+            color: TruxifyColors.accent.withValues(alpha: isDark ? 0.1 : 0.2),
             blurRadius: 15,
             offset: const Offset(0, 6),
           ),
@@ -430,7 +453,7 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
                             _isLoadingReputation
                                 ? '...'
                                 : _onChainScore != null
-                                    ? '${(_onChainScore! / 100).toStringAsFixed(1)}'
+                                    ? (_onChainScore! / 100).toStringAsFixed(1)
                                     : '0.0',
                             style: GoogleFonts.dmSans(
                               fontSize: 48,
@@ -439,12 +462,15 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
                             ),
                           ),
                           const SizedBox(width: 4),
-                          Text(
-                            '/ 100',
-                            style: GoogleFonts.dmSans(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white60,
+                          Flexible(
+                            child: Text(
+                              '/ 100',
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.dmSans(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white60,
+                              ),
                             ),
                           ),
                         ],
@@ -454,7 +480,7 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
-                            color: color.withOpacity(0.2),
+                            color: color.withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(color: color, width: 1.5),
                           ),
@@ -580,7 +606,7 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
       decoration: BoxDecoration(
-        color: isDark ? TruxifyColors.cardBackgroundDark : Colors.white,
+        color: isDark ? TruxifyColors.darkCardBackground : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isDark ? TruxifyColors.darkBorder : Colors.grey[200]!,
@@ -701,7 +727,7 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
           if (isExpanded) ...[
             Container(
               decoration: BoxDecoration(
-                color: isDark ? Colors.white.withOpacity(0.02) : Colors.grey[50],
+                color: isDark ? Colors.white.withValues(alpha: 0.02) : Colors.grey[50],
                 borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
               ),
               padding: const EdgeInsets.all(16.0),
@@ -763,15 +789,15 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
                             icon: const Icon(Icons.copy_rounded, size: 16, color: Colors.grey),
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(),
-                            onPressed: () {
-                              Clipboard.setData(ClipboardData(text: txHash)).then((_) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Transaction hash copied to clipboard!'),
-                                    backgroundColor: TruxifyColors.success,
-                                  ),
-                                );
-                              });
+                            onPressed: () async {
+                              await Clipboard.setData(ClipboardData(text: txHash));
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Transaction hash copied to clipboard!'),
+                                  backgroundColor: TruxifyColors.success,
+                                ),
+                              );
                             },
                           ),
                         ],
@@ -802,7 +828,7 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
             style: GoogleFonts.dmSans(
               fontSize: 13,
               fontWeight: FontWeight.bold,
-              color: negative ? Colors.red : (isDark ? Colors.white87 : Colors.black87),
+              color: negative ? Colors.red : (isDark ? Colors.white70 : Colors.black87),
             ),
           ),
         ],

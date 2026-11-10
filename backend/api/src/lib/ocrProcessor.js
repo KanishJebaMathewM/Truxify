@@ -87,17 +87,24 @@ export function parseDocumentText(text, docType) {
     const datePattern = /(\d{2}[\/\-]\d{2}[\/\-]\d{4}|\d{4}[\/\-]\d{2}[\/\-]\d{2})/g;
     const dates = text.match(datePattern) || [];
 
+    // The DOB is a date too — without excluding it, it lands in dates[0] and
+    // gets misassigned as valid_from (and shifts valid_until onto the issue
+    // date, marking current documents expired). Extract it first and exclude.
+    const dobPatternEarly = /(?:DOB|DATE OF BIRTH|D\.O\.B)[:\s]*(\d{2}[\/\-]\d{2}[\/\-]\d{4})/i;
+    const dobEarly = text.match(dobPatternEarly);
+    const validityDates = dobEarly ? dates.filter((d) => d !== dobEarly[1]) : dates;
+
     // Number patterns (alphanumeric sequences)
     const numberPattern = /\b[A-Z0-9]{6,20}\b/g;
     const numbers = text.match(numberPattern) || [];
 
-    // Assign dates based on document type
+    // Assign dates based on document type (DOB excluded above)
     if (docType === 'DL' || docType === 'RC' || docType === 'INSURANCE') {
-        if (dates.length >= 2) {
-            extracted.valid_from = dates[0];
-            extracted.valid_until = dates[1];
-        } else if (dates.length === 1) {
-            extracted.valid_until = dates[0];
+        if (validityDates.length >= 2) {
+            extracted.valid_from = validityDates[0];
+            extracted.valid_until = validityDates[1];
+        } else if (validityDates.length === 1) {
+            extracted.valid_until = validityDates[0];
         }
     }
 
@@ -149,12 +156,20 @@ export function validateImageFile(file) {
         return { valid: false, error: `Invalid file type: ${file.mimetype}` };
     }
 
-    const maxSize = 10 * 1024 * 1024; // 10MB
-    if (file.size > maxSize) {
-        return { valid: false, error: `File too large (${Math.round(file.size / 1024 / 1024)}MB). Max 10MB.` };
+    // `file.size` comes from the multipart parser/client and can be omitted or
+    // inflated. Measure the bytes that will actually be sent to OCR so an
+    // undersized or oversized payload cannot slip through.
+    if (!Buffer.isBuffer(file.buffer)) {
+        return { valid: false, error: 'File content is missing or unreadable' };
     }
 
-    if (file.size < 1024) {
+    const size = file.buffer.length;
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (size > maxSize) {
+        return { valid: false, error: `File too large (${Math.round(size / 1024 / 1024)}MB). Max 10MB.` };
+    }
+
+    if (size < 1024) {
         return { valid: false, error: 'File too small, likely corrupted' };
     }
 

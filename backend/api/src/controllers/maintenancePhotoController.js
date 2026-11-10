@@ -91,7 +91,8 @@ export async function uploadMaintenancePhotos(req, res) {
     }
 
     // Validate, scan, and upload files in parallel
-    const uploadResults = await Promise.all(
+    // Wait for every started write before rollback can remove successful uploads.
+    const uploadSettlements = await Promise.allSettled(
       uploadedFiles.map(async (file, i) => {
         let verifiedMimeType;
         try {
@@ -152,6 +153,10 @@ export async function uploadMaintenancePhotos(req, res) {
         return storagePath;
       })
     );
+
+    const failedUpload = uploadSettlements.find(result => result.status === 'rejected');
+    if (failedUpload) throw failedUpload.reason;
+    const uploadResults = uploadSettlements.map(result => result.value);
 
     // Generate signed URLs for the uploaded files in parallel
     const photoUrls = await Promise.all(

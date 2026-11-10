@@ -33,12 +33,10 @@ export class StampedeLock {
 
     // 1. Single-flight within the same Node.js process: coalesce concurrent callers
     if (this.inFlight.has(key)) {
-      try {
-        const result = await this.inFlight.get(key);
-        return { value: result.value, isLeader: false, durationMs: result.durationMs };
-      } catch (err) {
-        // If the in-flight computation failed, fall through to attempt computation ourselves
-      }
+      // Joined callers observe the same outcome, including failure. A later
+      // explicit call may retry once the completed flight has been removed.
+      const result = await this.inFlight.get(key);
+      return { ...result, isLeader: false };
     }
 
     // 2. Create the in-flight deferred promise
@@ -79,7 +77,9 @@ export class StampedeLock {
     try {
       return await computePromise;
     } finally {
-      this.inFlight.delete(key);
+      if (this.inFlight.get(key) === computePromise) {
+        this.inFlight.delete(key);
+      }
     }
   }
 

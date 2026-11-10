@@ -1,12 +1,14 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
-import torch
-import numpy as np
-from datetime import datetime
 import logging
-from pinns.model import PhysicsInformedNN, PhysicsLoss, PINNTrainer
 import os
+from datetime import datetime
+from functools import wraps
+from typing import List, Literal
+
+import torch
+from fastapi import APIRouter, HTTPException
+from pinns.model import PhysicsInformedNN, PhysicsLoss, PINNTrainer
+from pinns.training_transition import PINNInputError, loop_policy
+from pydantic import BaseModel, Field, StrictInt
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pinns", tags=["Physics-Informed Neural Networks"])
@@ -21,17 +23,28 @@ model = PhysicsInformedNN(input_dim, hidden_dim, output_dim, num_layers)
 physics_loss = PhysicsLoss('diffusion')
 trainer = PINNTrainer(model, physics_loss)
 
+
+def serialized_native(function):
+    @wraps(function)
+    def operation(*args, **kwargs):
+        with trainer._operation_lock:
+            return function(*args, **kwargs)
+    return operation
+
+
 class TrainRequest(BaseModel):
-    epochs: int = 1000
-    batch_size: int = 32
-    data_points: int = 1000
-    phys_points: int = 5000
-    physics_type: str = 'diffusion'
+    epochs: StrictInt = Field(default=1, ge=1, le=1000)
+    batch_size: StrictInt = Field(default=32, ge=1, le=4096)
+    data_points: StrictInt = Field(default=32, ge=1, le=10000)
+    phys_points: StrictInt = Field(default=32, ge=1, le=10000)
+    physics_type: Literal['diffusion', 'advection', 'burger', 'poisson'] = 'diffusion'
 
 @router.post("/train")
-async def train_pinns(request: TrainRequest):
+@serialized_native
+def train_pinns(request: TrainRequest):
     """Train PINN model"""
     try:
+        loop_policy(trainer, request.data_points, request.phys_points, request.epochs, request.batch_size)
         # Generate synthetic data
         # Domain: x in [-1, 1]
         x_data = torch.rand(request.data_points, input_dim) * 2 - 1
@@ -40,15 +53,16 @@ async def train_pinns(request: TrainRequest):
         # Physics points
         x_phys = torch.rand(request.phys_points, input_dim) * 2 - 1
         
-        # Set physics type
-        physics_loss.physics_type = request.physics_type
-        
-        # Train
-        results = trainer.train(
-            x_data, y_data, x_phys,
-            epochs=request.epochs,
-            batch_size=request.batch_size
-        )
+        # Request-specific toy physics selection is owned by the native worker,
+        # including cancellation; restore the shared configuration on exit.
+        with trainer._operation_lock:
+            previous_kind = trainer.physics_loss.physics_type
+            try:
+                trainer.physics_loss.physics_type = request.physics_type
+                results = trainer.train(x_data, y_data, x_phys,
+                                        epochs=request.epochs, batch_size=request.batch_size)
+            finally:
+                trainer.physics_loss.physics_type = previous_kind
         
         return {
             'success': True,
@@ -61,6 +75,8 @@ async def train_pinns(request: TrainRequest):
             },
             'timestamp': datetime.now().isoformat()
         }
+    except PINNInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as e:
         logger.error(f"Training failed: {e}")
         logger.error(f"Internal error: {e}")
@@ -68,7 +84,8 @@ async def train_pinns(request: TrainRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/predict")
-async def predict_pinns(x: List[List[float]]):
+@serialized_native
+def predict_pinns(x: List[List[float]]):
     """Make predictions using PINN"""
     try:
         x_tensor = torch.tensor(x, dtype=torch.float32)
@@ -89,7 +106,8 @@ async def predict_pinns(x: List[List[float]]):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/model-info")
-async def get_model_info():
+@serialized_native
+def get_model_info():
     """Get model information"""
     try:
         return {
@@ -113,7 +131,8 @@ async def get_model_info():
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/save")
-async def save_model(path: str = "models/pinns_model.pth"):
+@serialized_native
+def save_model(path: str = "models/pinns_model.pth"):
     path = os.path.join("models", os.path.basename(path))
     """Save PINN model"""
     try:
@@ -130,7 +149,8 @@ async def save_model(path: str = "models/pinns_model.pth"):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/load")
-async def load_model(path: str = "models/pinns_model.pth"):
+@serialized_native
+def load_model(path: str = "models/pinns_model.pth"):
     path = os.path.join("models", os.path.basename(path))
     """Load PINN model"""
     try:

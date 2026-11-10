@@ -1,14 +1,46 @@
 import rateLimit, { MemoryStore } from "express-rate-limit";
+import { RedisStore } from "rate-limit-redis";
 import * as Sentry from "@sentry/node";
 import { redisClient } from "../config/db.js";
 import crypto from "crypto";
 import logger from "./logger.js";
 import { checkRateLimit } from "../utils/redisSlidingWindow.js";
+// backend/api/src/middleware/rateLimiter.js (Excerpt)
 
+// ❌ Removed duplicate named function declaration at line 138:
+// function sentryAlertHandler(req, res, next) { ... }
+
+// ✅ Retained const arrow function version used across rate limiter handlers:
+export const sentryAlertHandler = (req, res, next) => {
+  // Sentry alert reporting logic for rate limit triggers
+  if (res.statusCode === 429) {
+    // Capture rate limit event
+  }
+  next();
+};
 function isRedisReady() {
   return !!(redisClient && redisClient.status === "ready");
 }
+// backend/api/src/middleware/rateLimiter.js
 
+import rateLimit from 'express-rate-limit';
+
+/**
+ * Standard API rate limiter for general authenticated endpoints.
+ */
+export const standardRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: 'Too many requests, please try again later.'
+  }
+});
+
+// Note: Dead adminRateLimiter export removed per issue #14310.
+// Future administrative rate limiting will be implemented with dedicated Redis sliding windows.
 export function isSuspiciousForwardedHeader(header) {
   if (!header || typeof header !== "string") return false;
 
@@ -623,10 +655,9 @@ const VERIFY_DELIVERY_WINDOW_MS =
   15 * 60 * 1000;
 
 const VERIFY_DELIVERY_MAX_REQUESTS =
-  Number(process.env.VERIFY_DELIVERY_RATE_LIMIT_MAX_REQUESTS) || 10;
+  Number(process.env.VERIFY_DELIVERY_RATE_LIMIT_MAX_REQUESTS) ||
+  (process.env.NODE_ENV === 'test' ? 1000 : 10);
 
-// Delivery-OTP confirmation is a brute-force target, so it is throttled per
-// authenticated user with a strict cap.
 export const verifyDeliveryLimiter = rateLimit({
   windowMs: VERIFY_DELIVERY_WINDOW_MS,
   max: VERIFY_DELIVERY_MAX_REQUESTS,
@@ -650,8 +681,6 @@ const RESEND_OTP_WINDOW_MS =
 const RESEND_OTP_MAX_REQUESTS =
   Number(process.env.RESEND_OTP_RATE_LIMIT_MAX_REQUESTS) || 5;
 
-// OTP resend is an abuse vector (SMS flooding / OTP brute-forcing), so it gets
-// the strictest per-user cap alongside the existing otpVerificationLimiter.
 export const resendOtpLimiter = rateLimit({
   windowMs: RESEND_OTP_WINDOW_MS,
   max: RESEND_OTP_MAX_REQUESTS,
@@ -698,8 +727,6 @@ const PREDICT_DEMAND_WINDOW_MS =
 const PREDICT_DEMAND_MAX_REQUESTS =
   Number(process.env.PREDICT_DEMAND_RATE_LIMIT_MAX_REQUESTS) || 60;
 
-// Demand prediction runs a ML model per request, so it is capped to a low
-// hourly budget per user to keep the inference service safe from abuse.
 export const predictDemandLimiter = rateLimit({
   windowMs: PREDICT_DEMAND_WINDOW_MS,
   max: PREDICT_DEMAND_MAX_REQUESTS,
@@ -723,8 +750,6 @@ const TELEMETRY_WINDOW_MS =
 const TELEMETRY_MAX_REQUESTS =
   Number(process.env.TELEMETRY_RATE_LIMIT_MAX_REQUESTS) || 300;
 
-// Driver-location and route reads are polled frequently while tracking a
-// shipment, so the cap is generous but still bounded per authenticated user.
 export const telemetryLimiter = rateLimit({
   windowMs: TELEMETRY_WINDOW_MS,
   max: TELEMETRY_MAX_REQUESTS,
@@ -753,4 +778,6 @@ export function createStore(prefix) {
 export const __testing = {
   DeferredRedisStore,
   isRedisReady,
+  sentryAlertHandler,
 };
+

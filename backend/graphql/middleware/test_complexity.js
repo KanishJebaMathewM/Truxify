@@ -26,6 +26,11 @@ const deeplyNestedQuery = `
           preferences {
             notifications {
               emailEnabled
+              pushSettings {
+                quietHours {
+                  enabled
+                }
+              }
             }
           }
         }

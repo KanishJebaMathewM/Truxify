@@ -6,7 +6,6 @@ from transformers.model import (
     TransformerTrainer,
     DemandForecastTransformer
 )
-from routes.transformer_routes import TrainRequest
 from pydantic import ValidationError
 
 class TestTimeSeriesTransformer:
@@ -67,6 +66,8 @@ class TestTimeSeriesTransformer:
         )
 
     def test_pydantic_train_request_constraints(self):
+        from routes.transformer_routes import TrainRequest
+
         # Test valid request
         req = TrainRequest(
             epochs=10,

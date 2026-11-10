@@ -1,11 +1,13 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
-import numpy as np
-from datetime import datetime
 import logging
-from imitation.model import ImitationLearningModel
 import os
+from datetime import datetime
+from typing import Annotated, Dict, List
+
+import numpy as np
+from fastapi import APIRouter, HTTPException
+from imitation.advisory import AdvisoryAdmissionError
+from imitation.model import ImitationLearningModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/imitation", tags=["Imitation Learning"])
@@ -18,9 +20,9 @@ hidden_dim = 256
 model = ImitationLearningModel(state_dim, action_dim, hidden_dim)
 
 class TrainRequest(BaseModel):
-    epochs: int = 100
-    batch_size: int = 32
-    data_size: int = 1000
+    epochs: int = Field(default=100, ge=1, le=200)
+    batch_size: int = Field(default=32, ge=1, le=1024)
+    data_size: int = Field(default=1000, ge=1, le=10000)
 
 @router.post("/train/bc")
 async def train_behavioral_cloning(request: TrainRequest):
@@ -101,15 +103,10 @@ async def train_policy(request: TrainRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/predict")
-async def predict_action(state: List[float], safety_check: bool = True):
+async def predict_action(state: List[Annotated[float, Field(strict=True, allow_inf_nan=False)]],
+                         safety_check: bool = True):
     """Predict action from state"""
     try:
-        if len(state) != state_dim:
-            return {
-                'success': False,
-                'error': f'Expected {state_dim} dimensions, got {len(state)}'
-            }
-        
         state_np = np.array(state)
         result = model.predict_action(state_np, safety_check)
         
@@ -118,6 +115,8 @@ async def predict_action(state: List[float], safety_check: bool = True):
             'data': result,
             'timestamp': datetime.now().isoformat()
         }
+    except AdvisoryAdmissionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as e:
         logger.error(f"Prediction failed: {e}")
         logger.error(f"Internal error: {e}")
@@ -128,7 +127,7 @@ async def predict_action(state: List[float], safety_check: bool = True):
 async def get_safety_rules():
     """Get default safety rules"""
     try:
-        rules = model.safety.get_default_rules()
+        rules = model.safety.safety_rules
         return {
             'success': True,
             'data': rules,
@@ -150,6 +149,8 @@ async def add_safety_rule(rule: Dict):
             'message': 'Safety rule added',
             'timestamp': datetime.now().isoformat()
         }
+    except AdvisoryAdmissionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as e:
         logger.error(f"Add safety rule failed: {e}")
         logger.error(f"Internal error: {e}")

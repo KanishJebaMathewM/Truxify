@@ -123,6 +123,27 @@ export function calculatePlazaFee(plaza, vehicleClass = '2_AXLE_TRUCK') {
   };
 }
 
+// A route with hundreds of waypoints multiplies every segment by the full
+// plaza registry. This cap keeps a single estimate bounded while leaving room
+// for detailed long-haul routes.
+export const MAX_TOLL_WAYPOINTS = 200;
+
+function assertRoutePoint(point, field) {
+  if (!point || typeof point !== 'object' || Array.isArray(point)) {
+    throw new DomainError(400, { error: `${field} must be an object with numeric lat and lng values` });
+  }
+
+  const { lat, lng } = point;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    throw new DomainError(400, { error: `${field} must contain finite lat and lng values` });
+  }
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    throw new DomainError(400, { error: `${field} coordinates are outside the valid latitude/longitude range` });
+  }
+
+  return { lat, lng };
+}
+
 /**
  * Estimates toll costs by intercepting route points with the NHAI Toll Plaza Registry.
  * 
@@ -133,11 +154,41 @@ export function calculatePlazaFee(plaza, vehicleClass = '2_AXLE_TRUCK') {
  * @returns {Object} Toll estimate breakdown with crossed plazas and total INR amount
  */
 export function estimateRouteTolls(origin, destination, vehicleClass = '2_AXLE_TRUCK', waypoints = []) {
-  if (!origin?.lat || !origin?.lng || !destination?.lat || !destination?.lng) {
+  if (
+    !origin ||
+    !destination ||
+    origin.lat == null ||
+    origin.lng == null ||
+    destination.lat == null ||
+    destination.lng == null
+  ) {
     throw new DomainError(400, { error: 'Valid origin and destination coordinates are required' });
   }
 
-  const routePoints = [origin, ...(Array.isArray(waypoints) ? waypoints : []), destination];
+  const start = assertRoutePoint(origin, 'origin');
+  const end = assertRoutePoint(destination, 'destination');
+
+  if (waypoints !== undefined && waypoints !== null && !Array.isArray(waypoints)) {
+    throw new DomainError(400, { error: 'waypoints must be an array of { lat, lng } objects' });
+  }
+  const intermediateWaypoints = waypoints || [];
+  if (intermediateWaypoints.length > MAX_TOLL_WAYPOINTS) {
+    throw new DomainError(400, {
+      error: `waypoints must contain at most ${MAX_TOLL_WAYPOINTS} entries`,
+    });
+  }
+
+  const validatedWaypoints = intermediateWaypoints.map((point, index) =>
+    assertRoutePoint(point, `waypoints[${index}]`)
+  );
+
+  if (!Object.prototype.hasOwnProperty.call(VEHICLE_AXLE_CLASSES, vehicleClass)) {
+    throw new DomainError(400, {
+      error: `Unknown vehicleClass: ${vehicleClass}. Expected one of: ${Object.keys(VEHICLE_AXLE_CLASSES).join(', ')}`,
+    });
+  }
+
+  const routePoints = [start, ...validatedWaypoints, end];
   const detectedPlazas = new Map();
   const maxPlazaBufferKm = 12; // Maximum corridor buffer radius around highway centerline
 
@@ -176,14 +227,14 @@ export function estimateRouteTolls(origin, destination, vehicleClass = '2_AXLE_T
   const totalTollAmountInr = plazaList.reduce((sum, p) => sum + p.feeInr, 0);
 
   logger.info(
-    { origin, destination, vehicleClass, tollPlazasCount: plazaList.length, totalTollAmountInr },
+    { origin: start, destination: end, vehicleClass, tollPlazasCount: plazaList.length, totalTollAmountInr },
     '[tollService] Toll estimate computed'
   );
 
   return {
     success: true,
     vehicleClass,
-    vehicleClassDetails: VEHICLE_AXLE_CLASSES[vehicleClass] || VEHICLE_AXLE_CLASSES['2_AXLE_TRUCK'],
+    vehicleClassDetails: VEHICLE_AXLE_CLASSES[vehicleClass],
     totalPlazasCrossed: plazaList.length,
     totalTollEstimateInr: totalTollAmountInr,
     plazas: plazaList,

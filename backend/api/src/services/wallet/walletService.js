@@ -9,7 +9,7 @@ import logger from '../../middleware/logger.js';
 export async function validateWalletAddress(walletAddress) {
     if (!walletAddress || typeof walletAddress !== 'string') {
         // eslint-disable-next-line preserve-caught-error
-        throw new (400, { error: 'Wallet address is required and must be a valid string.' });
+        throw new DomainError(400, { error: 'Wallet address is required and must be a valid string.' });
     }
     if (!ethers.isAddress(walletAddress)) {
         throw new DomainError(400, { error: `Invalid Ethereum/Polygon wallet address format: "${walletAddress}".` });
@@ -19,7 +19,7 @@ export async function validateWalletAddress(walletAddress) {
 
 export async function getWalletDetails(walletAddress) {
     const validatedAddress = await validateWalletAddress(walletAddress);
-    logger.info(`[WalletService] Fetching details for wallet: ${validatedAddress}`);
+    logger.info(`[WalletService] Fetching details for wallet: ${walletAddress}`);
     
     // Core wallet lookup logic placeholder
     return {

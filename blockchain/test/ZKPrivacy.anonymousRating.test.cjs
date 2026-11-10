@@ -72,7 +72,7 @@ describe("ZKPrivacy submitAnonymousRating", function () {
 
     await zkPrivacy
       .connect(rater)
-      .submitAnonymousRating(driver.address, 5, tripId, proofWithInput(input));
+      .submitAnonymousRating(driver.address, 5, nullifier, proofWithInput(input));
 
     expect(await zkPrivacy.usedNullifiers(nullifier)).to.equal(true);
     expect(await zkPrivacy.getDriverAverageRating(driver.address)).to.equal(500n);
@@ -92,7 +92,7 @@ describe("ZKPrivacy submitAnonymousRating", function () {
       await verifier.setExpectedInput(input);
       await zkPrivacy
         .connect(who)
-        .submitAnonymousRating(driver.address, 4, tripId, proofWithInput(input));
+        .submitAnonymousRating(driver.address, 4, nullifier, proofWithInput(input));
     }
 
     expect(await zkPrivacy.getDriverAverageRating(driver.address)).to.equal(400n);
@@ -107,7 +107,7 @@ describe("ZKPrivacy submitAnonymousRating", function () {
     await expectRevert(
       zkPrivacy
         .connect(rater)
-        .submitAnonymousRating(driver.address, 5, tripId, proofWithInput(input)),
+        .submitAnonymousRating(driver.address, 5, nullifier, proofWithInput(input)),
       "Invalid ZK proof"
     );
 
@@ -128,7 +128,7 @@ describe("ZKPrivacy submitAnonymousRating", function () {
     await expectRevert(
       zkPrivacy
         .connect(rater)
-        .submitAnonymousRating(driver.address, 5, tripId, proofWithInput(mismatchedInput)),
+        .submitAnonymousRating(driver.address, 5, nullifier, proofWithInput(mismatchedInput)),
       "Nullifier mismatch in proof input"
     );
   });
@@ -142,7 +142,7 @@ describe("ZKPrivacy submitAnonymousRating", function () {
     await expectRevert(
       zkPrivacy
         .connect(rater)
-        .submitAnonymousRating(driver.address, 5, tripId, proofWithInput([])),
+        .submitAnonymousRating(driver.address, 5, nullifier, proofWithInput([])),
       "Invalid proof public inputs length"
     );
   });
@@ -155,12 +155,12 @@ describe("ZKPrivacy submitAnonymousRating", function () {
 
     await zkPrivacy
       .connect(rater)
-      .submitAnonymousRating(driver.address, 5, tripId, proofWithInput(input));
+      .submitAnonymousRating(driver.address, 5, nullifier, proofWithInput(input));
 
     await expectRevert(
       zkPrivacy
         .connect(rater)
-        .submitAnonymousRating(driver.address, 5, tripId, proofWithInput(input)),
+        .submitAnonymousRating(driver.address, 5, nullifier, proofWithInput(input)),
       "Nullifier already used for trip rating"
     );
   });
@@ -174,7 +174,7 @@ describe("ZKPrivacy submitAnonymousRating", function () {
     await expectRevert(
       zkPrivacy
         .connect(rater)
-        .submitAnonymousRating(driver.address, 0, tripId, proofWithInput(input)),
+        .submitAnonymousRating(driver.address, 0, nullifier, proofWithInput(input)),
       "Invalid rating stars (1-5)"
     );
   });

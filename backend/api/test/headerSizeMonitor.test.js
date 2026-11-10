@@ -91,7 +91,7 @@ describe('headerSizeMonitor', () => {
     expect(warnMock).not.toHaveBeenCalled();
   });
 
-  it('does not log warnings in production', async () => {
+  it('keeps logging oversized headers in production', async () => {
     process.env.NODE_ENV = 'production';
 
     const app = createApp({
@@ -100,6 +100,8 @@ describe('headerSizeMonitor', () => {
 
     await request(app).get('/test');
 
-    expect(warnMock).not.toHaveBeenCalled();
+    // Oversized headers are a production signal (proxy loops, token stuffing),
+    // so the warning must not be limited to development.
+    expect(warnMock).toHaveBeenCalledTimes(1);
   });
 });

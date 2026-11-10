@@ -121,7 +121,6 @@ class _LanguageScreenState extends State<LanguageScreen> {
               onPressed: () async {
                 final controller = TruxifyScope.of(context);
                 final selectedCode = _languages[_selectedLanguageIndex]['code'] ?? 'en';
-                await Provider.of<LanguageProvider>(context, listen: false).changeLocale(selectedCode);
                 await controller.setLocale(selectedCode);
                 if (!mounted) return;
                 _showLanguageChangedSnackBar();

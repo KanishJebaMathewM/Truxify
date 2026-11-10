@@ -31,8 +31,10 @@ class FuelAnalyticsService {
       final fuelLitresUsed = kmPerLitre > 0 ? (totalDistanceKm / kmPerLitre) : 0;
       final estimatedFuelCost = fuelLitresUsed * fuelPricePerLitre;
       
-      final profitMargin = totalPayout > 0 
-          ? ((totalPayout - estimatedFuelCost) / totalPayout) * 100 
+      // With no efficiency figure there is no fuel estimate, so the margin
+      // is UNKNOWN — report 0 rather than a misleading 100%.
+      final profitMargin = (totalPayout > 0 && kmPerLitre > 0)
+          ? ((totalPayout - estimatedFuelCost) / totalPayout) * 100
           : 0.0;
 
       // Provide sample points for a chart (last 5 trips)

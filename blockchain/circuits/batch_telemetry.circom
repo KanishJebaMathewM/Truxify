@@ -121,6 +121,8 @@ template BatchTelemetry(N) {
     component pingHashers[N];
     signal computedHashes[N];
     
+    // Verify each telemetry ping forms an individual hash
+    component hashers[N];
     for (var i = 0; i < N; i++) {
         pingHashers[i] = PingHash();
         pingHashers[i].deviceKey <== deviceKey;
@@ -134,6 +136,20 @@ template BatchTelemetry(N) {
         computedHashes[i] <== pingHashers[i].out;
     }
     
+    // Sequentially fold/accumulate the computed hashes into a state-transition chain
+    signal runningRoots[N + 1];
+    runningRoots[0] <== initialMerkleRoot;
+
+    component accumulators[N];
+    for (var i = 0; i < N; i++) {
+        accumulators[i] = PoseidonHash2();
+        accumulators[i].inputs[0] <== runningRoots[i];
+        accumulators[i].inputs[1] <== computedHashes[i];
+        runningRoots[i + 1] <== accumulators[i].out;
+    }
+    
+    // Ensure the final accumulated root strictly matches the public finalMerkleRoot
+    finalMerkleRoot === runningRoots[N];
     // ── Step 2: Validate monotonic sequence numbers ────────────────────────
     
     // endSequence must equal startSequence + N - 1

@@ -1,0 +1,9 @@
+# Legacy ETA serving-generation ownership
+
+The standalone sklearn ETAPredictor serializes train/load with one instance-local reentrant lifecycle owner. Training fits a private candidate, writes its existing pickle/checksum paths, and only then publishes it under a short state owner. Existing warm predictions capture one model reference and run outside both owners; failed fitting, persistence or reading retains that serving reference. A load fallback fits/persists privately and publishes only after its integrity check and actual pickle read succeed; verification/read failures leave warm serving state intact and cold state unset. Cold callers recheck under the lifecycle owner so one successful cold preparation satisfies waiting predictions.
+
+The synthetic fallback, seed stream, features, route conversion, minimum ETA and confidence formulas are unchanged. This is distinct from the traffic TensorFlow pipeline and does not implement A/B generation routing or move that endpoint off the event loop.
+
+Ownership is per instance/process. Direct external mutation of the public model attribute is not a supported coordinated writer. The existing two-file persistence protocol is retained: failure can leave partial on-disk state, which the existing cold integrity policy can retrain. This repair does not promise atomic file pairs, cross-process transactions, physical ETA calibration or deployment readiness. Existing checksum/pickle trust policy is unchanged.
+
+Native tests use real sklearn fitting/inference, private filesystem roundtrips and directory-write failures, controlled native-fit scheduling, warm generation retention, cold caller coalescing and a generation swap during feature normalization. Original response/synthetic tests remain. Linux checks both sklearn1.5.2 and declared1.9.0.

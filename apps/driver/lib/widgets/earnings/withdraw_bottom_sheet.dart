@@ -96,7 +96,7 @@ class _WithdrawBottomSheetState extends State<WithdrawBottomSheet> {
             : amountRupees.toStringAsFixed(2);
     _amountController.text = display;
     _amountController.selection = TextSelection.fromPosition(
-      TextSelection(offset: _amountController.text.length),
+      TextPosition(offset: _amountController.text.length),
     );
     setState(() => _serverError = null);
   }

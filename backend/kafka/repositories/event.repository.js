@@ -235,7 +235,7 @@ export async function insertEventsWithTransaction(client, events) {
     await client.query('COMMIT');
     return events.length;
   } catch (err) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
+    try { await client.query('ROLLBACK'); } catch (err) { logger.warn('Failed to roll back event transaction:', err); }
     throw err;
   }
 }

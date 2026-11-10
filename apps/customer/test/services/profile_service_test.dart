@@ -5,6 +5,7 @@ import 'package:truxify/core/api_client.dart';
 import 'package:truxify/services/profile_service.dart';
 import 'package:truxify/services/supabase_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:convert';
 
 class MockApiClient extends Mock implements ApiClient {}
@@ -13,6 +14,10 @@ class MockGoTrueClient extends Mock implements GoTrueClient {}
 class MockUser extends Mock implements User {}
 
 void main() {
+  // The service caches via flutter_secure_storage — needs the binding +
+  // channel mocks.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   late MockApiClient apiClient;
   late MockSupabaseClient supabaseClient;
   late MockGoTrueClient authClient;
@@ -25,6 +30,8 @@ void main() {
     authClient = MockGoTrueClient();
     user = MockUser();
 
+    SharedPreferences.setMockInitialValues({});
+    FlutterSecureStorage.setMockInitialValues({});
     SupabaseService.mockClient = supabaseClient;
 
     when(() => supabaseClient.auth).thenReturn(authClient);
@@ -51,15 +58,16 @@ void main() {
 
     verify(() => apiClient.get('/api/profile')).called(1);
 
-    final prefs = await SharedPreferences.getInstance();
-    final cached = prefs.getString('truxify_profile_cache');
+    // The cache moved from SharedPreferences to flutter_secure_storage.
+    const storage = FlutterSecureStorage();
+    final cached = await storage.read(key: 'truxify_profile_cache');
     expect(cached, isNotNull);
     expect(jsonDecode(cached!)['email'], equals('john@example.com'));
   });
 
   test('fetchProfile returns cached data on ApiException if available', () async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('truxify_profile_cache', jsonEncode({'id': 'user_123', 'email': 'cached@example.com'}));
+    const storage = FlutterSecureStorage();
+    await storage.write(key: 'truxify_profile_cache', value: jsonEncode({'id': 'user_123', 'email': 'cached@example.com'}));
 
     when(() => apiClient.get('/api/profile'))
         .thenThrow(const ApiException(400, 'Bad Request'));
@@ -79,21 +87,23 @@ void main() {
   });
 
   test('fetchProfile clears corrupted cached data on ApiException', () async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('truxify_profile_cache', 'not-json');
+    const storage = FlutterSecureStorage();
+    await storage.write(key: 'truxify_profile_cache', value: 'not-json');
 
     when(() => apiClient.get('/api/profile'))
         .thenThrow(const ApiException(503, 'Service Unavailable'));
 
-    expect(
-      () => profileService.fetchProfile(),
+    // The cache clear happens inside the async rejection — the closure form
+    // of expect() would not await it before the read below races ahead.
+    await expectLater(
+      profileService.fetchProfile(),
       throwsA(isA<StateError>().having(
         (e) => e.message,
         'message',
         'Service Unavailable',
       )),
     );
-    expect(prefs.getString('truxify_profile_cache'), isNull);
+    expect(await storage.read(key: 'truxify_profile_cache'), isNull);
   });
 
   group('fetchCustomerStats', () {

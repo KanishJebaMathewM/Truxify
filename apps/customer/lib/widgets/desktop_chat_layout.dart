@@ -300,7 +300,7 @@ class _DesktopChatLayoutState extends State<DesktopChatLayout> {
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: selected
-                        ? Colors.blue.withOpacity(0.08)
+                        ? Colors.blue.withValues(alpha: 0.08)
                         : Colors.transparent,
                     border: selected
                         ? Border(
@@ -490,7 +490,7 @@ class _DesktopChatLayoutState extends State<DesktopChatLayout> {
         return Container(
           width: double.infinity,
           color: isDragging
-              ? Colors.blue.withOpacity(0.05)
+              ? Colors.blue.withValues(alpha: 0.05)
               : Colors.grey.shade50,
           child: Stack(
             children: [
@@ -507,7 +507,7 @@ class _DesktopChatLayoutState extends State<DesktopChatLayout> {
               if (isDragging)
                 Positioned.fill(
                   child: Container(
-                    color: Colors.blue.withOpacity(0.08),
+                    color: Colors.blue.withValues(alpha: 0.08),
                     child: Center(
                       child: Container(
                         padding: const EdgeInsets.symmetric(

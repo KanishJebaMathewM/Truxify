@@ -1,7 +1,6 @@
 from pydantic import BaseModel, Field, model_validator
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 import torch
-import numpy as np
 from datetime import datetime
 import logging
 import asyncio
@@ -13,6 +12,7 @@ from transformers.model import (
     TransformerTrainer
 )
 from app.execution import run_training_job, run_inference
+from transformers.training_contract import ForecastAdmissionError, request_tensors
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/transformer", tags=["Time Series Transformers"])
@@ -32,8 +32,23 @@ traffic_lock = asyncio.Lock()
 price_lock = asyncio.Lock()
 
 class ForecastRequest(BaseModel):
-    data: List[List[float]]
-    horizon: int = 24
+    data: List[List[float]] = Field(min_length=1, max_length=512)
+    horizon: int = Field(default=24, ge=1, le=168)
+
+    @model_validator(mode="after")
+    def validate_matrix(self):
+        width = None
+        for row in self.data:
+            if not row or len(row) > 128:
+                raise ValueError('each row must be a non-empty list of at most 128 numbers')
+            if width is None:
+                width = len(row)
+            elif len(row) != width:
+                raise ValueError('all rows must have equal length')
+            for value in row:
+                if not isinstance(value, (int, float)) or (isinstance(value, float) and (value != value or value in (float("inf"), float("-inf")))):
+                    raise ValueError('matrix values must be finite numbers')
+        return self
 
 class TrainRequest(BaseModel):
     epochs: int = Field(50, ge=1, le=500)
@@ -128,14 +143,7 @@ async def train_demand(request: TrainRequest):
     """Train demand forecast transformer"""
     async with demand_lock:
         try:
-            train_data = torch.tensor(request.train_data, dtype=torch.float32)
-            train_labels = torch.tensor(request.train_labels, dtype=torch.float32)
-            
-            val_data = None
-            val_labels = None
-            if request.val_data is not None and request.val_labels is not None:
-                val_data = torch.tensor(request.val_data, dtype=torch.float32)
-                val_labels = torch.tensor(request.val_labels, dtype=torch.float32)
+            train_data, train_labels, val_data, val_labels = request_tensors(request)
             
             results = await run_training_job(
                 "demand",
@@ -152,6 +160,10 @@ async def train_demand(request: TrainRequest):
                 'data': results,
                 'timestamp': datetime.now().isoformat()
             }
+        except HTTPException:
+            raise
+        except ForecastAdmissionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except Exception as e:
             logger.error(f"Training failed: {e}")
             raise HTTPException(status_code=500, detail="Internal server error")
@@ -161,14 +173,7 @@ async def train_traffic(request: TrainRequest):
     """Train traffic forecast transformer"""
     async with traffic_lock:
         try:
-            train_data = torch.tensor(request.train_data, dtype=torch.float32)
-            train_labels = torch.tensor(request.train_labels, dtype=torch.float32)
-            
-            val_data = None
-            val_labels = None
-            if request.val_data is not None and request.val_labels is not None:
-                val_data = torch.tensor(request.val_data, dtype=torch.float32)
-                val_labels = torch.tensor(request.val_labels, dtype=torch.float32)
+            train_data, train_labels, val_data, val_labels = request_tensors(request)
             
             results = await run_training_job(
                 "traffic",
@@ -185,6 +190,10 @@ async def train_traffic(request: TrainRequest):
                 'data': results,
                 'timestamp': datetime.now().isoformat()
             }
+        except HTTPException:
+            raise
+        except ForecastAdmissionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except Exception as e:
             logger.error(f"Training failed: {e}")
             raise HTTPException(status_code=500, detail="Internal server error")
@@ -194,14 +203,7 @@ async def train_price(request: TrainRequest):
     """Train price forecast transformer"""
     async with price_lock:
         try:
-            train_data = torch.tensor(request.train_data, dtype=torch.float32)
-            train_labels = torch.tensor(request.train_labels, dtype=torch.float32)
-            
-            val_data = None
-            val_labels = None
-            if request.val_data is not None and request.val_labels is not None:
-                val_data = torch.tensor(request.val_data, dtype=torch.float32)
-                val_labels = torch.tensor(request.val_labels, dtype=torch.float32)
+            train_data, train_labels, val_data, val_labels = request_tensors(request)
             
             results = await run_training_job(
                 "price",
@@ -218,6 +220,10 @@ async def train_price(request: TrainRequest):
                 'data': results,
                 'timestamp': datetime.now().isoformat()
             }
+        except HTTPException:
+            raise
+        except ForecastAdmissionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except Exception as e:
             logger.error(f"Training failed: {e}")
             raise HTTPException(status_code=500, detail="Internal server error")

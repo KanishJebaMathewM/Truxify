@@ -943,7 +943,7 @@ Widget _cargoBadge({
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    id: 'btn_enter_otp_confirm_delivery',
+                    key: const ValueKey('btn_enter_otp_confirm_delivery'),
                     borderRadius: BorderRadius.circular(16),
                     onTap: () async {
                       final released = await Navigator.of(context).push<bool>(
@@ -957,7 +957,7 @@ Widget _cargoBadge({
                           ),
                         ),
                       );
-                      if (released == true && mounted) {
+                      if (released == true && context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: Row(

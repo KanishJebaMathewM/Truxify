@@ -54,7 +54,7 @@ router.get('/status', authenticate, async (req, res) => {
       data: status
     });
   } catch (error) {
-    logger.error({ requestId: req.requestId }, '[OracleRoutes] Status error:', error?.message || error);
+    logger.error({ requestId: req.requestId, event: 'ORACLE_STATUS_ERROR', error: error?.message || String(error) }, 'Status error');
     res.status(500).json({
       success: false,
       error: 'Internal Server Error'
@@ -85,7 +85,7 @@ router.post('/confirm', oracleVerificationLimiter, authenticate, validateBody(or
       });
     }
 
-    logger.error({ requestId: req.requestId }, '[OracleRoutes] Confirm error:', error?.message || error);
+    logger.error({ requestId: req.requestId, event: 'ORACLE_CONFIRM_ERROR', error: error?.message || String(error) }, 'Confirm error');
     res.status(500).json({
       success: false,
       error: 'Internal Server Error'
@@ -97,10 +97,6 @@ router.post('/verify-crosschain', oracleVerificationLimiter, authenticate, valid
   try {
     const { orderId, blockchainHash } = req.body;
 
-    // Defense in depth: reject malformed transaction hashes before any order
-    // lookup or oracle/RPC work. The request schema enforces the same bytes32
-    // shape, but this guard keeps the route safe if validation is bypassed or
-    // a future schema regression weakens the constraint.
     if (!BLOCKCHAIN_TX_HASH_RE.test(blockchainHash)) {
       return res.status(400).json({
         success: false,
@@ -124,7 +120,7 @@ router.post('/verify-crosschain', oracleVerificationLimiter, authenticate, valid
       });
     }
 
-    logger.error({ requestId: req.requestId }, '[OracleRoutes] Verify-crosschain error:', error?.message || error);
+    logger.error({ requestId: req.requestId, event: 'ORACLE_VERIFY_CROSSCHAIN_ERROR', error: error?.message || String(error) }, 'Verify-crosschain error');
     res.status(500).json({
       success: false,
       error: 'Internal Server Error'

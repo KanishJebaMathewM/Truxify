@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import eventBus, { EventBus } from '../../../src/core/events/EventBus.js';
 import { BaseEvent } from '../../../src/core/events/BaseEvent.js';
 
-describe.skip('EventBus', () => {
+describe('EventBus', () => {
   let bus;
 
   beforeEach(() => {
@@ -14,7 +14,7 @@ describe.skip('EventBus', () => {
     bus.clearMetrics();
   });
 
-  describe.skip('publish and subscribe', () => {
+  describe('publish and subscribe', () => {
     it('should publish and receive events via string type', () => {
       const handler = vi.fn();
       bus.subscribe('test:simple', handler);
@@ -61,7 +61,7 @@ describe.skip('EventBus', () => {
     });
   });
 
-  describe.skip('emitSafe', () => {
+  describe('emitSafe', () => {
     it('should emit safely and catch async errors', () => {
       const listener = vi.fn();
       bus.on('safe:test', listener);
@@ -103,7 +103,7 @@ describe.skip('EventBus', () => {
     });
   });
 
-  describe.skip('metrics', () => {
+  describe('metrics', () => {
     it('should track published count', () => {
       bus.publish('metrics:test', {});
       expect(bus.metrics.published).toBe(1);
@@ -121,7 +121,7 @@ describe.skip('EventBus', () => {
     });
   });
 
-  describe.skip('deduplication', () => {
+  describe('deduplication', () => {
     it('should deduplicate events by eventId', () => {
       const handler = vi.fn();
       bus.subscribe('dedup:test', handler);
@@ -146,7 +146,7 @@ describe.skip('EventBus', () => {
     });
   });
 
-  describe.skip('adapters', () => {
+  describe('adapters', () => {
     it('should publish to registered adapters', async () => {
       const mockAdapter = { publish: vi.fn(), connect: vi.fn(), disconnect: vi.fn() };
       bus.registerAdapter('mock', mockAdapter);
@@ -192,7 +192,7 @@ describe.skip('EventBus', () => {
     });
   });
 
-  describe.skip('unsubscribe', () => {
+  describe('unsubscribe', () => {
     it('should unsubscribe a handler', () => {
       const handler = vi.fn();
       bus.subscribe('unsub:test', handler);
@@ -205,7 +205,7 @@ describe.skip('EventBus', () => {
     });
   });
 
-  describe.skip('publishAsync', () => {
+  describe('publishAsync', () => {
     it('should resolve after publishing', async () => {
       const handler = vi.fn();
       bus.subscribe('async:test', handler);

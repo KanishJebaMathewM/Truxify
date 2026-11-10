@@ -91,7 +91,7 @@ class _BridgeStrikePreventionScreenState extends State<BridgeStrikePreventionScr
         children: [
           const Icon(Icons.map, size: 150, color: Colors.white24),
           if (isDanger) ...[
-            Container(color: Colors.redAccent.withOpacity(0.2)),
+            Container(color: Colors.redAccent.withValues(alpha: 0.2)),
             Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -155,7 +155,7 @@ class _BridgeStrikePreventionScreenState extends State<BridgeStrikePreventionScr
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(color: dangerColor.withOpacity(0.1), borderRadius: BorderRadius.circular(16), border: Border.all(color: dangerColor)),
+        decoration: BoxDecoration(color: dangerColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(16), border: Border.all(color: dangerColor)),
         child: Column(
           children: [
             const Icon(Icons.do_not_disturb_alt, color: Colors.redAccent, size: 48),

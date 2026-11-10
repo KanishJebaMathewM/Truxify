@@ -24,9 +24,12 @@ describe('FraudDetectionService', () => {
   });
 
   describe('singleton initialization', () => {
-    it('has a fraud threshold property', () => {
-      // Threshold is set from FRAUD_THRESHOLD env var; in test env it may be NaN if unset/unparseable
-      expect(fraudDetectionService).toHaveProperty('fraudThreshold');
+    it('defaults fraudThreshold to 0.7 when FRAUD_THRESHOLD env var is not set', () => {
+      expect(fraudDetectionService.fraudThreshold).toBe(0.7);
+    });
+
+    it('fraudThreshold is a finite number', () => {
+      expect(Number.isFinite(fraudDetectionService.fraudThreshold)).toBe(true);
     });
 
     it('has behavioralProfiles as Map', () => {

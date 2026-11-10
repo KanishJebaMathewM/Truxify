@@ -5,10 +5,16 @@ const SAFE_REQUEST_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 export function requestIdMiddleware(req, res, next) {
   const incoming = req.headers['x-request-id'];
-  req.requestId =
-    typeof incoming === 'string' && SAFE_REQUEST_ID.test(incoming)
-      ? incoming
-      : randomUUID();
+  const isReuse =
+    typeof incoming === 'string' && SAFE_REQUEST_ID.test(incoming);
+  req.requestId = isReuse ? incoming : randomUUID();
+
+  if (!isReuse) {
+    logger.debug(
+      { event: 'REQUEST_ID_GENERATED', requestId: req.requestId },
+      'Generated request id'
+    );
+  }
 
   res.locals.requestId = req.requestId;
 

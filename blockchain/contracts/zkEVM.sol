@@ -169,7 +169,14 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
             txHashes[i] = txHash;
         }
 
-        require(currentState.root == newStateRoot, "Batch state root mismatch");
+        // Sanity-check that the per-tx folds in _applyTx reproduce the root the
+        // proof committed to: _calculateBatchStateRoot wraps the fold with the
+        // batch timestamp and id, so re-wrap the on-chain fold and compare.
+        require(
+            keccak256(abi.encodePacked(currentState.root, batchTimestamp, batchId)) == newStateRoot,
+            "Batch state root mismatch"
+        );
+        currentState.root = newStateRoot;
 
         // Submit batch
         batchCounter = batchId;
@@ -221,7 +228,8 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
         require(_verifyProof(proof, msg.sender, amount), "Invalid proof");
 
         currentState.balances[msg.sender] -= amount;
-        payable(msg.sender).transfer(amount);
+        (bool sent, ) = payable(msg.sender).call{value: amount}("");
+        require(sent, "Withdrawal transfer failed");
         emit BridgeWithdraw(msg.sender, amount);
     }
 
@@ -242,7 +250,8 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
         require(_verifyProof(proof, user, amount), "Invalid proof");
 
         currentState.balances[user] -= amount;
-        payable(msg.sender).transfer(amount);
+        (bool sentBridge, ) = payable(msg.sender).call{value: amount}("");
+        require(sentBridge, "Withdrawal transfer failed");
         emit BridgeWithdraw(user, amount);
     }
 
@@ -305,7 +314,8 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
         uint256 amount = currentState.balances[user];
         require(amount > 0, "No balance");
         currentState.balances[user] = 0;
-        payable(user).transfer(amount);
+        (bool sentOwner, ) = payable(user).call{value: amount}("");
+        require(sentOwner, "Withdrawal transfer failed");
     }
 
     // ============ Internal Functions ============
@@ -508,5 +518,7 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
 
     // ============ Receive ============
 
-    receive() external payable {}
+    receive() external payable {
+        revert("Use depositToL2");
+    }
 }

@@ -29,6 +29,7 @@ class TestSSE(unittest.TestCase):
             env=env,
             capture_output=True,
             text=True,
+            timeout=300,
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('TRUXIFY_SSE_MASTER_KEY is required', result.stderr + result.stdout)

@@ -1,83 +1,88 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { LoadOfferCacheService } from '../../src/services/order/loadOfferCacheService.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock the underlying cache implementation (e.g., Redis or an internal store)
-// Note: Adjust this mock path if your cache client is imported from a specific utility file.
-const mockCacheStore = {
+const mockRedis = {
   get: vi.fn(),
-  set: vi.fn(),
-  del: vi.fn(),
+  incr: vi.fn(),
 };
 
-describe('LoadOfferCacheService', () => {
-  let cacheService;
+vi.mock('../../src/config/db.js', () => ({
+  redisClient: mockRedis,
+}));
 
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
+const { LoadOfferCacheService } = await import('../../src/services/order/loadOfferCacheService.js');
+
+describe('LoadOfferCacheService (region + version contract)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Assuming the service takes the cache store as a dependency, 
-    // or you can use vi.mock() at the top of the file if it's imported directly.
-    cacheService = new LoadOfferCacheService(mockCacheStore);
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
+  describe('getRegion', () => {
+    it('geohash-encodes valid coordinates at precision 4', () => {
+      const region = LoadOfferCacheService.getRegion(13.0827, 80.2707);
+      expect(region).toMatch(/^[a-z0-9]{4}$/);
+    });
 
-  describe('Cache Key Generation', () => {
-    it('should generate unique cache keys for different offer IDs', () => {
-      const key1 = cacheService.generateCacheKey('offer-123');
-      const key2 = cacheService.generateCacheKey('offer-456');
-      
-      expect(key1).not.toBe(key2);
-      expect(key1).toContain('offer-123');
-      expect(key2).toContain('offer-456');
+    it('returns distinct regions for distant coordinates', () => {
+      const chennai = LoadOfferCacheService.getRegion(13.0827, 80.2707);
+      const delhi = LoadOfferCacheService.getRegion(28.6139, 77.2090);
+      expect(chennai).not.toBe(delhi);
+    });
+
+    it('falls back to global for missing or non-finite coordinates', () => {
+      expect(LoadOfferCacheService.getRegion(undefined, 80)).toBe('global');
+      expect(LoadOfferCacheService.getRegion(13, null)).toBe('global');
+      expect(LoadOfferCacheService.getRegion('', 80)).toBe('global');
+      expect(LoadOfferCacheService.getRegion('abc', 'def')).toBe('global');
     });
   });
 
-  describe('Cache Hit/Miss Logic', () => {
-    it('should return parsed data on a cache hit', async () => {
-      const mockOffer = { id: 'offer-123', price: 1500 };
-      mockCacheStore.get.mockResolvedValue(JSON.stringify(mockOffer));
-
-      const result = await cacheService.getOffer('offer-123');
-      
-      expect(mockCacheStore.get).toHaveBeenCalledWith(cacheService.generateCacheKey('offer-123'));
-      expect(result).toEqual(mockOffer);
+  describe('getVersion', () => {
+    it('returns the max of the region and global versions', async () => {
+      mockRedis.get.mockImplementation((key) =>
+        Promise.resolve(key.includes('region:chennai') ? '3' : '7'));
+      const version = await LoadOfferCacheService.getVersion('chennai');
+      expect(version).toBe('7');
     });
 
-    it('should return null on a cache miss', async () => {
-      mockCacheStore.get.mockResolvedValue(null);
-
-      const result = await cacheService.getOffer('offer-999');
-      
-      expect(result).toBeNull();
-      expect(mockCacheStore.get).toHaveBeenCalledWith(cacheService.generateCacheKey('offer-999'));
+    it('prefers the region version when it is newer', async () => {
+      mockRedis.get.mockImplementation((key) =>
+        Promise.resolve(key.includes('region:chennai') ? '9' : '2'));
+      const version = await LoadOfferCacheService.getVersion('chennai');
+      expect(version).toBe('9');
     });
-  });
 
-  describe('TTL Expiration Handling', () => {
-    it('should set cache with the correct TTL', async () => {
-      const mockOffer = { id: 'offer-123', price: 1500 };
-      const ttlSeconds = 3600; // 1 hour
+    it('returns null when no version has been published', async () => {
+      mockRedis.get.mockResolvedValue(null);
+      expect(await LoadOfferCacheService.getVersion('chennai')).toBeNull();
+    });
 
-      await cacheService.setOffer('offer-123', mockOffer, ttlSeconds);
-      
-      expect(mockCacheStore.set).toHaveBeenCalledWith(
-        cacheService.generateCacheKey('offer-123'),
-        JSON.stringify(mockOffer),
-        'EX',
-        ttlSeconds
-      );
+    it('returns null when the Redis lookup fails', async () => {
+      mockRedis.get.mockRejectedValue(new Error('connection lost'));
+      expect(await LoadOfferCacheService.getVersion('chennai')).toBeNull();
     });
   });
 
-  describe('Cache Invalidation', () => {
-    it('should invalidate cache on offer updates', async () => {
-      const offerId = 'offer-123';
-      
-      await cacheService.invalidateOffer(offerId);
-      
-      expect(mockCacheStore.del).toHaveBeenCalledWith(cacheService.generateCacheKey(offerId));
+  describe('invalidateRegion', () => {
+    it('increments the region version key', async () => {
+      mockRedis.incr.mockResolvedValue(4);
+      await LoadOfferCacheService.invalidateRegion(13.0827, 80.2707);
+      const region = LoadOfferCacheService.getRegion(13.0827, 80.2707);
+      expect(mockRedis.incr).toHaveBeenCalledWith(`version:load_offers:region:${region}`);
+    });
+
+    it('increments the global key when coordinates are missing', async () => {
+      mockRedis.incr.mockResolvedValue(2);
+      await LoadOfferCacheService.invalidateRegion(null, null);
+      expect(mockRedis.incr).toHaveBeenCalledWith('version:load_offers:region:global');
+    });
+
+    it('swallows Redis errors during invalidation', async () => {
+      mockRedis.incr.mockRejectedValue(new Error('connection lost'));
+      await expect(LoadOfferCacheService.invalidateRegion(13.0827, 80.2707)).resolves.toBeUndefined();
     });
   });
 });

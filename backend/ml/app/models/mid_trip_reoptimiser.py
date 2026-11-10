@@ -1,9 +1,12 @@
 import logging
 import math
+import sys
+from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
+from itertools import pairwise
 from typing import Dict, List
 
-from utils.osrm_client import get_route_matrix_with_duration
+from utils.osrm_client import MAX_TABLE_LOCATIONS, get_route_matrix_with_duration
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +102,7 @@ def _sequence_total(matrix: List[List[float]], sequence: List[int]) -> float:
     return sum(matrix[sequence[index]][sequence[index + 1]] for index in range(len(sequence) - 1))
 
 
-def _route_insertion_options_with_matrix(
+def _legacy_route_insertion_options_with_matrix(
     base_route_indices: List[int],
     pickup_index: int,
     dropoff_index: int,
@@ -154,6 +157,142 @@ def _route_insertion_options_with_matrix(
     return options
 
 
+def _iter_partial_road_insertions(
+    base_route_indices, pickup_index, dropoff_index, distance_matrix, duration_matrix,
+):
+    """Stream complete reachable paths without subtracting unreachable edges."""
+    route_length = len(base_route_indices) - 1
+    costs = []
+    for matrix in (distance_matrix, duration_matrix):
+        edges = [matrix[a][b] for a, b in pairwise(base_route_indices)]
+        baseline = sum(edges)
+        if not math.isfinite(baseline):
+            return  # An unreachable baseline has no finite detour reference.
+        prefix = [0.0]
+        for edge in edges:
+            prefix.append(prefix[-1] + edge)
+        costs.append((
+            edges, baseline, prefix,
+            [matrix[a][pickup_index] for a in base_route_indices],
+            [matrix[pickup_index][a] for a in base_route_indices],
+            [matrix[a][dropoff_index] for a in base_route_indices],
+            [matrix[dropoff_index][a] for a in base_route_indices],
+            matrix[pickup_index][dropoff_index],
+        ))
+    for pickup_position in range(route_length + 1):
+        for dropoff_position in range(pickup_position + 1, route_length + 2):
+            detours, pickups = [], []
+            for edges, baseline, prefix, to_pickup, from_pickup, to_dropoff, from_dropoff, pickup_dropoff in costs:
+                added = [to_pickup[pickup_position]]
+                removed = []
+                if pickup_position < route_length:
+                    removed.append(edges[pickup_position])
+                if dropoff_position == pickup_position + 1:
+                    # Reconstruct the complete local gap. Pickup-only travel
+                    # can be unreachable even though pickup->dropoff->next fits.
+                    added.append(pickup_dropoff)
+                    if pickup_position < route_length:
+                        added.append(from_dropoff[pickup_position + 1])
+                else:
+                    if pickup_position < route_length:
+                        added.append(from_pickup[pickup_position + 1])
+                    added.append(to_dropoff[dropoff_position - 1])
+                    if dropoff_position <= route_length:
+                        removed.append(edges[dropoff_position - 1])
+                        added.append(from_dropoff[dropoff_position])
+                pickup = prefix[pickup_position] + to_pickup[pickup_position]
+                delta = sum(added) - sum(removed)
+                total = baseline - sum(removed) + sum(added)
+                detours.append(max(delta, 0.0) if math.isfinite(total) else float("inf"))
+                pickups.append(pickup)
+            yield detours[0], detours[1], pickups[0], pickups[1]
+
+
+def _iter_route_insertion_options_with_matrix(
+    base_route_indices: list[int],
+    pickup_index: int,
+    dropoff_index: int,
+    distance_matrix: list[list[float]],
+    duration_matrix: list[list[float]],
+) -> Iterator[tuple[float, float, float, float]]:
+    """Enumerate every directed insertion using linear workspace and edge deltas.
+
+    Finite road matrices use O(n) edge reads and O(n²) arithmetic. Compatibility
+    with legacy invalid arithmetic is kept via the full-route fallback; valid
+    unreachable road cells use explicit streamed complete-path admission.
+    No positions are pruned before the caller evaluates pickup deadlines.
+    """
+    if not base_route_indices:
+        return
+    route_length = len(base_route_indices) - 1
+    costs = []
+    for matrix in (distance_matrix, duration_matrix):
+        edges = [matrix[a][b] for a, b in pairwise(base_route_indices)]
+        to_pickup = [matrix[a][pickup_index] for a in base_route_indices]
+        from_pickup = [matrix[pickup_index][a] for a in base_route_indices]
+        to_dropoff = [matrix[a][dropoff_index] for a in base_route_indices]
+        from_dropoff = [matrix[dropoff_index][a] for a in base_route_indices]
+        pickup_dropoff = matrix[pickup_index][dropoff_index]
+        values = [value for group in (edges, to_pickup, from_pickup, to_dropoff, from_dropoff, [pickup_dropoff]) for value in group]
+        safe_edge = sys.float_info.max / max(6, route_length + 2)
+        if any(value == float("inf") for value in values) and all(
+            value >= 0 and (math.isfinite(value) or value == float("inf"))
+            for value in values
+        ):
+            yield from _iter_partial_road_insertions(
+                base_route_indices, pickup_index, dropoff_index,
+                distance_matrix, duration_matrix,
+            )
+            return
+        if any(not math.isfinite(value) or abs(value) > safe_edge for value in values):
+            yield from _legacy_route_insertion_options_with_matrix(
+                base_route_indices, pickup_index, dropoff_index,
+                distance_matrix, duration_matrix,
+            )
+            return
+        prefix = [0.0]
+        for edge in edges:
+            prefix.append(prefix[-1] + edge)
+        costs.append((edges, to_pickup, from_pickup, to_dropoff, from_dropoff,
+                      pickup_dropoff, prefix))
+
+    for pickup_position in range(route_length + 1):
+        pickup_deltas = []
+        pickup_totals = []
+        for edges, to_pickup, from_pickup, _, _, _, prefix in costs:
+            delta = to_pickup[pickup_position]
+            if pickup_position < route_length:
+                delta += from_pickup[pickup_position + 1] - edges[pickup_position]
+            pickup_deltas.append(delta)
+            pickup_totals.append(prefix[pickup_position] + to_pickup[pickup_position])
+        for dropoff_position in range(pickup_position + 1, route_length + 2):
+            detours = []
+            for dimension, (edges, _, from_pickup, to_dropoff, from_dropoff,
+                            pickup_dropoff, _) in enumerate(costs):
+                if dropoff_position == pickup_position + 1:
+                    # Consecutive pickup/dropoff replace an edge leaving pickup.
+                    delta = pickup_dropoff
+                    if pickup_position < route_length:
+                        delta += from_dropoff[pickup_position + 1] - from_pickup[pickup_position + 1]
+                else:
+                    # Other gaps still refer to the original directed route.
+                    delta = to_dropoff[dropoff_position - 1]
+                    if dropoff_position <= route_length:
+                        delta += from_dropoff[dropoff_position] - edges[dropoff_position - 1]
+                detours.append(max(pickup_deltas[dimension] + delta, 0.0))
+            yield detours[0], detours[1], pickup_totals[0], pickup_totals[1]
+
+
+def _route_insertion_options_with_matrix(
+    base_route_indices: list[int], pickup_index: int, dropoff_index: int,
+    distance_matrix: list[list[float]], duration_matrix: list[list[float]],
+) -> list[tuple[float, float, float, float]]:
+    """Preserve the list API for callers explicitly requesting all options."""
+    return list(_iter_route_insertion_options_with_matrix(
+        base_route_indices, pickup_index, dropoff_index, distance_matrix, duration_matrix,
+    ))
+
+
 def _best_route_insertion_with_matrix(
     base_route_indices: List[int],
     pickup_index: int,
@@ -163,7 +302,7 @@ def _best_route_insertion_with_matrix(
 ) -> tuple[float, float, float, float]:
     """Return the minimum-distance matrix insertion for compatibility."""
     return min(
-        _route_insertion_options_with_matrix(
+        _iter_route_insertion_options_with_matrix(
             base_route_indices,
             pickup_index,
             dropoff_index,
@@ -172,6 +311,21 @@ def _best_route_insertion_with_matrix(
         ),
         key=lambda option: (option[0], option[1], option[2], option[3]),
     )
+
+
+def _iter_candidate_road_batches(current, remaining_route_points, candidate_loads):
+    """Stream bounded tables; candidate pairs share only the full baseline."""
+    batch_size = (MAX_TABLE_LOCATIONS - 1 - len(remaining_route_points)) // 2
+    if batch_size < 1:
+        raise ValueError("Remaining route cannot fit one candidate in the OSRM table")
+    for start in range(0, len(candidate_loads), batch_size):
+        batch = candidate_loads[start:start + batch_size]
+        pickups = [(load.get("pickup_lat", 0.0), load.get("pickup_lng", 0.0)) for load in batch]
+        dropoffs = [(load.get("dropoff_lat", 0.0), load.get("dropoff_lng", 0.0)) for load in batch]
+        locations = [current, *remaining_route_points, *pickups, *dropoffs]
+        matrices = get_route_matrix_with_duration(locations)
+        yield batch, pickups, dropoffs, matrices
+        del matrices
 
 
 def find_mid_trip_loads(
@@ -214,114 +368,117 @@ def find_mid_trip_loads(
         if not math.isfinite(payment) or payment <= 0.0:
             continue
 
-        candidate_loads.append(load)
+        candidate_loads.append(dict(load))
 
     if not candidate_loads:
         return {"recommendations": []}
 
-    pickup_locations = [
-        (load.get("pickup_lat", 0.0), load.get("pickup_lng", 0.0))
-        for load in candidate_loads
-    ]
-    dropoff_locations = [
-        (load.get("dropoff_lat", 0.0), load.get("dropoff_lng", 0.0))
-        for load in candidate_loads
-    ]
-
-    locations = [
-        (cur_lat, cur_lng),
-        *remaining_route_points,
-        *pickup_locations,
-        *dropoff_locations,
-    ]
-    distance_matrix, duration_matrix = get_route_matrix_with_duration(locations)
-
     remaining_route_indices = list(range(1, len(remaining_route_points) + 1))
     base_route_indices = [0] + remaining_route_indices
     pickup_offset = 1 + len(remaining_route_points)
-    dropoff_offset = pickup_offset + len(candidate_loads)
-
-    now = datetime.now(timezone.utc)
+    now = None
     recommendations = []
+    for batch, pickup_locations, dropoff_locations, matrices in _iter_candidate_road_batches(
+        (cur_lat, cur_lng), remaining_route_points, candidate_loads,
+    ):
+        distance_matrix, duration_matrix = matrices
+        dropoff_offset = pickup_offset + len(batch)
+        if now is None:
+            # Preserve one evaluation clock, captured after the first road observation.
+            now = datetime.now(timezone.utc)
+        insertion_options = None
+        for load_index, load in enumerate(batch):
+            try:
+                pickup_lat, pickup_lng = pickup_locations[load_index]
+                dropoff_lat, dropoff_lng = dropoff_locations[load_index]
+                pickup_idx = pickup_offset + load_index
+                dropoff_idx = dropoff_offset + load_index
 
-    for load_index, load in enumerate(candidate_loads):
-        try:
-            pickup_lat, pickup_lng = pickup_locations[load_index]
-            dropoff_lat, dropoff_lng = dropoff_locations[load_index]
-            pickup_idx = pickup_offset + load_index
-            dropoff_idx = dropoff_offset + load_index
+                insertion_options = _iter_route_insertion_options_with_matrix(
+                    base_route_indices,
+                    pickup_idx,
+                    dropoff_idx,
+                    distance_matrix,
+                    duration_matrix,
+                )
 
-            insertion_options = _route_insertion_options_with_matrix(
-                base_route_indices,
-                pickup_idx,
-                dropoff_idx,
-                distance_matrix,
-                duration_matrix,
-            )
+                deadline_dt = datetime.fromisoformat(load.get("pickup_deadline", ""))
+                if deadline_dt.tzinfo is None:
+                    deadline_dt = deadline_dt.replace(tzinfo=timezone.utc)
+                else:
+                    deadline_dt = deadline_dt.astimezone(timezone.utc)
 
-            deadline_dt = datetime.fromisoformat(load.get("pickup_deadline", ""))
-            if deadline_dt.tzinfo is None:
-                deadline_dt = deadline_dt.replace(tzinfo=timezone.utc)
-            else:
-                deadline_dt = deadline_dt.astimezone(timezone.utc)
+                # Lazily track (a) the best insertion whose own arrival meets the
+                # deadline and (b) the append-at-end option, whose arrival gates
+                # overall feasibility: a pickup that only fits by jumping ahead of
+                # queued stops is not allowed. No list materialization (streaming).
+                best_option = None
+                estimated_pickup_time = None
+                append_option = None
+                for option in insertion_options:
+                    append_option = option
+                    if not all(math.isfinite(value) for value in option):
+                        continue  # Preserve complete-route reachability from main.
+                    candidate_pickup_time = now + timedelta(minutes=option[3])
+                    if candidate_pickup_time <= deadline_dt and (
+                        best_option is None or option < best_option
+                    ):
+                        best_option = option
+                        estimated_pickup_time = candidate_pickup_time
 
-            feasible_options = []
-            for option in insertion_options:
-                estimated_pickup_time = now + timedelta(minutes=option[3])
-                if estimated_pickup_time <= deadline_dt:
-                    feasible_options.append((option, estimated_pickup_time))
+                if append_option is None or best_option is None:
+                    continue
+                if not math.isfinite(append_option[3]):
+                    continue
+                if now + timedelta(minutes=append_option[3]) > deadline_dt:
+                    continue
 
-            if not feasible_options:
+                detour_km, detour_minutes, pickup_route_distance, pickup_route_minutes = best_option
+
+                dist_cur_pickup = distance_matrix[0][pickup_idx]
+                payment = float(load.get("payment_inr", 0.0))
+                if detour_km > 0:
+                    earnings_per_km = payment / detour_km
+                else:
+                    earnings_per_km = payment
+                earnings_score = min(earnings_per_km / 50.0, 1.0) * 40.0
+
+                max_proximity_km = 100.0
+                proximity_score = max(
+                    0.0, 1.0 - dist_cur_pickup / max_proximity_km
+                ) * 30.0
+
+                time_buffer_hours = (
+                    deadline_dt - estimated_pickup_time
+                ).total_seconds() / 3600.0
+                time_score = min(time_buffer_hours / 6.0, 1.0) * 30.0
+                priority_score = earnings_score + proximity_score + time_score
+
+                recommendations.append(
+                    {
+                        "load_id": load.get("load_id", ""),
+                        "detour_km": round(detour_km, 2),
+                        "detour_minutes": round(detour_minutes, 2),
+                        "additional_earnings": round(payment, 2),
+                        "priority_score": round(priority_score, 2),
+                        "pickup_location": {"lat": pickup_lat, "lng": pickup_lng},
+                        "dropoff_location": {"lat": dropoff_lat, "lng": dropoff_lng},
+                    }
+                )
+
+            except (ValueError, TypeError, KeyError):
+                continue
+            except Exception as e:
+                logger.warning(
+                    "Error scoring load '%s': %s", load.get("load_id", "unknown"), e
+                )
                 continue
 
-            (detour_km, detour_minutes, pickup_route_distance, pickup_route_minutes), estimated_pickup_time = min(
-                feasible_options,
-                key=lambda item: (
-                    item[0][0],
-                    item[0][1],
-                    item[0][2],
-                    item[0][3],
-                ),
-            )
-
-            dist_cur_pickup = distance_matrix[0][pickup_idx]
-            payment = float(load.get("payment_inr", 0.0))
-            if detour_km > 0:
-                earnings_per_km = payment / detour_km
-            else:
-                earnings_per_km = payment
-            earnings_score = min(earnings_per_km / 50.0, 1.0) * 40.0
-
-            max_proximity_km = 100.0
-            proximity_score = max(
-                0.0, 1.0 - dist_cur_pickup / max_proximity_km
-            ) * 30.0
-
-            time_buffer_hours = (
-                deadline_dt - estimated_pickup_time
-            ).total_seconds() / 3600.0
-            time_score = min(time_buffer_hours / 6.0, 1.0) * 30.0
-            priority_score = earnings_score + proximity_score + time_score
-
-            recommendations.append(
-                {
-                    "load_id": load.get("load_id", ""),
-                    "detour_km": round(detour_km, 2),
-                    "detour_minutes": round(detour_minutes, 2),
-                    "additional_earnings": round(payment, 2),
-                    "priority_score": round(priority_score, 2),
-                    "pickup_location": {"lat": pickup_lat, "lng": pickup_lng},
-                    "dropoff_location": {"lat": dropoff_lat, "lng": dropoff_lng},
-                }
-            )
-
-        except (ValueError, TypeError, KeyError):
-            continue
-        except Exception as e:
-            logger.warning(
-                "Error scoring load '%s': %s", load.get("load_id", "unknown"), e
-            )
-            continue
+        # Stable sorting retains earlier candidate identities at tied scores.
+        # No road matrices or unbounded global recommendation list are retained.
+        recommendations.sort(key=lambda item: item["priority_score"], reverse=True)
+        del recommendations[5:]
+        del distance_matrix, duration_matrix, matrices, insertion_options
 
     recommendations.sort(key=lambda x: x["priority_score"], reverse=True)
     return {"recommendations": recommendations[:5]}

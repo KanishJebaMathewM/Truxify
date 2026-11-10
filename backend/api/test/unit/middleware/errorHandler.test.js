@@ -38,7 +38,11 @@ describe('errorHandler middleware', () => {
     const res = mockRes();
     errorHandler(err, req, res, mockNext);
     expect(res.statusCode).toBe(413);
-    expect(res.jsonData.error).toBe('Payload too large');
+    expect(res.jsonData.error).toEqual({
+      code: 'PAYLOAD_TOO_LARGE',
+      message: 'Payload too large',
+      details: {},
+    });
     expect(mockNext).not.toHaveBeenCalled();
   });
 
@@ -50,7 +54,11 @@ describe('errorHandler middleware', () => {
     const res = mockRes();
     errorHandler(err, req, res, mockNext);
     expect(res.statusCode).toBe(400);
-    expect(res.jsonData.error).toBe('Malformed JSON payload');
+    expect(res.jsonData.error).toEqual({
+      code: 'MALFORMED_JSON',
+      message: 'Malformed JSON payload',
+      details: {},
+    });
   });
 
   it('passes through SyntaxError without status 400 to generic handler', () => {
@@ -67,8 +75,11 @@ describe('errorHandler middleware', () => {
     const res = mockRes();
     errorHandler(err, req, res, mockNext);
     expect(res.statusCode).toBe(413);
-    expect(res.jsonData.error).toContain('File upload error');
-    expect(res.jsonData.code).toBe('LIMIT_FILE_SIZE');
+    expect(res.jsonData.error).toEqual({
+      code: 'PAYLOAD_TOO_LARGE',
+      message: 'File upload error: File too large',
+      details: { multerCode: 'LIMIT_FILE_SIZE' },
+    });
   });
 
   it('returns 400 for MulterError with other codes', () => {
@@ -91,9 +102,11 @@ describe('errorHandler middleware', () => {
     const res = mockRes();
     errorHandler(err, req, res, mockNext);
     expect(res.statusCode).toBe(400);
-    expect(res.jsonData.error).toBe('Validation failed');
-    expect(res.jsonData.details).toHaveLength(2);
-    expect(res.jsonData.details[0]).toEqual({ field: 'email', message: 'Invalid email' });
+    expect(res.jsonData.error).toEqual({
+      code: 'VALIDATION_ERROR',
+      message: 'Validation failed',
+      details: { email: 'Invalid email', age: 'Must be positive' },
+    });
   });
 
   it('returns 500 for generic errors without specific handling', () => {
@@ -102,6 +115,10 @@ describe('errorHandler middleware', () => {
     const res = mockRes();
     errorHandler(err, req, res, mockNext);
     expect(res.statusCode).toBe(500);
-    expect(res.jsonData.error).toBe('Critical Internal Server Error.');
+    expect(res.jsonData.error).toEqual({
+      code: 'INTERNAL_ERROR',
+      message: 'Critical Internal Server Error.',
+      details: {},
+    });
   });
 });

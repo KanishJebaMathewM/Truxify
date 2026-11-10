@@ -56,7 +56,7 @@ class _FindTrucksFilterSheetState extends State<FindTrucksFilterSheet> {
           ),
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
-            value: _selectedGoodsType,
+            initialValue: _selectedGoodsType,
             decoration: const InputDecoration(
               border: OutlineInputBorder(),
               contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),

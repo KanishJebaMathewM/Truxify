@@ -2,7 +2,11 @@ import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { ValidationError } from '../utils/errors.js';
-import { generateIftaReport } from '../services/iftaTax.js';
+import {
+  generateIftaReport,
+  MAX_IFTA_FUEL_PURCHASES,
+  MAX_IFTA_WAYPOINTS,
+} from '../services/iftaTax.js';
 
 const router = express.Router();
 
@@ -15,6 +19,109 @@ const router = express.Router();
  *     description: Aggregates GPS waypoint mileage and fuel purchases per jurisdiction.
  *     security:
  *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [truckId, waypoints]
+ *             properties:
+ *               truckId:
+ *                 type: string
+ *               quarter:
+ *                 type: string
+ *                 default: Q3
+ *                 example: Q3
+ *               year:
+ *                 type: integer
+ *                 default: 2026
+ *               waypoints:
+ *                 type: array
+ *                 description: Ordered GPS waypoints; mileage between consecutive points is attributed to the later point's jurisdiction.
+ *                 items:
+ *                   type: object
+ *                   required: [latitude, longitude]
+ *                   properties:
+ *                     latitude:
+ *                       type: number
+ *                       minimum: -90
+ *                       maximum: 90
+ *                     longitude:
+ *                       type: number
+ *                       minimum: -180
+ *                       maximum: 180
+ *                     jurisdictionState:
+ *                       type: string
+ *                       example: TX
+ *               fuelPurchases:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     jurisdictionState:
+ *                       type: string
+ *                     gallons:
+ *                       type: number
+ *                       minimum: 0
+ *                     taxPaidUSD:
+ *                       type: number
+ *                       minimum: 0
+ *     responses:
+ *       200:
+ *         description: Quarterly IFTA report
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     truckId:
+ *                       type: string
+ *                     period:
+ *                       type: string
+ *                       example: Q3 2026
+ *                     summary:
+ *                       type: object
+ *                       properties:
+ *                         totalMilesDriven:
+ *                           type: number
+ *                         totalGallonsPurchased:
+ *                           type: number
+ *                         fleetAverageMpg:
+ *                           type: number
+ *                           nullable: true
+ *                           description: null when no fuel was purchased in the period.
+ *                     jurisdictionBreakdown:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           jurisdictionState:
+ *                             type: string
+ *                           totalMilesDriven:
+ *                             type: number
+ *                           taxableGallonsPurchased:
+ *                             type: number
+ *                           taxPaidUSD:
+ *                             type: number
+ *                     generatedAt:
+ *                       type: string
+ *                       format: date-time
+ *       400:
+ *         description: Missing truckId/waypoints, non-array fuelPurchases, or invalid waypoint/amount values
+ *       413:
+ *         description: Waypoint or fuel purchase batch exceeds the maximum size
+ *       401:
+ *         description: Authentication required
+ *       403:
+ *         description: Forbidden - ifta:generate-report policy required
+ *       500:
+ *         description: Failed to generate IFTA report
  */
 router.post(
   '/generate-report',
@@ -36,6 +143,18 @@ router.post(
       // turned a client mistake into a 500.
       if (fuelPurchases !== undefined && fuelPurchases !== null && !Array.isArray(fuelPurchases)) {
         return res.status(400).json({ error: 'fuelPurchases must be an array.' });
+      }
+
+      if (waypoints.length > MAX_IFTA_WAYPOINTS) {
+        return res.status(413).json({
+          error: `waypoints must contain at most ${MAX_IFTA_WAYPOINTS} entries.`
+        });
+      }
+
+      if (Array.isArray(fuelPurchases) && fuelPurchases.length > MAX_IFTA_FUEL_PURCHASES) {
+        return res.status(413).json({
+          error: `fuelPurchases must contain at most ${MAX_IFTA_FUEL_PURCHASES} entries.`
+        });
       }
 
       const report = generateIftaReport({

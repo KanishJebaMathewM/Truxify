@@ -284,6 +284,7 @@ void main() {
         destinationLat: 26.0,
         destinationLng: 75.0,
         paymentInr: 10000,
+        weightKg: 6000,
       );
       expect(load.hasDeadheadData, isTrue);
     });

@@ -9,6 +9,11 @@ const orderValidationServiceMock = {
   assertOrderFound: vi.fn(),
 };
 
+const osrmMock = vi.hoisted(() => ({
+  getRouteGeometry: vi.fn(),
+  buildStraightLineGeometry: vi.fn(),
+}));
+
 vi.mock('../../src/config/db.js', () => ({
   mongoDb: mongoDbMock,
   supabase: {},
@@ -18,11 +23,14 @@ vi.mock('../../src/config/db.js', () => ({
 
 vi.mock('../../src/services/order/orderValidationService.js', () => ({
   orderValidationService: orderValidationServiceMock,
+  // The controller constructs this class at module load; returning the
+  // shared double keeps the suite's staged lookups in effect.
+  OrderValidationService: vi.fn(function () { return orderValidationServiceMock; }),
 }));
 
 vi.mock('../../src/services/osrm.js', () => ({
-  getRouteGeometry: vi.fn(),
-  buildStraightLineGeometry: vi.fn(),
+  getRouteGeometry: osrmMock.getRouteGeometry,
+  buildStraightLineGeometry: osrmMock.buildStraightLineGeometry,
 }));
 
 const { getDriverLocation, getLiveRouteGeometry } = await import('../../src/controllers/orderController.js');
@@ -120,6 +128,9 @@ describe('Order Driver Location & Telemetry order_id scoping', () => {
     ];
 
     toArrayMock.mockResolvedValue(mockTelemetry);
+
+    osrmMock.getRouteGeometry.mockResolvedValue({ type: 'Feature' });
+    osrmMock.buildStraightLineGeometry.mockReturnValue({ type: 'Feature' });
 
     const req = {
       params: { id: 'order-uuid-789' },

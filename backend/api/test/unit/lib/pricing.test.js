@@ -5,7 +5,54 @@ import {
   convertKmToMiles,
   guardNonNegative,
 } from '../../../src/lib/pricing.js';
+// backend/api/test/unit/lib/pricing.test.js
 
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { calculateDistanceAndDuration } from '../../../src/lib/pricing.js';
+
+describe('pricing.js - calculateDistanceAndDuration Unit Tests', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('calculates distance and duration successfully with valid coordinate inputs', async () => {
+    // Mock successful routing/OSRM response or underlying fetch
+    // Test input: Chennai coordinates (13.0827, 80.2707) to (13.0569, 80.2425)
+    const origin = { lat: 13.0827, lng: 80.2707 };
+    const destination = { lat: 13.0569, lng: 80.2425 };
+
+    const result = await calculateDistanceAndDuration(origin, destination);
+
+    expect(result).toBeDefined();
+    expect(result).toHaveProperty('distanceKm');
+    expect(result).toHaveProperty('durationMinutes');
+    expect(typeof result.distanceKm).toBe('number');
+    expect(result.distanceKm).toBeGreaterThan(0);
+  });
+
+  it('triggers NaN guard and returns null when coordinates are invalid or non-numeric', async () => {
+    // FIX: Verify NaN guard per issue #5910
+    const invalidOrigin = { lat: 'invalid', lng: 80.2707 };
+    const validDestination = { lat: 13.0569, lng: 80.2425 };
+
+    const result = await calculateDistanceAndDuration(invalidOrigin, validDestination);
+
+    expect(result).toBeNull();
+  });
+
+  it('triggers straight-line Haversine fallback when OSRM result is null', async () => {
+    // FIX: Verify fallback behavior when routing API fails or returns null
+    const origin = { lat: 13.0827, lng: 80.2707 };
+    const destination = { lat: 13.0569, lng: 80.2425 };
+
+    // Force OSRM mock/failure if applicable, ensuring fallback calculation executes
+    const result = await calculateDistanceAndDuration(origin, destination, { forceFallback: true });
+
+    expect(result).toBeDefined();
+    expect(result.source).toBe('fallback_haversine');
+    expect(result.distanceKm).toBeGreaterThan(0);
+  });
+});
 // Note: sanitizePrice uses MIN_FREIGHT_PAISa/MAX_FREIGHT_PAISa which are not
 // exported; tested indirectly through integration tests.
 

@@ -1,4 +1,109 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// backend/api/test/unit/workZoneService.test.js
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { getActiveWorkZones, createWorkZone, validateRouteWorkZones } from '../../src/services/workZoneService.js';
+import * as SupabaseClient from '../../src/config/supabase.js';
+import * as CacheManager from '../../src/cache/CacheManager.js';
+
+vi.mock('../../src/config/supabase.js', () => ({
+  supabase: {
+    from: vi.fn()
+  }
+}));
+
+vi.mock('../../src/cache/CacheManager.js', () => ({
+  getCacheItem: vi.fn(),
+  setCacheItem: vi.fn()
+}));
+
+describe('WorkZoneService Unit Tests', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('getActiveWorkZones', () => {
+    it('should return active work zones from cache if available', async () => {
+      const mockCachedZones = [{ id: 'wz-1', status: 'active', lat: 13.0827, lng: 80.2707 }];
+      CacheManager.getCacheItem.mockResolvedValueOnce(mockCachedZones);
+
+      const zones = await getActiveWorkZones();
+
+      expect(zones).toEqual(mockCachedZones);
+      expect(CacheManager.getCacheItem).toHaveBeenCalledWith('work_zones:active');
+      expect(SupabaseClient.supabase.from).not.toHaveBeenCalled();
+    });
+
+    it('should fetch from database and cache when cache misses', async () => {
+      CacheManager.getCacheItem.mockResolvedValueOnce(null);
+      
+      const mockDbData = [{ id: 'wz-2', status: 'active', lat: 12.9716, lng: 77.5946 }];
+      const mockSelect = {
+        eq: vi.fn().mockReturnThis(),
+        then: (resolve) => resolve({ data: mockDbData, error: null })
+      };
+      
+      SupabaseClient.supabase.from.mockReturnValue({
+        select: vi.fn().mockReturnValue(mockSelect)
+      });
+
+      const zones = await getActiveWorkZones();
+
+      expect(zones).toEqual(mockDbData);
+      expect(CacheManager.setCacheItem).toHaveBeenCalledWith('work_zones:active', mockDbData, expect.any(Number));
+    });
+  });
+
+  describe('createWorkZone', () => {
+    it('should successfully create a new work zone record', async () => {
+      const newZonePayload = { title: 'Highway Repair', lat: 13.1, lng: 80.2, radiusMeters: 500 };
+      const mockInsertResult = { id: 'wz-new', ...newZonePayload, status: 'active' };
+
+      const mockInsert = {
+        insert: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({ data: mockInsertResult, error: null })
+          })
+        })
+      };
+
+      SupabaseClient.supabase.from.mockReturnValue(mockInsert);
+
+      const result = await createWorkZone(newZonePayload);
+
+      expect(result.success).toBe(true);
+      expect(result.data.id).toBe('wz-new');
+      expect(SupabaseClient.supabase.from).toHaveBeenCalledWith('work_zones');
+    });
+  });
+
+  describe('validateRouteWorkZones', () => {
+    it('should detect intersecting work zones along a route', async () => {
+      const routeWaypoints = [
+        { lat: 13.0827, lng: 80.2707 },
+        { lat: 13.0900, lng: 80.2800 }
+      ];
+
+      // Mock active work zones near waypoint
+      vi.spyOn({ getActiveWorkZones }, 'getActiveWorkZones').mockResolvedValueOnce([
+        { id: 'wz-1', lat: 13.0850, lng: 80.2750, radiusMeters: 1000 }
+      ]);
+
+      const analysis = await validateRouteWorkZones(routeWaypoints);
+
+      expect(analysis.hasWorkZones).toBe(true);
+      expect(analysis.intersectingZones).toHaveLength(1);
+    });
+  });
+});
+/**
+ * Unit Tests for WorkZone Service
+ * 
+ * Tests delay prediction logic, fail-open error handling, 
+ * and bypass waypoint generation.
+ */
+
+
 import workZoneService, {
   WorkZoneService,
   predictWorkZoneDelays,
@@ -857,9 +962,10 @@ describe('WorkZoneService Unit Tests', () => {
         expect(result.problematicPoint).not.toBeNull();
 
         expect(logger.info).toHaveBeenCalledWith(
-          expect.stringContaining(
-            '[WorkZoneService] Predicted severe commercial delay'
-          )
+          expect.objectContaining({
+            event: 'WORKZONE_SEVERE_DELAY_PREDICTED',
+          }),
+          expect.any(String)
         );
       }
     });
@@ -892,9 +998,10 @@ describe('WorkZoneService Unit Tests', () => {
       });
 
       expect(logger.error).toHaveBeenCalledWith(
-        expect.stringContaining(
-          '[WorkZoneService] Error predicting work-zone delays'
-        )
+        expect.objectContaining({
+          event: 'WORKZONE_PREDICTION_ERROR',
+        }),
+        expect.any(String)
       );
     });
   });
@@ -998,6 +1105,43 @@ describe('WorkZoneService Unit Tests', () => {
         });
 
       expect(results.length).toBeGreaterThan(0);
+    });
+
+    it('accepts 0 lat/lng as valid coordinates', () => {
+      const result = generateBypassWaypoint({ lat: 0, lng: 0 });
+      expect(result).not.toBeNull();
+      expect(result.lat).toBeCloseTo(7 / 111, 5);
+      expect(result.lng).toBeCloseTo(7 / 111, 5);
+    });
+
+    it('accepts a zero latitude with a non-zero longitude', () => {
+      const result = generateBypassWaypoint({ lat: 0, lng: -77.22 });
+      expect(result).not.toBeNull();
+      expect(result.lat).toBeCloseTo(7 / 111, 5);
+    });
+
+    it('accepts a zero longitude with a non-zero latitude', () => {
+      const result = generateBypassWaypoint({ lat: 12.97, lng: 0 });
+      expect(result).not.toBeNull();
+      expect(result.lng).toBeCloseTo(7 / 111, 5);
+    });
+
+    it('returns null for a non-finite latitude', () => {
+      expect(generateBypassWaypoint({ lat: 'abc', lng: 77.22 })).toBeNull();
+      expect(generateBypassWaypoint({ lat: NaN, lng: 77.22 })).toBeNull();
+      expect(generateBypassWaypoint({ lat: Infinity, lng: 77.22 })).toBeNull();
+    });
+
+    it('returns null for out-of-range coordinates', () => {
+      expect(generateBypassWaypoint({ lat: 91, lng: 77.22 })).toBeNull();
+      expect(generateBypassWaypoint({ lat: -91, lng: 77.22 })).toBeNull();
+      expect(generateBypassWaypoint({ lat: 12.97, lng: 181 })).toBeNull();
+      expect(generateBypassWaypoint({ lat: 12.97, lng: -181 })).toBeNull();
+    });
+
+    it('never emits a NaN bypass coordinate', () => {
+      const result = generateBypassWaypoint({ lat: 'abc', lng: 'def' });
+      expect(result).toBeNull();
     });
   });
 });

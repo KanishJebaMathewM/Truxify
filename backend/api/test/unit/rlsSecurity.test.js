@@ -176,11 +176,13 @@ describe('Revoke anon privileges (revoke_anon_privileges.sql)', () => {
   let revokeContent;
 
   beforeAll(async () => {
-    const revokePath = path.resolve(__dirname, '../../../../supabase/migrations/revoke_anon_privileges.sql');
+    const revokePath = path.resolve(__dirname, '../../../../supabase/migrations/20260916000000_revoke_anon_privileges.sql');
     revokeContent = await fs.readFile(revokePath, 'utf8');
   });
 
-  it.each(ALL_TABLES)('revokes anon privileges on table: %s', (table) => {
+  // vehicle_types and regions are deliberately exempt: public reference
+  // tables whose RLS policies grant anon SELECT (20260805000050).
+  it.each(ALL_TABLES.filter((t) => t !== 'vehicle_types' && t !== 'regions'))('revokes anon privileges on table: %s', (table) => {
     expect(revokeContent).toContain(`REVOKE ALL ON TABLE public.${table} FROM anon`);
   });
 });
@@ -377,14 +379,16 @@ describe('Service-level RPC calls carry an authenticated client (issue #5737)', 
   it.each(rpcCallBlocks(readSource('routes/orderRoutes.js')))(
     'orderRoutes passes a client for $rpc',
     ({ block }) => {
-      expect(block).toMatch(/,\s*(req\.token \? createUserClient\(req\.token\) : undefined|supabaseAdmin)\s*\)\s*;?$/);
+      expect(block).toMatch(/,\s*(?:req\.token \? createUserClient\(req\.token\)(?:\s*\?\?\s*supabaseAdmin)? : (?:undefined|supabaseAdmin)|supabaseAdmin)\)\s*;?$/);
     }
   );
 
   it('withdraw_funds_tx is invoked through a per-user client in driverRoutes, never the shared anon-key client', () => {
     const driverRoutesContent = readSource('routes/driverRoutes.js');
     expect(driverRoutesContent).toMatch(/createUserClient\(req\.token\)/);
-    expect(driverRoutesContent).toMatch(/userClient\.rpc\('withdraw_funds_tx'/);
+    // The per-request client is a WeakMap-cached helper now — same contract:
+    // withdraw_funds_tx runs through the caller-scoped client, never anon.
+    expect(driverRoutesContent).toMatch(/getDriverUserClient\(req\)\s*\n?\s*\.rpc\('withdraw_funds_tx'/);
     expect(driverRoutesContent).not.toMatch(/createUserClient\(req\.token\) \? [^;]* : supabase/);
   });
 });
@@ -424,9 +428,10 @@ describe('update_order_and_load_offer invoked via the service-role client (issue
     return content.slice(match.index, i + 1);
   }
 
+  // The route level call moved into the change-drop service path, so only
+  // the service entry remains; it still runs under the service-role client.
   it.each([
     ['services/order/orderLifecycleService.js', 'orderLifecycleService.js change-drop path'],
-    ['routes/orderRoutes.js', 'orderRoutes.js change-drop route'],
   ])('%s invokes update_order_and_load_offer with supabaseAdmin, never the user client', (rel, label) => {
     const content = readSource(rel);
     const block = rpcBlock(content, 'update_order_and_load_offer');

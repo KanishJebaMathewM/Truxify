@@ -1,5 +1,6 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_core_platform_interface/test.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -20,7 +21,9 @@ Future<void> setupTests() async {
           projectId: 'mock-project-id',
         ),
       );
-    } on FirebaseException catch (_) {}
+    } on FirebaseException catch (e) {
+      debugPrint('Firebase initialization failed: $e');
+    }
   }
 
   try {

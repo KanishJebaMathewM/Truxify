@@ -15,6 +15,10 @@ import { DomainError } from './order/domainError.js';
 const crdtEntityStore = new Map(); // compositeKey -> { value, hlc, isDeleted, updatedAt }
 const processedIdempotencyKeys = new Set();
 let serverLogicalCounter = 0;
+// HLC core invariant: the server's clock component must never regress, even
+// after adopting a skewed client's future timestamp — otherwise later server
+// stamps would sort BEFORE earlier ones (compareHlc orders millis first).
+let serverLastMillis = 0;
 
 /**
  * Parses and compares two Hybrid Logical Clock strings: `<millis>:<counter>:<nodeId>`.
@@ -45,13 +49,14 @@ export function compareHlc(hlcA, hlcB) {
  */
 export function generateServerHlc(clientHlcStr = null) {
   const now = Date.now();
-  let maxMillis = now;
+  let maxMillis = Math.max(now, serverLastMillis);
 
   if (clientHlcStr) {
     const [cMillis] = clientHlcStr.split(':');
     const clientMillis = Number(cMillis) || 0;
-    maxMillis = Math.max(now, clientMillis);
+    maxMillis = Math.max(maxMillis, clientMillis);
   }
+  serverLastMillis = maxMillis;
 
   serverLogicalCounter += 1;
   return `${maxMillis}:${serverLogicalCounter}:server_node_01`;

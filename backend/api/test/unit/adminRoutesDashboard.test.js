@@ -76,6 +76,7 @@ describe('adminRoutes', () => {
       expect(res.body).toEqual({
         active_drivers: 5,
         pending_orders: 3,
+        total_revenue_today: 3,
         // total_amount is stored in paise; the route reports INR.
         total_revenue_today: 300,
       });

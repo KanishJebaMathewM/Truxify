@@ -4,10 +4,15 @@ import { supabase } from "../src/config/db.js";
 
 const router = express.Router();
 
-// POST /api/users/fcm-token
-// Update FCM token for the authenticated user
+/*
+  POST /api/users/fcm-token
+
+  Updates the Firebase Cloud Messaging (FCM) token
+  for the currently authenticated user.
+*/
 router.post("/fcm-token", authenticate, async (req, res) => {
   try {
+    // Get FCM token from request body
     const { fcmToken } = req.body;
 
     // Validate FCM token
@@ -38,7 +43,6 @@ router.post("/fcm-token", authenticate, async (req, res) => {
 
     // Handle Supabase errors
     if (error) {
-      // Log detailed error only on the server
       console.error("Supabase FCM token update error:", error);
 
       // Profile does not exist
@@ -49,7 +53,6 @@ router.post("/fcm-token", authenticate, async (req, res) => {
         });
       }
 
-      // Other database errors
       return res.status(500).json({
         success: false,
         error: "Failed to update FCM token",
@@ -63,7 +66,6 @@ router.post("/fcm-token", authenticate, async (req, res) => {
       data,
     });
   } catch (error) {
-    // Log detailed error only on the server
     console.error("FCM token route error:", error);
 
     return res.status(500).json({

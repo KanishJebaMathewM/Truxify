@@ -1,6 +1,8 @@
 from datetime import datetime
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+from typing import Annotated
+from anomaly.generation_contract import AdmissionError
 from typing import Dict, List, Any, Optional
 import numpy as np
 import logging
@@ -44,11 +46,12 @@ class GPSData(BaseModel):
     route_deviation: float
 
 class TrainRequest(BaseModel):
-    data: Dict[str, List[List[float]]]
-    epochs: int = 50
+    model_config = ConfigDict(allow_inf_nan=False)
+    data: Dict[str, List[List[List[Annotated[float, Field(strict=True)]]]]]
+    epochs: Annotated[int, Field(strict=True, ge=1, le=16)] = 1
 
 @router.post("/detect/driver")
-async def detect_driver_anomaly(data: DriverData):
+def detect_driver_anomaly(data: DriverData):
     """Detect anomalies in driver behavior"""
     try:
         result = detector.detect_driver_anomaly(data.dict())
@@ -64,7 +67,7 @@ async def detect_driver_anomaly(data: DriverData):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/detect/transaction")
-async def detect_transaction_anomaly(data: TransactionData):
+def detect_transaction_anomaly(data: TransactionData):
     """Detect anomalies in transactions"""
     try:
         result = detector.detect_transaction_anomaly(data.dict())
@@ -80,7 +83,7 @@ async def detect_transaction_anomaly(data: TransactionData):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/detect/gps")
-async def detect_gps_anomaly(data: GPSData):
+def detect_gps_anomaly(data: GPSData):
     """Detect anomalies in GPS data"""
     try:
         result = detector.detect_gps_anomaly(data.dict())
@@ -96,7 +99,7 @@ async def detect_gps_anomaly(data: GPSData):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/train")
-async def train_models(request: TrainRequest):
+def train_models(request: TrainRequest):
     """Train anomaly detection models"""
     try:
         # Convert data
@@ -112,6 +115,8 @@ async def train_models(request: TrainRequest):
             'data': results,
             'timestamp': datetime.now().isoformat()
         }
+    except AdmissionError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Model training failed: {e}")
         logger.error(f"Internal error: {e}")
@@ -119,7 +124,7 @@ async def train_models(request: TrainRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/history")
-async def get_anomaly_history(data_type: Optional[str] = None):
+def get_anomaly_history(data_type: Optional[str] = None):
     """Get anomaly detection history"""
     try:
         history = detector.get_anomaly_history(data_type)
@@ -136,7 +141,7 @@ async def get_anomaly_history(data_type: Optional[str] = None):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/alerts")
-async def get_alerts(severity: Optional[str] = None):
+def get_alerts(severity: Optional[str] = None):
     """Get recent alerts"""
     try:
         alerts = detector.get_alerts(severity)
@@ -153,7 +158,7 @@ async def get_alerts(severity: Optional[str] = None):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/stats")
-async def get_anomaly_stats():
+def get_anomaly_stats():
     """Get anomaly detection statistics"""
     try:
         stats = detector.get_stats()
@@ -169,11 +174,11 @@ async def get_anomaly_stats():
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/threshold/set")
-async def set_threshold(data_type: str, threshold: float):
+def set_threshold(data_type: str, threshold: float):
     """Set anomaly threshold for a data type"""
     try:
         if data_type in detector.models:
-            detector.models[data_type].threshold = threshold
+            detector.set_threshold(data_type, threshold)
             return {
                 'success': True,
                 'message': f'Threshold set to {threshold} for {data_type}',
@@ -183,6 +188,8 @@ async def set_threshold(data_type: str, threshold: float):
             raise HTTPException(status_code=404, detail=f"Data type {data_type} not found")
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Threshold setting failed: {e}")
         logger.error(f"Internal error: {e}")
@@ -190,11 +197,11 @@ async def set_threshold(data_type: str, threshold: float):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/threshold/{data_type}")
-async def get_threshold(data_type: str):
+def get_threshold(data_type: str):
     """Get anomaly threshold for a data type"""
     try:
         if data_type in detector.models:
-            threshold = detector.models[data_type].threshold
+            threshold = detector.get_threshold(data_type)
             return {
                 'success': True,
                 'data': {

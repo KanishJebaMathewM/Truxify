@@ -8,7 +8,7 @@ class WeightDistributionService {
   final double _emptyDrive = 16000;
   final double _emptyTandem = 9000;
   
-  List<Pallet> _pallets = [
+  final List<Pallet> _pallets = [
     Pallet(id: 'P1 (Steel)', weightLbs: 12000, positionX: 0.1), // Heavy, front
     Pallet(id: 'P2 (Steel)', weightLbs: 12000, positionX: 0.9), // Heavy, back
     Pallet(id: 'P3 (Wood)', weightLbs: 4000, positionX: 0.5),   // Light, middle

@@ -110,7 +110,7 @@ class _ExpenseGeofenceDashboardState extends State<ExpenseGeofenceDashboard> {
               ),
             ),
             
-          ..._pendingExpenses.map((e) => _buildExpenseCard(e, isPending: true)).toList(),
+          ..._pendingExpenses.map((e) => _buildExpenseCard(e, isPending: true)),
           
           if (_confirmedExpenses.isNotEmpty)
             Padding(

@@ -1,11 +1,17 @@
 import numpy as np
 
+if __package__:
+    from .policy_scores import dimensions, evaluate_policy, owned
+else:  # legacy direct-module test/import entry point
+    from policy_scores import dimensions, evaluate_policy, owned
+
 class MappoFleetBalancer:
     """
     Multi-Agent Proximal Policy Optimization (MAPPO) Fleet Re-Balancing Engine.
     Coordinates load dispatch decisions across decentralized truck agents.
     """
     def __init__(self, num_agents: int = 5, state_dim: int = 10):
+        dimensions(state_dim, num_agents)
         self.num_agents = num_agents
         self.state_dim = state_dim
         # Shared critic weights and actor weights
@@ -16,26 +22,11 @@ class MappoFleetBalancer:
         """
         global_state: Array of shape (state_dim,) representing fleet demands, locations, and speeds.
         """
-        if len(global_state) != self.state_dim:
-            raise ValueError("Invalid global state dimension.")
-            
-        value_estimate = float(np.dot(global_state, self.critic_weights))
-        action_logits = np.dot(global_state, self.actor_weights)
-        
-        # Numerically stable softmax for load dispatch selection.
-        # Subtracting the max prevents overflow when logits are large and
-        # avoids the inf/inf -> NaN -> argmax=0 collapse.
-        max_logit = np.max(action_logits)
-        z = action_logits - max_logit
-        e = np.exp(z)
-        sum_e = np.sum(e)
-        if not np.isfinite(sum_e) or sum_e <= 0:
-            # Degenerate all -inf case: fall back to a uniform distribution
-            # so the agent still selects a valid (non-NaN) action.
-            probs = np.full_like(action_logits, 1.0 / len(action_logits))
-        else:
-            probs = e / sum_e
-        selected_agent = int(np.argmax(probs))
+        dimensions(self.state_dim, self.num_agents)
+        state = owned(global_state, (self.state_dim,))
+        actor = owned(self.actor_weights, (self.state_dim, self.num_agents))
+        critic = owned(self.critic_weights, (self.state_dim, 1))
+        value_estimate, probs, selected_agent = evaluate_policy(state, actor, critic)
 
         return {
             "critic_state_value": round(value_estimate, 4),

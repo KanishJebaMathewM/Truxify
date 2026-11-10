@@ -4,12 +4,15 @@ import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateBody } from '../middleware/validate.js';
 import { orderRepository, orderLifecycleService, logger } from '../core/container.js';
-import { sendFcmNotification, storeDeliveryOtp } from '../services/notificationService.js';
+import { sendFcmNotification } from '../services/notificationService.js';
+import crypto from 'crypto';
 
 const router = express.Router();
 
 const confirmOtpSchema = z.object({
   otp: z.string().regex(/^\d{4}$/, { message: 'OTP must be 4 digits' }).optional(),
+  // Accepted for client compatibility but deliberately not authoritative:
+  // self-reported coordinates must never satisfy the escrow release gate.
   latitude: z.number().optional(),
   longitude: z.number().optional(),
 });
@@ -17,7 +20,7 @@ const confirmOtpSchema = z.object({
 router.post('/:id/confirm-otp', authenticate, userLimiter, validateBody(confirmOtpSchema), async (req, res) => {
   try {
     const orderId = req.params.id;
-    const { otp, latitude, longitude } = req.body;
+    const { otp } = req.body;
 
     // 1. Fetch order details from database
     const order = await orderRepository.findOrderByAnyId(orderId, '*');
@@ -33,39 +36,34 @@ router.post('/:id/confirm-otp', authenticate, userLimiter, validateBody(confirmO
       return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
     }
 
-    // 2. If no OTP is provided, but coordinates are supplied, try secure server-side geofence confirmation.
-    if (!otp && latitude !== undefined && longitude !== undefined) {
-      try {
-        const result = await orderLifecycleService.deliveryVerification.geofenceAutoConfirm({
-          orderId: orderData.id,
-          driverId: req.user.id,
-          driverLat: latitude,
-          driverLng: longitude,
-          geofenceRadiusM: 500
-        });
-        return res.json({
-          success: true,
-          ...result
-        });
-      } catch (geofenceErr) {
-        logger.error(`[confirm-otp] Geofence auto-confirm failed for order ${orderData.id}:`, geofenceErr.message);
-        return res.status(400).json({ error: geofenceErr.payload?.error || geofenceErr.message || 'Geofence verification failed.' });
-      }
-    }
-
-    // 3. Otherwise, if no coordinates and no OTP, reject.
+    // 2. The customer-entered OTP is the ONLY signal that releases escrow.
+    //
+    // A geofence used to be accepted here as a substitute for the OTP, computed
+    // from latitude/longitude in this request body. That made the bypass
+    // self-asserted: the assigned driver could echo the order's own drop
+    // coordinates back and get distance 0, and the route then stored a constant
+    // 'GEOF' string as a valid OTP and released payment. This contradicts the
+    // documented model in DeliveryVerificationService.geofenceAutoConfirm, which
+    // uses server-ingested telemetry for presence and states that self-reported
+    // GPS alone must never satisfy the release gate.
+    //
+    // Presence telemetry is still enforced where it belongs, by
+    // assertDriverAtDropoff(), which records a flag without releasing payment.
     if (!otp) {
-      return res.status(400).json({ error: 'OTP is required to confirm delivery.' });
+      return res.status(400).json({
+        error: 'OTP is required to confirm delivery. The customer must provide the delivery OTP.'
+      });
     }
 
-    // 4. Trigger delivery completion and escrow payment release securely via the lifecycle service.
+    // 3. Trigger delivery completion and escrow payment release
+    // This calls verifyDelivery under the hood which releases smart contract payments
     const { escrowUpdateFailed } = await orderLifecycleService.verifyDeliveryFn(
       orderData.id,
       req.user.id,
       otp
     );
 
-    // 5. Send FCM push notification to the driver
+    // 4. Send FCM push notification to the driver: "Payment Released ✓ ₹XXXX credited"
     const displayAmount = orderData.total_amount ? (orderData.total_amount / 100).toFixed(2) : '0.00';
     await sendFcmNotification(req.user.id, {
       title: 'Payment Released',
@@ -74,18 +72,22 @@ router.post('/:id/confirm-otp', authenticate, userLimiter, validateBody(confirmO
       logger.warn(`[confirm-otp] Notification delivery failed: ${err.message}`);
     });
 
+    // isGeofenced is retained as a constant false so older clients keep taking
+    // the OTP branch. Auto-confirm by geofence no longer exists on this route.
     if (escrowUpdateFailed) {
       return res.status(202).json({
         message: 'Delivery verified successfully. Escrow payout requires reconciliation.',
         escrow_status: 'released',
-        payment_released: true
+        payment_released: true,
+        isGeofenced: false
       });
     }
 
     return res.json({
       success: true,
       message: 'Delivery verified successfully! Payment released to driver.',
-      payment_released: true
+      payment_released: true,
+      isGeofenced: false
     });
   } catch (err) {
     logger.error('[confirm-otp] Exception:', err.message);

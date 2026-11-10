@@ -15,6 +15,18 @@ from app.models import price_prediction as pp
 client = TestClient(app, headers={'X-API-Key': 'test_key'})
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _trained_demand_artifact():
+    """Train and sign the demand artifact once for this module.
+
+    The committed models_storage/demand_forecast.pkl predates HMAC signing and
+    is refused at load, so the auth/list/predict tests below cannot pass in a
+    fresh checkout without training a valid artifact first.
+    """
+    df.train_demand_forecast_model()
+    df.reset_model_cache()
+
+
 def test_root():
     response = client.get("/")
     assert response.status_code == 200
@@ -35,7 +47,7 @@ def test_health():
         "collaborative_filter",
         "eta_predictor",
     }
-    assert data["model_artifact_origin"]["demand_forecast"] in {"real", "synthetic", None}
+    assert data["model_artifact_origin"]["demand_forecast"] in {"real", "synthetic", "module_trained", None}
 
 
 def _auth_payload():
@@ -96,7 +108,7 @@ def test_train_demand(tmp_path, monkeypatch):
     assert "mae" in data["metrics"]
     assert "rmse" in data["metrics"]
     meta = df.get_model_meta("demand_forecast") or {}
-    assert meta.get("training_meta", {}).get("source") == "synthetic"
+    assert meta.get("training_meta", {}).get("source") == "module_trained"
 
 
 def test_list_models():

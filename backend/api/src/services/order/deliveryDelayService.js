@@ -8,6 +8,15 @@ export const DELIVERY_DELAY_THRESHOLD_MINUTES = Number.isFinite(Number(process.e
 
 const ACTIVE_STATUSES = new Set(['active', 'truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving']);
 
+function parseDestinationCoordinate(value, limit) {
+  // PostgreSQL numeric values can be strings; missing/non-scalar values
+  // must not be coerced to a valid zero coordinate.
+  if ((typeof value !== 'number' && typeof value !== 'string') ||
+      (typeof value === 'string' && !value.trim())) return null;
+  const coordinate = Number(value);
+  return Number.isFinite(coordinate) && Math.abs(coordinate) <= limit ? coordinate : null;
+}
+
 function formatEta(eta) {
   return new Date(eta).toISOString();
 }
@@ -52,7 +61,8 @@ export class DeliveryDelayService {
   }
 
   async processLocation({ orderId, driverId, latitude, longitude }) {
-    if (!orderId || !driverId || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+    if (!orderId || !driverId || !Number.isFinite(latitude) || !Number.isFinite(longitude) ||
+        Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
 
     const { data: order, error } = await this.orderRepository.findOrderById(
       orderId,
@@ -60,11 +70,15 @@ export class DeliveryDelayService {
     );
     if (error || !order || order.driver_id !== driverId || !ACTIVE_STATUSES.has(order.status)) return null;
 
+    const dropLat = parseDestinationCoordinate(order.drop_lat, 90);
+    const dropLng = parseDestinationCoordinate(order.drop_lng, 180);
+    if (dropLat === null || dropLng === null) return null;
+
     const estimate = await this.routeEstimate({
       pickupLat: latitude,
       pickupLng: longitude,
-      dropLat: Number(order.drop_lat),
-      dropLng: Number(order.drop_lng),
+      dropLat,
+      dropLng,
     });
     if (!estimate || !Number.isFinite(estimate.durationSeconds)) return null;
 

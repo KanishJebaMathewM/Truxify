@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
 
 import '../models/app_models.dart';
+import '../services/driver_insights_service.dart';
 import '../services/marketplace_repository.dart';
 import '../theme/app_theme.dart';
 

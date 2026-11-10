@@ -125,7 +125,7 @@ class _TireChainScreenState extends State<TireChainScreen> {
   Widget _buildMetricTile(String label, String value, IconData icon, Color color) {
     return Card(
       elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: color.withOpacity(0.3), width: 2)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: color.withValues(alpha: 0.3), width: 2)),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(

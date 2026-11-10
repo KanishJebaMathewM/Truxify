@@ -51,8 +51,8 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
   };
 
   String _filterTruckType = 'Any';
-  Set<String> _selectedFilterTruckTypes = {};
-  Set<String> _selectedFilterCargoCategories = {};
+  final Set<String> _selectedFilterTruckTypes = {};
+  final Set<String> _selectedFilterCargoCategories = {};
   double _filterMinCapacity = 0;
   double _filterMaxCapacity = 25;
   String _filterMaterialType = 'Any';
@@ -820,7 +820,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                         style: Theme.of(context).textTheme.labelMedium),
                     const SizedBox(height: 8),
                     DropdownButtonFormField<String>(
-                      value: _filterMaterialType,
+                      initialValue: _filterMaterialType,
                       items: materialTypes
                           .map((m) => DropdownMenuItem(value: m, child: Text(m)))
                           .toList(),
@@ -1277,7 +1277,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                 child: Column(
                   children: [
                     DropdownButtonFormField<String>(
-                      value: _goodsType,
+                      initialValue: _goodsType,
                       items: _goodsTypes
                           .map((type) => DropdownMenuItem(value: type, child: Text(type)))
                           .toList(),

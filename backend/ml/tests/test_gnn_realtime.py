@@ -30,7 +30,7 @@ def test_real_time_update_reroutes_when_traffic_changes():
         {'from': 'B', 'to': 'C', 'distance': 10.0, 'time': 10.0, 'cost': 50.0, 'fuel': 4.0, 'congestion': 0.1},
     ]
 
-    optimizer = RouteOptimizer()
+    optimizer = RouteOptimizer(allow_untrained=True)
     updated_route = optimizer.real_time_update(
         current_route,
         {
@@ -57,7 +57,7 @@ def test_real_time_update_applies_route_updates_without_reoptimization_when_unch
         {'from': 'B', 'to': 'C', 'distance': 10.0, 'time': 10.0, 'cost': 50.0, 'fuel': 4.0, 'congestion': 0.1},
     ]
 
-    optimizer = RouteOptimizer()
+    optimizer = RouteOptimizer(allow_untrained=True)
     updated_route = optimizer.real_time_update(
         current_route,
         {'A-B': {'time': 10.0, 'cost': 50.0, 'congestion': 0.1}},

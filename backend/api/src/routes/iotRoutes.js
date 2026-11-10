@@ -103,6 +103,24 @@ const telemetryHistoryLimiter = rateLimit({
   message: { error: 'Rate limit exceeded', retryAfter: 900 },
 });
 
+
+// backend/api/src/routes/iotRoutes.js (Excerpt)
+
+// BEFORE:
+// await supabase.from('notifications').insert({
+//   user_id: driverId,
+//   notif_type: 'cold_chain_alert',
+//   title: 'Cold Chain Temperature Violation',
+//   body: 'Temperature threshold exceeded in cargo compartment.'
+// });
+
+// FIXED: Use valid 'system' notif_type per issue #6963
+await supabase.from('notifications').insert({
+  user_id: driverId,
+  notif_type: 'system',
+  title: 'Cold Chain Temperature Violation',
+  body: 'Temperature threshold exceeded in cargo compartment.',
+});
 // ============================================================================
 // 1. POST TELEMETRY DATA (IoT)
 // POST /api/iot/telemetry/:id
@@ -204,7 +222,7 @@ router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePar
     let prevOutOfRange = false;
     let prevErr = null;
     if (isOutOfRange) {
-      logger.warn(`Cold chain violation on load ${loadId}: temp ${temperature}°C out of range [${load.target_temperature_min}, ${load.target_temperature_max}]`);
+      logger.warn({ event: 'COLD_CHAIN_VIOLATION', requestId: req.requestId || req.id, loadId, temperature, targetMin: load.target_temperature_min, targetMax: load.target_temperature_max }, 'Cold chain violation detected');
 
       const { data: prevTelemetry, error: pErr } = await supabaseAdmin
         .from('temperature_telemetry')

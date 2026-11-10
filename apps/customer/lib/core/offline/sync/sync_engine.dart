@@ -28,9 +28,10 @@ class SyncEngine {
     this.maxRetries = 5,
     this.batchSize = 20,
     http.Client? httpClient,
-    Future<String?> Function()? getCurrentToken,
-    Future<bool> Function()? refreshAuthToken,
-  }) : resolver = resolver ?? ConflictResolver(), httpClient = httpClient ?? _defaultHttpClient, getCurrentToken = getCurrentToken ?? _defaultGetCurrentToken, refreshAuthToken = refreshAuthToken ?? _defaultRefreshAuthToken;
+    Connectivity? connectivity,
+    String? Function()? getCurrentToken,
+    Future<String?> Function()? refreshAuthToken,
+  }) : resolver = resolver ?? ConflictResolver(), httpClient = httpClient ?? _defaultHttpClient, getCurrentToken = getCurrentToken ?? _defaultGetCurrentToken, refreshAuthToken = refreshAuthToken ?? _defaultRefreshAuthToken, _connectivity = connectivity ?? Connectivity();
 
   final OfflineEventDb db;
   final String apiBaseUrl;
@@ -62,7 +63,7 @@ class SyncEngine {
   bool _isSyncing = false;
 
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
-  final Connectivity _connectivity = Connectivity();
+  final Connectivity _connectivity;
 
   Future<void> startListening() async {
     if (_connectivitySubscription != null) return;
@@ -216,7 +217,9 @@ class SyncEngine {
         final newToken = await refreshAuthToken();
         if (newToken == null) {
           developer.log('[SyncEngine] ❌ Token refresh failed; re-queuing batch as retryable (preserve data).');
-          return SyncUploadOutcome.retryableFailure;
+          // An auth-plumbing blip is not a server rejection: re-queue without
+          // burning the retry budget (issue #14734).
+          return SyncUploadOutcome.networkUnavailable;
         }
         final retry = await _postBatch(body, newToken);
         if (retry.statusCode == 200 || retry.statusCode == 202) {
@@ -231,7 +234,9 @@ class SyncEngine {
             retry.statusCode == 400) {
           return SyncUploadOutcome.permanentFailure;
         }
-        return SyncUploadOutcome.retryableFailure;
+        // The post-refresh failure is still an auth-cycle blip: preserve the
+        // retry budget (issue #14734).
+        return SyncUploadOutcome.networkUnavailable;
       }
 
       if (response.statusCode == 409 || response.statusCode == 422 || response.statusCode == 400) {

@@ -1,120 +1,59 @@
 import axios from 'axios';
 import logger from '../../middleware/logger.js';
 import { CircuitBreaker } from '../../lib/circuitBreaker.js';
+import { geographic, bufferRadius, admitRoute, corridorEnvelope, MAX_ROUTE_RESPONSE_BYTES } from './corridorObservation.js';
 
-export class CorridorService {
-  /**
-   * @param {object} [options={}]
-   * @param {string} [options.osrmBaseUrl]
-   * @param {number} [options.defaultBufferMeters=25000] - 25km buffer default
-   */
-  constructor(options = {}) {
-    this.osrmBaseUrl = options.osrmBaseUrl || process.env.OSRM_BASE_URL || 'https://router.project-osrm.org';
-    this.defaultBufferMeters = options.defaultBufferMeters || 25000;
-    this.breaker = new CircuitBreaker({
-      failureThreshold: 5,
-      cooldownPeriod: 20000,
-    });
-  }
-
-  /**
-   * Fetches the detailed OSRM route geometry between origin and destination.
-   * 
-   * @param {object} origin - { lat, lng }
-   * @param {object} destination - { lat, lng }
-   * @returns {Promise<{coordinates: Array<[number, number]>, distanceKm: number, durationMinutes: number}>}
-   */
-  async getRouteGeometry(origin, destination) {
-    const url = `${this.osrmBaseUrl}/route/v1/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}`;
-
-    try {
-      const response = await this.breaker.execute(async () => {
-        return axios.get(url, {
-          timeout: 4000,
-          params: {
-            geometries: 'geojson',
-            overview: 'full',
-            steps: false,
-          },
-        });
-      });
-
-      const route = response?.data?.routes?.[0];
-      if (route && route.geometry) {
-        return {
-          coordinates: route.geometry.coordinates, // [[lng, lat], ...]
-          distanceKm: Number((route.distance / 1000).toFixed(2)),
-          durationMinutes: Number((route.duration / 60).toFixed(1)),
-        };
-      }
-
-      throw new Error('No route found in OSRM response');
-    } catch (err) {
-      logger.warn({ err: err.message }, '[CorridorService] OSRM route lookup failed; constructing straight line approximation');
-      return {
-        coordinates: [
-          [origin.lng, origin.lat],
-          [destination.lng, destination.lat],
-        ],
-        distanceKm: 0,
-        durationMinutes: 0,
-      };
-    }
-  }
-
-  /**
-   * Generates an elastic corridor bounding box and GeoJSON buffer along a route.
-   * 
-   * @param {object} origin - { lat, lng }
-   * @param {object} destination - { lat, lng }
-   * @param {number} [bufferMeters] - Buffer radius in meters (default 25km)
-   * @returns {Promise<object>} Corridor definition with bounding box and GeoJSON
-   */
-  async generateCorridor(origin, destination, bufferMeters = null) {
-    const radiusMeters = bufferMeters || this.defaultBufferMeters;
-    const route = await this.getRouteGeometry(origin, destination);
-
-    const coords = route.coordinates;
-    let minLng = Infinity;
-    let maxLng = -Infinity;
-    let minLat = Infinity;
-    let maxLat = -Infinity;
-
-    for (const [lng, lat] of coords) {
-      if (lng < minLng) minLng = lng;
-      if (lng > maxLng) maxLng = lng;
-      if (lat < minLat) minLat = lat;
-      if (lat > maxLat) maxLat = lat;
-    }
-
-    // Convert buffer meters to approximate degree offset (1 deg lat ~ 111,320m)
-    const latBufferDeg = radiusMeters / 111320;
-    const avgLat = (minLat + maxLat) / 2;
-    const lngBufferDeg = radiusMeters / (111320 * Math.cos((avgLat * Math.PI) / 180));
-
-    const boundingBox = {
-      minLng: Number((minLng - lngBufferDeg).toFixed(6)),
-      maxLng: Number((maxLng + lngBufferDeg).toFixed(6)),
-      minLat: Number((minLat - latBufferDeg).toFixed(6)),
-      maxLat: Number((maxLat + latBufferDeg).toFixed(6)),
-    };
-
-    const routeLineStringGeoJson = {
-      type: 'LineString',
-      coordinates: coords,
-    };
-
-    return {
-      origin,
-      destination,
-      bufferMeters: radiusMeters,
-      directDistanceKm: route.distanceKm,
-      directDurationMinutes: route.durationMinutes,
-      boundingBox,
-      routeLineStringGeoJson,
-      generatedAt: new Date().toISOString(),
-    };
-  }
+function fallback(start, end, reason) {
+  return { coordinates: [[start.lng, start.lat], [end.lng, end.lat]], distanceKm: 0, durationMinutes: 0,
+    source: 'straight_line', routeObserved: false, reason };
 }
 
+export class CorridorService {
+  #base;
+  #buffer;
+  #timeout;
+  constructor(options = {}) {
+    const base = options.osrmBaseUrl ?? process.env.OSRM_BASE_URL ?? 'https://router.project-osrm.org';
+    if (typeof base !== 'string' || !base.trim()) throw new TypeError('OSRM base URL must be nonempty');
+    const url = new URL(base);
+    if (!['http:', 'https:'].includes(url.protocol) || url.search || url.hash) throw new TypeError('OSRM base URL must use HTTP(S) without query/fragment');
+    this.#base = base.trim().replace(/\/+$/, '');
+    this.#buffer = bufferRadius(options.defaultBufferMeters ?? 25000);
+    this.#timeout = options.timeoutMs ?? 4000;
+    if (!Number.isSafeInteger(this.#timeout) || this.#timeout < 1 || this.#timeout > 60000) throw new RangeError('timeout must be an integer in [1,60000]');
+    this.breaker = new CircuitBreaker('routing-corridor', { failureThreshold: 5, resetTimeoutMs: 20000, requestTimeoutMs: this.#timeout });
+  }
+  get osrmBaseUrl() { return this.#base; }
+  get defaultBufferMeters() { return this.#buffer; }
+
+  async getRouteGeometry(origin, destination) {
+    const start = geographic(origin); const end = geographic(destination);
+    const path = [start, end].map(point => `${point.lng.toFixed(6)},${point.lat.toFixed(6)}`).join(';');
+    try {
+      return await this.breaker.execute(async ({ signal }) => {
+        const response = await axios.get(`${this.#base}/route/v1/driving/${path}`, {
+          timeout: this.#timeout, signal, maxContentLength: MAX_ROUTE_RESPONSE_BYTES,
+          params: { geometries: 'geojson', overview: 'full', steps: false, alternatives: false },
+        });
+        return admitRoute(response.data) ?? fallback(start, end, 'no_route');
+      });
+    } catch (error) {
+      logger.warn({ err: error.message }, '[CorridorService] Road route unobserved; retaining owned straight-line fallback');
+      return fallback(start, end, 'provider_unavailable');
+    }
+  }
+
+  async generateCorridor(origin, destination, bufferMeters = null) {
+    const start = geographic(origin); const end = geographic(destination);
+    const radius = bufferRadius(bufferMeters ?? this.#buffer);
+    const route = await this.getRouteGeometry(start, end);
+    const envelope = corridorEnvelope(route.coordinates, radius);
+    return { origin: { ...start }, destination: { ...end }, bufferMeters: radius,
+      directDistanceKm: route.distanceKm, directDurationMinutes: route.durationMinutes,
+      boundingBox: envelope.boundingBox, longitudeMode: envelope.longitudeMode,
+      routeSource: route.source, routeObserved: route.routeObserved, routeReason: route.reason,
+      routeLineStringGeoJson: { type: 'LineString', coordinates: route.coordinates.map(point => [...point]) },
+      generatedAt: new Date().toISOString() };
+  }
+}
 export default CorridorService;

@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 
@@ -197,7 +196,7 @@ void main() {
         // Should not throw — the router catches the exception.
       });
 
-      test.skip('catches and logs callback errors', () async {
+      test('catches and logs callback errors', () async {
         final data = {'notifType': 'order_update'};
         await NotificationRouter.navigate(data, (target, data) async {
           throw Exception('Test error');
@@ -218,7 +217,6 @@ void main() {
         );
 
         NotificationTarget? receivedTarget;
-        String? receivedOrderId;
 
         await NotificationRouter.navigateFromItem(item, (target, data) async {
           receivedTarget = target;
@@ -249,12 +247,6 @@ void main() {
 
     group('navigateFromRemoteMessage', () {
       test('navigates from RemoteMessage data', () async {
-        // Mock RemoteMessage
-        class MockRemoteMessage {
-          final Map<String, dynamic> data;
-          MockRemoteMessage(this.data);
-        }
-
         final message = MockRemoteMessage({
           'notifType': 'order_update',
           'order_display_id': 'ORD-1',
@@ -363,4 +355,9 @@ void main() {
       expect(item.loadOfferId, 'OFFER-123');
     });
   });
+}
+// Dart has no local class declarations — hoisted out of the test body.
+class MockRemoteMessage {
+  final Map<String, dynamic> data;
+  MockRemoteMessage(this.data);
 }

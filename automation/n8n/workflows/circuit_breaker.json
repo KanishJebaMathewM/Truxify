@@ -42,6 +42,7 @@
           "boolean": [
             {
               "value1": "={{ $json.isAnomalyDetected }}",
+              "operation": "equal",
               "value2": true
             }
           ]

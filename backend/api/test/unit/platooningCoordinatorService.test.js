@@ -6,7 +6,7 @@ import {
   PLATOON_CONFIG,
   PLATOON_STATUS,
   VEHICLE_ROLE,
-} from '../../../backend/api/src/services/platooningCoordinatorService.js';
+} from '../../src/services/platooningCoordinatorService.js';
 
 describe('Autonomous Truck Platooning Coordinator Service', () => {
   let coordinator;

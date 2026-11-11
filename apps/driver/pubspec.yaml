@@ -40,24 +40,24 @@ dependencies:
   sqflite: ^2.3.0
   path_provider: ^2.1.2
   connectivity_plus: ^7.2.0
-  record: ^5.0.5
-  workmanager: ^0.6.0
+  record: ^7.1.2
+  workmanager: ^0.10.10
   intl: ^0.20.2
   url_launcher: ^6.3.2
-  geolocator: ^11.1.0
+  geolocator: ^14.0.2
   socket_io_client: ^3.1.6
   shimmer: ^3.0.0
-  permission_handler: ^11.4.0
+  permission_handler: ^13.0.2
   share_plus: ^10.1.4
   pdf: ^3.11.2
   printing: ^5.13.4
   qr_flutter: ^4.1.0
-  camera: ^0.11.0+2
+  camera: ^0.12.2
   signature: ^6.3.0
   image_picker: ^1.1.2
   flutter_image_compress: ^2.3.0
-  battery_plus: ^6.2.1
-  flutter_dotenv: ^5.2.0
+  battery_plus: ^7.1.2
+  flutter_dotenv: ^6.0.1
   sentry_flutter: ^8.14.1
 
 dev_dependencies:

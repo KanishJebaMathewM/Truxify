@@ -1,12 +1,6 @@
 import { Kafka } from 'kafkajs';
 import { context, propagation } from '@opentelemetry/api';
 import logger from '../../api/src/middleware/logger.js';
-// backend/kafka/config/kafka.config.js (Excerpt)
-
-import { Kafka } from 'kafkajs';
-import logger from '../middleware/logger.js';
-
-// ... existing Kafka instance configuration ...
 
 export async function resetConsumerOffsets(groupId, topicPartitions) {
   const admin = kafka.admin();

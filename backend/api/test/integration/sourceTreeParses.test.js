@@ -12,7 +12,6 @@ const ROOT_DIR = path.resolve(BACKEND_API_DIR, '..');
 // covered again.
 const EXEMPT_PARSE_FILES = new Set([
   'src/lib/profileCache.js',
-  'src/services/webrtc/WebRTCSignalingServer.js',
 ]);
 
 const EXCLUDED_DIRS = new Set(['node_modules', 'dist', 'coverage', '.git', 'build', '.next']);

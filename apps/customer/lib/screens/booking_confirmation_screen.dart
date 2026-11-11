@@ -348,7 +348,12 @@ final orderId = _createdOrderId ?? await _orderService.createOrder(
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) {
+        if (!didPop) Navigator.of(context).pop();
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: const Text('Confirm Booking'),
         leading: IconButton(
@@ -581,6 +586,7 @@ final orderId = _createdOrderId ?? await _orderService.createOrder(
             ),
           ),
         ],
+      ),
       ),
     );
   }

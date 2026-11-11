@@ -15,7 +15,7 @@ router.post("/fcm-token", authenticate, async (req, res) => {
     // Get FCM token from request body
     const { fcmToken } = req.body;
 
-    // Validate token
+    // Validate FCM token
     if (!fcmToken || typeof fcmToken !== "string") {
       return res.status(400).json({
         success: false,
@@ -23,7 +23,7 @@ router.post("/fcm-token", authenticate, async (req, res) => {
       });
     }
 
-    // Make sure authenticate middleware provided the user
+    // Make sure authenticated user exists
     if (!req.user || !req.user.id) {
       return res.status(401).json({
         success: false,
@@ -41,21 +41,29 @@ router.post("/fcm-token", authenticate, async (req, res) => {
       .select("id, fcm_token")
       .single();
 
-    // Supabase error
+    // Handle Supabase errors
     if (error) {
       console.error("Supabase FCM token update error:", error);
 
+      // Profile does not exist
+      if (error.code === "PGRST116") {
+        return res.status(404).json({
+          success: false,
+          error: "User profile not found",
+        });
+      }
+
       return res.status(500).json({
         success: false,
-        error: error.message,
+        error: "Failed to update FCM token",
       });
     }
 
-    // Successfully updated
+    // Successful update
     return res.status(200).json({
       success: true,
       message: "FCM token updated successfully",
-      user: data,
+      data,
     });
   } catch (error) {
     console.error("FCM token route error:", error);

@@ -1,53 +1,105 @@
-"""Model #16: Cargo & Payload Multi-Load Optimiser (Phase 3 Intelligence)
+"""Model #16: Cargo & Payload Multi-Load Optimiser.
 
-Solves multi-dimensional bin packing (weight + volume constraints) with greedy
-seeding and local search heuristics to combine multiple compatible freight loads
-onto a single truck. Sequences multi-stop pickups and deliveries using OSRM
-with graceful haversine fallbacks.
+Selects compatible freight loads using weight and volume constraints, builds
+pickup-before-delivery routes, and estimates road distance through OSRM with
+a Haversine fallback.
+
+Note: This module performs aggregate weight/volume optimisation. It does not
+perform physical 3D box placement because individual cargo dimensions and
+orientation constraints are not part of the input schema.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
+import urllib.error
 import urllib.parse
 import urllib.request
-import json
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field, validator
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Model #16: Cargo & Payload Optimiser"])
 
-# ---------------------------------------------------------------------------
-# Pydantic Schemas
-# ---------------------------------------------------------------------------
+Coordinate = Tuple[float, float]
+
+# ============================================================
+# 1. PYDANTIC SCHEMAS
+# ============================================================
+
+def validate_coordinate_pair(value: List[float], field_name: str):
+    """Validate latitude and longitude coordinates."""
+    if len(value) != 2:
+        raise ValueError(f"{field_name} must contain [latitude, longitude].")
+
+    lat, lon = value
+
+    if not math.isfinite(lat) or not math.isfinite(lon):
+        raise ValueError("Coordinates must be finite numbers.")
+
+    if not -90 <= lat <= 90:
+        raise ValueError("Latitude must be between -90 and 90.")
+
+    if not -180 <= lon <= 180:
+        raise ValueError("Longitude must be between -180 and 180.")
+
+    return value
+
 
 class LoadItem(BaseModel):
-    load_id: str = Field(..., description="Unique load identifier (e.g. L1)")
-    weight_kg: float = Field(..., ge=0, description="Cargo weight in kilograms")
-    volume_m3: float = Field(..., ge=0, description="Cargo volume in cubic metres")
-    origin: List[float] = Field(..., min_length=2, max_length=2, description="[lat, lng] of pickup")
-    destination: List[float] = Field(..., min_length=2, max_length=2, description="[lat, lng] of dropoff")
-    freight_amount: float = Field(..., ge=0, description="Offered freight payout in INR")
+    load_id: str = Field(..., min_length=1)
+    weight_kg: float = Field(..., ge=0, allow_inf_nan=False)
+    volume_m3: float = Field(..., ge=0, allow_inf_nan=False)
+    origin: List[float] = Field(..., min_length=2, max_length=2)
+    destination: List[float] = Field(..., min_length=2, max_length=2)
+    freight_amount: float = Field(..., ge=0, allow_inf_nan=False)
+
+    @validator("load_id")
+    def validate_load_id(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("load_id cannot be empty.")
+        return value
+
+    @validator("origin", "destination")
+    def validate_coordinates(cls, value):
+        return validate_coordinate_pair(value, "origin/destination")
 
 
 class LoadOptimiserInput(BaseModel):
-    truck_payload_kg: float = Field(..., gt=0, description="Maximum truck weight capacity in kg")
-    truck_volume_m3: float = Field(..., gt=0, description="Maximum truck volumetric capacity in m3")
-    available_loads: List[LoadItem] = Field(..., description="Pool of candidate loads")
-    driver_location: List[float] = Field(..., min_length=2, max_length=2, description="Driver current [lat, lng]")
+    truck_payload_kg: float = Field(..., gt=0, allow_inf_nan=False)
+    truck_volume_m3: float = Field(..., gt=0, allow_inf_nan=False)
+    available_loads: List[LoadItem]
+    driver_location: List[float] = Field(
+        ..., min_length=2, max_length=2
+    )
+    top_k: int = Field(5, ge=1, le=20)
+
+    @validator("driver_location")
+    def validate_driver_location(cls, value):
+        return validate_coordinate_pair(value, "driver_location")
+
+    @validator("available_loads")
+    def validate_unique_load_ids(cls, loads):
+        ids = [load.load_id for load in loads]
+
+        if len(ids) != len(set(ids)):
+            raise ValueError("Duplicate load IDs are not allowed.")
+
+        return loads
 
 
 class RouteStop(BaseModel):
-    type: str = Field(..., description="'start', 'pickup', or 'destination'")
-    load_id: Optional[str] = Field(None, description="Associated load ID for pickup or dropoff")
-    location: List[float] = Field(..., description="[lat, lng] coordinates")
-    description: str = Field(..., description="Human-readable stop description")
+    type: str
+    load_id: Optional[str] = None
+    location: List[float]
+    description: str
 
 
 class LoadCombination(BaseModel):
@@ -79,360 +131,619 @@ class LoadOptimiserOutput(BaseModel):
     combinations: List[LoadCombination]
 
 
-# ---------------------------------------------------------------------------
-# Distance & Geometry Utilities
-# ---------------------------------------------------------------------------
+# ============================================================
+# 2. DISTANCE AND GEOMETRY UTILITIES
+# ============================================================
 
 EARTH_RADIUS_KM = 6371.0
-CIRCUITY_FACTOR = 1.25  # Highway circuity factor for Indian roads over Haversine
-AVG_TRUCK_SPEED_KMH = 45.0  # Typical commercial truck average speed in India
+CIRCUITY_FACTOR = 1.25
+AVG_TRUCK_SPEED_KMH = 45.0
+OSRM_TIMEOUT_SECONDS = float(
+    os.getenv("OSRM_TIMEOUT_SECONDS", "1.0")
+)
 
 
-def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Calculate great-circle distance between two points in km."""
+def haversine_km(lat1, lon1, lat2, lon2):
+    """Calculate great-circle distance between two coordinates."""
+
     d_lat = math.radians(lat2 - lat1)
     d_lon = math.radians(lon2 - lon1)
+
     a = (
-        math.sin(d_lat / 2.0) ** 2
+        math.sin(d_lat / 2) ** 2
         + math.cos(math.radians(lat1))
         * math.cos(math.radians(lat2))
-        * math.sin(d_lon / 2.0) ** 2
+        * math.sin(d_lon / 2) ** 2
     )
-    return 2.0 * EARTH_RADIUS_KM * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+
+    a = min(1.0, max(0.0, a))
+
+    return (
+        2 * EARTH_RADIUS_KM
+        * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    )
 
 
-_osrm_status: Optional[bool] = None
+def haversine_route_estimate(points):
+    """Estimate route distance when OSRM is unavailable."""
+
+    distance = sum(
+        haversine_km(
+            *points[i],
+            *points[i + 1]
+        ) * CIRCUITY_FACTOR
+        for i in range(len(points) - 1)
+    )
+
+    distance = round(distance, 1)
+    duration = round(distance / AVG_TRUCK_SPEED_KMH, 2)
+
+    return distance, duration
 
 
-def query_osrm_distance(points: List[Tuple[float, float]]) -> Tuple[float, float]:
-    """Query OSRM for driving distance (km) and duration (hours) across a sequence of points.
+def query_osrm_distance(points):
+    """Get driving distance and duration using OSRM."""
 
-    Falls back to circuity-adjusted Haversine if OSRM is unreachable.
-    """
-    global _osrm_status
     if len(points) < 2:
         return 0.0, 0.0
 
-    osrm_url = os.environ.get("OSRM_BASE_URL", "http://localhost:5002").rstrip("/")
+    osrm_url = os.getenv(
+        "OSRM_BASE_URL",
+        "http://localhost:5002"
+    ).rstrip("/")
 
-    # Only attempt OSRM query if not previously marked unreachable
-    if _osrm_status is not False:
-        coords_str = ";".join(f"{lon:.6f},{lat:.6f}" for lat, lon in points)
-        url = f"{osrm_url}/route/v1/driving/{coords_str}?overview=false&steps=false"
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Truxify-ML-Engine"})
-            with urllib.request.urlopen(req, timeout=0.5) as resp:
-                if resp.status == 200:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    if data.get("code") == "Ok" and "routes" in data and len(data["routes"]) > 0:
-                        _osrm_status = True
-                        distance_m = data["routes"][0].get("distance", 0.0)
-                        duration_s = data["routes"][0].get("duration", 0.0)
-                        return round(distance_m / 1000.0, 1), round(duration_s / 3600.0, 2)
-        except Exception:
-            _osrm_status = False
+    coordinates = ";".join(
+        f"{lon:.6f},{lat:.6f}"
+        for lat, lon in points
+    )
 
-    total_dist_km = 0.0
-    for i in range(len(points) - 1):
-        p1 = points[i]
-        p2 = points[i + 1]
-        dist = haversine_km(p1[0], p1[1], p2[0], p2[1]) * CIRCUITY_FACTOR
-        total_dist_km += dist
+    query = urllib.parse.urlencode({
+        "overview": "false",
+        "steps": "false"
+    })
 
-    total_dist_km = max(round(total_dist_km, 1), 5.0)
-    duration_hours = round(total_dist_km / AVG_TRUCK_SPEED_KMH, 2)
-    return total_dist_km, duration_hours
+    url = (
+        f"{osrm_url}/route/v1/driving/"
+        f"{coordinates}?{query}"
+    )
+
+    try:
+        request = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Truxify-ML-Engine"}
+        )
+
+        with urllib.request.urlopen(
+            request,
+            timeout=OSRM_TIMEOUT_SECONDS
+        ) as response:
+
+            if response.status != 200:
+                raise RuntimeError("OSRM request failed.")
+
+            data = json.loads(
+                response.read().decode("utf-8")
+            )
+
+            routes = data.get("routes") or []
+
+            if data.get("code") != "Ok" or not routes:
+                raise RuntimeError("Invalid OSRM route response.")
+
+            distance = float(routes[0]["distance"])
+            duration = float(routes[0]["duration"])
+
+            if (
+                not math.isfinite(distance)
+                or not math.isfinite(duration)
+                or distance < 0
+                or duration < 0
+            ):
+                raise ValueError("Invalid OSRM distance or duration.")
+
+            return (
+                round(distance / 1000, 1),
+                round(duration / 3600, 2)
+            )
+
+    except (
+        urllib.error.URLError,
+        TimeoutError,
+        ValueError,
+        KeyError,
+        TypeError,
+        json.JSONDecodeError,
+        RuntimeError
+    ) as error:
+
+        logger.warning(
+            "OSRM unavailable. Using Haversine fallback: %s",
+            error
+        )
+
+        return haversine_route_estimate(points)
 
 
-# ---------------------------------------------------------------------------
-# Stop Sequencing with Precedence (Pickups before Dropoffs)
-# ---------------------------------------------------------------------------
+# ============================================================
+# 3. PICKUP AND DELIVERY ROUTE SEQUENCING
+# ============================================================
 
-def sequence_stops(
-    driver_loc: Tuple[float, float],
-    loads: List[LoadItem]
-) -> Tuple[List[RouteStop], List[Tuple[float, float]]]:
-    """Sequence pickups and dropoffs greedily by nearest feasible stop,
-
-    ensuring that every load's origin is visited prior to its destination.
+def sequence_stops(driver_loc, loads):
     """
-    stops: List[RouteStop] = [
+    Generate route stops using nearest-stop selection.
+
+    Ensures each load is picked up before its delivery.
+    """
+
+    stops = [
         RouteStop(
             type="start",
             load_id=None,
-            location=[driver_loc[0], driver_loc[1]],
-            description="Driver Start Location",
+            location=[
+                driver_loc[0],
+                driver_loc[1]
+            ],
+            description="Driver Start Location"
         )
     ]
-    point_coords: List[Tuple[float, float]] = [driver_loc]
+
+    point_coords = [driver_loc]
 
     picked_up = set()
     delivered = set()
+
     current_pos = driver_loc
 
-    # Build candidates
-    # Each stop: (type, load_id, (lat, lng), desc)
-    total_stops_needed = len(loads) * 2
-
     while len(delivered) < len(loads):
+
         candidates = []
-        for l in loads:
-            if l.load_id not in picked_up:
+
+        for load in loads:
+
+            if load.load_id not in picked_up:
+
                 candidates.append((
                     "pickup",
-                    l.load_id,
-                    (l.origin[0], l.origin[1]),
-                    f"Pickup {l.load_id} ({l.weight_kg}kg, {l.volume_m3}m³)",
+                    load.load_id,
+                    tuple(load.origin),
+                    f"Pickup {load.load_id} "
+                    f"({load.weight_kg} kg, {load.volume_m3} m3)"
                 ))
-            elif l.load_id not in delivered:
+
+            elif load.load_id not in delivered:
+
                 candidates.append((
                     "destination",
-                    l.load_id,
-                    (l.destination[0], l.destination[1]),
-                    f"Deliver {l.load_id} (Collect ₹{int(l.freight_amount):,})",
+                    load.load_id,
+                    tuple(load.destination),
+                    f"Deliver {load.load_id}"
                 ))
 
         if not candidates:
+            logger.error(
+                "Route sequencing stopped before all deliveries."
+            )
             break
 
-        # Pick nearest candidate from current_pos
-        best_cand = None
-        best_dist = float("inf")
-        for cand in candidates:
-            c_loc = cand[2]
-            d = haversine_km(current_pos[0], current_pos[1], c_loc[0], c_loc[1])
-            if d < best_dist:
-                best_dist = d
-                best_cand = cand
+        best_stop = min(
+            candidates,
+            key=lambda candidate: haversine_km(
+                current_pos[0],
+                current_pos[1],
+                candidate[2][0],
+                candidate[2][1]
+            )
+        )
 
-        stop_type, l_id, loc, desc = best_cand
-        stops.append(RouteStop(
-            type=stop_type,
-            load_id=l_id,
-            location=[loc[0], loc[1]],
-            description=desc,
-        ))
-        point_coords.append(loc)
-        current_pos = loc
+        stop_type, load_id, location, description = best_stop
+
+        stops.append(
+            RouteStop(
+                type=stop_type,
+                load_id=load_id,
+                location=list(location),
+                description=description
+            )
+        )
+
+        point_coords.append(location)
+        current_pos = location
 
         if stop_type == "pickup":
-            picked_up.add(l_id)
+            picked_up.add(load_id)
         else:
-            delivered.add(l_id)
+            delivered.add(load_id)
 
     return stops, point_coords
 
 
-# ---------------------------------------------------------------------------
-# Multi-Dimensional Bin Packing & Local Search Engine
-# ---------------------------------------------------------------------------
+# ============================================================
+# 4. COMBINATION EVALUATION
+# ============================================================
 
 def compute_combination_details(
-    candidate_loads: List[LoadItem],
-    truck_weight: float,
-    truck_volume: float,
-    driver_loc: Tuple[float, float],
-    combo_index: int,
-) -> LoadCombination:
-    """Evaluate and build a complete LoadCombination object for a feasible set of loads."""
-    total_w = sum(l.weight_kg for l in candidate_loads)
-    total_v = sum(l.volume_m3 for l in candidate_loads)
-    total_rev = sum(l.freight_amount for l in candidate_loads)
+    candidate_loads,
+    truck_weight,
+    truck_volume,
+    driver_loc,
+    combo_index
+):
+    """Calculate capacity, route, revenue and recommendation."""
 
-    w_fill = round((total_w / truck_weight) * 100.0, 1)
-    v_fill = round((total_v / truck_volume) * 100.0, 1)
-    payload_fill = max(w_fill, v_fill)
-
-    # Route sequencing
-    route_stops, points = sequence_stops(driver_loc, candidate_loads)
-    dist_km, dur_h = query_osrm_distance(points)
-
-    # Revenue per km efficiency
-    earnings_per_km = total_rev / max(dist_km, 1.0)
-
-    # Composite ranking score:
-    # 50% normalized earnings, 30% payload fill, 20% distance efficiency
-    score = round(
-        (0.5 * (total_rev / 10000.0))
-        + (0.3 * (payload_fill / 100.0))
-        + (0.2 * min(earnings_per_km / 100.0, 2.0)),
-        3,
+    total_weight = sum(
+        load.weight_kg for load in candidate_loads
     )
 
-    # Recommendation badge
-    if len(candidate_loads) > 1 and payload_fill >= 80.0:
-        reason = f"High Capacity Multi-Load ({len(candidate_loads)} shipments): {payload_fill}% fill, ₹{int(total_rev):,} earnings"
+    total_volume = sum(
+        load.volume_m3 for load in candidate_loads
+    )
+
+    total_revenue = sum(
+        load.freight_amount for load in candidate_loads
+    )
+
+    weight_fill = round(
+        (total_weight / truck_weight) * 100, 1
+    )
+
+    volume_fill = round(
+        (total_volume / truck_volume) * 100, 1
+    )
+
+    payload_fill = max(
+        weight_fill,
+        volume_fill
+    )
+
+    route_stops, points = sequence_stops(
+        driver_loc,
+        candidate_loads
+    )
+
+    distance, duration = query_osrm_distance(points)
+
+    earnings_per_km = (
+        total_revenue / max(distance, 1.0)
+    )
+
+    revenue_score = min(total_revenue / 10000, 1.0)
+    capacity_score = min(payload_fill / 100, 1.0)
+    efficiency_score = min(earnings_per_km / 100, 1.0)
+
+    score = round(
+        0.50 * revenue_score
+        + 0.30 * capacity_score
+        + 0.20 * efficiency_score,
+        3
+    )
+
+    if len(candidate_loads) > 1 and payload_fill >= 80:
+
+        reason = (
+            f"High Capacity Multi-Load "
+            f"({len(candidate_loads)} shipments): "
+            f"{payload_fill}% utilization, "
+            f"Rs. {total_revenue:,.2f} earnings"
+        )
+
     elif len(candidate_loads) > 1:
-        reason = f"Multi-Drop Consolidation: {len(candidate_loads)} loads, ₹{earnings_per_km:.0f}/km efficiency"
+
+        reason = (
+            f"Multi-Drop Consolidation: "
+            f"{len(candidate_loads)} loads, "
+            f"Rs. {earnings_per_km:.2f}/km efficiency"
+        )
+
     else:
-        reason = f"Single Direct Load: {payload_fill}% truck capacity utilization"
+
+        reason = (
+            f"Single Direct Load: "
+            f"{payload_fill}% capacity utilization"
+        )
 
     return LoadCombination(
         combination_id=f"COMBO-{combo_index}",
-        load_ids=[l.load_id for l in candidate_loads],
+        load_ids=[
+            load.load_id for load in candidate_loads
+        ],
         loads=candidate_loads,
-        total_weight_kg=round(total_w, 1),
-        total_volume_m3=round(total_v, 1),
-        weight_fill_percent=w_fill,
-        volume_fill_percent=v_fill,
+        total_weight_kg=round(total_weight, 2),
+        total_volume_m3=round(total_volume, 2),
+        weight_fill_percent=weight_fill,
+        volume_fill_percent=volume_fill,
         payload_fill_percent=payload_fill,
-        total_freight_amount=round(total_rev, 2),
-        estimated_distance_km=dist_km,
-        estimated_duration_hours=dur_h,
+        total_freight_amount=round(total_revenue, 2),
+        estimated_distance_km=distance,
+        estimated_duration_hours=duration,
         route_sequence=route_stops,
         score=score,
-        recommendation_reason=reason,
+        recommendation_reason=reason
     )
 
 
+# ============================================================
+# 5. MULTI-DIMENSIONAL BIN PACKING OPTIMISATION
+# ============================================================
+
 def solve_load_optimisation(
-    truck_payload_kg: float,
-    truck_volume_m3: float,
-    available_loads: List[LoadItem],
-    driver_location: Tuple[float, float],
-    top_k: int = 5,
-) -> List[LoadCombination]:
-    """Execute multi-dimensional bin packing with greedy seeds + local search."""
-    # 1. Filter out loads that physically cannot fit individually
+    truck_payload_kg,
+    truck_volume_m3,
+    available_loads,
+    driver_location,
+    top_k=5
+):
+    """
+    Generate feasible combinations using greedy heuristics
+    and local search.
+    """
+
+    if truck_payload_kg <= 0 or truck_volume_m3 <= 0:
+        raise ValueError("Truck capacities must be positive.")
+
+    if top_k < 1:
+        raise ValueError("top_k must be at least 1.")
+
+    load_ids = [load.load_id for load in available_loads]
+
+    if len(load_ids) != len(set(load_ids)):
+        raise ValueError("Load IDs must be unique.")
+
     valid_loads = [
-        l for l in available_loads
-        if l.weight_kg <= truck_payload_kg and l.volume_m3 <= truck_volume_m3
+        load for load in available_loads
+        if load.weight_kg <= truck_payload_kg
+        and load.volume_m3 <= truck_volume_m3
     ]
 
     if not valid_loads:
         return []
 
-    # 2. Compute value density for each load
-    # Density metric = freight / (0.5 * (w/W) + 0.5 * (v/V))
-    def get_density(item: LoadItem) -> float:
-        norm_w = item.weight_kg / truck_payload_kg
-        norm_v = item.volume_m3 / truck_volume_m3
-        consumption = max(0.5 * norm_w + 0.5 * norm_v, 0.001)
-        return item.freight_amount / consumption
+    def fits(weight, volume, load):
+        return (
+            weight + load.weight_kg <= truck_payload_kg
+            and volume + load.volume_m3 <= truck_volume_m3
+        )
 
-    # Store discovered sets of load_ids to prevent duplicates
-    discovered_combos: Dict[frozenset[str], List[LoadItem]] = {}
+    def get_density(load):
 
-    def try_register_combo(candidate: List[LoadItem]):
+        normalized_weight = (
+            load.weight_kg / truck_payload_kg
+        )
+
+        normalized_volume = (
+            load.volume_m3 / truck_volume_m3
+        )
+
+        consumption = max(
+            0.5 * normalized_weight
+            + 0.5 * normalized_volume,
+            0.001
+        )
+
+        return load.freight_amount / consumption
+
+    discovered_combos = {}
+
+    def register_combo(candidate):
+
         if not candidate:
             return
-        tot_w = sum(x.weight_kg for x in candidate)
-        tot_v = sum(x.volume_m3 for x in candidate)
-        if tot_w <= truck_payload_kg and tot_v <= truck_volume_m3:
-            key = frozenset(x.load_id for x in candidate)
-            if key not in discovered_combos:
-                discovered_combos[key] = candidate
 
-    # 3. Greedy Heuristic Seeds
+        ids = [load.load_id for load in candidate]
+
+        if len(ids) != len(set(ids)):
+            return
+
+        total_weight = sum(
+            load.weight_kg for load in candidate
+        )
+
+        total_volume = sum(
+            load.volume_m3 for load in candidate
+        )
+
+        if (
+            total_weight <= truck_payload_kg
+            and total_volume <= truck_volume_m3
+        ):
+
+            key = frozenset(ids)
+
+            discovered_combos.setdefault(
+                key,
+                list(candidate)
+            )
+
+    def greedy_build(sorted_loads):
+
+        selected = []
+        weight = 0.0
+        volume = 0.0
+
+        for load in sorted_loads:
+
+            if fits(weight, volume, load):
+
+                selected.append(load)
+
+                weight += load.weight_kg
+                volume += load.volume_m3
+
+        return selected
+
     # Seed A: Density-first greedy
-    density_sorted = sorted(valid_loads, key=get_density, reverse=True)
-    combo_a: List[LoadItem] = []
-    w_acc = 0.0
-    v_acc = 0.0
-    for l in density_sorted:
-        if w_acc + l.weight_kg <= truck_payload_kg and v_acc + l.volume_m3 <= truck_volume_m3:
-            combo_a.append(l)
-            w_acc += l.weight_kg
-            v_acc += l.volume_m3
-    try_register_combo(combo_a)
+    density_sorted = sorted(
+        valid_loads,
+        key=get_density,
+        reverse=True
+    )
+
+    register_combo(
+        greedy_build(density_sorted)
+    )
 
     # Seed B: Revenue-first greedy
-    revenue_sorted = sorted(valid_loads, key=lambda x: x.freight_amount, reverse=True)
-    combo_b: List[LoadItem] = []
-    w_acc = 0.0
-    v_acc = 0.0
-    for l in revenue_sorted:
-        if w_acc + l.weight_kg <= truck_payload_kg and v_acc + l.volume_m3 <= truck_volume_m3:
-            combo_b.append(l)
-            w_acc += l.weight_kg
-            v_acc += l.volume_m3
-    try_register_combo(combo_b)
+    revenue_sorted = sorted(
+        valid_loads,
+        key=lambda load: (
+            load.freight_amount,
+            get_density(load)
+        ),
+        reverse=True
+    )
 
-    # Seed C: Proximity-first greedy (nearest pickup to driver location)
-    def dist_to_driver(l: LoadItem) -> float:
-        return haversine_km(driver_location[0], driver_location[1], l.origin[0], l.origin[1])
+    register_combo(
+        greedy_build(revenue_sorted)
+    )
 
-    proximity_sorted = sorted(valid_loads, key=dist_to_driver)
-    combo_c: List[LoadItem] = []
-    w_acc = 0.0
-    v_acc = 0.0
-    for l in proximity_sorted:
-        if w_acc + l.weight_kg <= truck_payload_kg and v_acc + l.volume_m3 <= truck_volume_m3:
-            combo_c.append(l)
-            w_acc += l.weight_kg
-            v_acc += l.volume_m3
-    try_register_combo(combo_c)
+    # Seed C: Proximity-first greedy
+    proximity_sorted = sorted(
+        valid_loads,
+        key=lambda load: haversine_km(
+            driver_location[0],
+            driver_location[1],
+            load.origin[0],
+            load.origin[1]
+        )
+    )
 
-    # Seed D: Single largest loads as single-load baselines
-    for single in revenue_sorted[:3]:
-        try_register_combo([single])
+    register_combo(
+        greedy_build(proximity_sorted)
+    )
 
-    # 4. Local Search (1-opt & 2-opt swaps + greedy filling)
-    base_combos = list(discovered_combos.values())
+    # Seed D: Single-load alternatives
+    for load in revenue_sorted[:10]:
+        register_combo([load])
+
+    # Local search
+    base_combos = list(
+        discovered_combos.values()
+    )
+
     for combo in base_combos:
-        current_set = set(x.load_id for x in combo)
-        unselected = [x for x in valid_loads if x.load_id not in current_set]
 
-        # Greedy fill: try adding any unselected loads
+        current_ids = {
+            load.load_id for load in combo
+        }
+
+        unselected = [
+            load for load in valid_loads
+            if load.load_id not in current_ids
+        ]
+
+        # Greedy filling
         extended = list(combo)
-        for cand in unselected:
-            tot_w = sum(x.weight_kg for x in extended) + cand.weight_kg
-            tot_v = sum(x.volume_m3 for x in extended) + cand.volume_m3
-            if tot_w <= truck_payload_kg and tot_v <= truck_volume_m3:
-                extended.append(cand)
-        try_register_combo(extended)
 
-        # 1-opt swap: replace one item with a better unselected item
-        for i, in_item in enumerate(combo):
-            for cand in unselected:
-                swap_candidate = list(combo)
-                swap_candidate[i] = cand
-                try_register_combo(swap_candidate)
+        used_weight = sum(
+            load.weight_kg for load in extended
+        )
 
-    # 5. Evaluate and rank all discovered combinations
-    evaluated: List[LoadCombination] = []
-    for idx, loads_comb in enumerate(discovered_combos.values(), start=1):
-        res = compute_combination_details(
-            candidate_loads=loads_comb,
+        used_volume = sum(
+            load.volume_m3 for load in extended
+        )
+
+        for candidate in sorted(
+            unselected,
+            key=get_density,
+            reverse=True
+        ):
+
+            if fits(
+                used_weight,
+                used_volume,
+                candidate
+            ):
+
+                extended.append(candidate)
+
+                used_weight += candidate.weight_kg
+                used_volume += candidate.volume_m3
+
+        register_combo(extended)
+
+        # One-for-one swap
+        for index in range(len(combo)):
+
+            for candidate in unselected:
+
+                swapped = list(combo)
+                swapped[index] = candidate
+
+                register_combo(swapped)
+
+    # Evaluate combinations
+    evaluated = []
+
+    for index, combination in enumerate(
+        discovered_combos.values(),
+        start=1
+    ):
+
+        result = compute_combination_details(
+            candidate_loads=combination,
             truck_weight=truck_payload_kg,
             truck_volume=truck_volume_m3,
             driver_loc=driver_location,
-            combo_index=idx,
+            combo_index=index
         )
-        evaluated.append(res)
 
-    # 6. Rank combinations by score and revenue
-    evaluated.sort(key=lambda c: (c.score, c.total_freight_amount, c.payload_fill_percent), reverse=True)
+        evaluated.append(result)
 
-    # Re-index combination IDs in clean ranked order (COMBO-1, COMBO-2, ...)
-    ranked: List[LoadCombination] = []
-    for rank_idx, combo in enumerate(evaluated[:top_k], start=1):
-        combo.combination_id = f"COMBO-{rank_idx}"
-        ranked.append(combo)
+    # Rank combinations
+    evaluated.sort(
+        key=lambda combination: (
+            combination.score,
+            combination.total_freight_amount,
+            combination.payload_fill_percent,
+            len(combination.load_ids)
+        ),
+        reverse=True
+    )
+
+    ranked = evaluated[:top_k]
+
+    for rank, combination in enumerate(
+        ranked,
+        start=1
+    ):
+
+        combination.combination_id = (
+            f"COMBO-{rank}"
+        )
 
     return ranked
 
 
-# ---------------------------------------------------------------------------
-# FastAPI Router Endpoints
-# ---------------------------------------------------------------------------
+# ============================================================
+# 6. FASTAPI ROUTER ENDPOINTS
+# ============================================================
 
-@router.post("/api/ml/load-optimiser", response_model=LoadOptimiserOutput)
-@router.post("/load-optimiser", response_model=LoadOptimiserOutput)
-async def optimise_loads_endpoint(payload: LoadOptimiserInput) -> LoadOptimiserOutput:
-    """Optimise multi-load assignments within weight and volume constraints.
+@router.post(
+    "/api/ml/load-optimiser",
+    response_model=LoadOptimiserOutput
+)
+@router.post(
+    "/load-optimiser",
+    response_model=LoadOptimiserOutput
+)
+def optimise_loads_endpoint(
+    payload: LoadOptimiserInput
+) -> LoadOptimiserOutput:
 
-    Generates ranked combinations maximizing total revenue and vehicle capacity
-    utilization while ordering multi-stop pickup and dropoff waypoints.
-    """
+    """Optimise multi-load assignments within truck constraints."""
+
     try:
-        driver_loc = (payload.driver_location[0], payload.driver_location[1])
+
+        driver_location = (
+            payload.driver_location[0],
+            payload.driver_location[1]
+        )
+
         combinations = solve_load_optimisation(
             truck_payload_kg=payload.truck_payload_kg,
             truck_volume_m3=payload.truck_volume_m3,
             available_loads=payload.available_loads,
-            driver_location=driver_loc,
-            top_k=5,
+            driver_location=driver_location,
+            top_k=payload.top_k
         )
 
         return LoadOptimiserOutput(
@@ -442,10 +753,34 @@ async def optimise_loads_endpoint(payload: LoadOptimiserInput) -> LoadOptimiserO
             truck_payload_kg=payload.truck_payload_kg,
             truck_volume_m3=payload.truck_volume_m3,
             driver_location=payload.driver_location,
-            total_available_loads=len(payload.available_loads),
-            feasible_combinations_count=len(combinations),
-            combinations=combinations,
+            total_available_loads=len(
+                payload.available_loads
+            ),
+            feasible_combinations_count=len(
+                combinations
+            ),
+            combinations=combinations
         )
-    except Exception as e:
-        logger.error("Load optimiser failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Load optimisation error: {str(e)}")
+
+    except ValueError as error:
+
+        logger.warning(
+            "Invalid optimisation request: %s",
+            error
+        )
+
+        raise HTTPException(
+            status_code=422,
+            detail=str(error)
+        ) from error
+
+    except Exception as error:
+
+        logger.exception(
+            "Load optimiser failed"
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Load optimisation failed. Please try again later."
+        ) from error

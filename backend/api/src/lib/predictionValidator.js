@@ -38,33 +38,7 @@ const MIN_PRICE_INR = 100;
  * for a single load in the East Africa corridor.
  */
 const MAX_PRICE_INR = 500_000;
-// backend/api/src/lib/predictionValidator.js
 
-export function validatePrediction(prediction) {
-  // Guard against null, undefined, arrays, or non-object payloads
-  if (!prediction || typeof prediction !== 'object' || Array.isArray(prediction)) {
-    return {
-      isValid: false,
-      errors: ['Prediction payload must be a non-null object']
-    };
-  }
-
-  const errors = [];
-
-  // Proceed with standard property validation checks
-  if (typeof prediction.confidence !== 'number' || prediction.confidence < 0 || prediction.confidence > 1) {
-    errors.push('Confidence must be a number between 0 and 1');
-  }
-
-  if (prediction.etaMinutes !== undefined && (typeof prediction.etaMinutes !== 'number' || prediction.etaMinutes < 0)) {
-    errors.push('ETA minutes must be a non-negative number');
-  }
-
-  return {
-    isValid: errors.length === 0,
-    errors
-  };
-}
 /**
  * Maximum acceptable ratio between max_price and estimated_price.
  * The ML model currently returns ±15% bands, so 3× is a generous ceiling.

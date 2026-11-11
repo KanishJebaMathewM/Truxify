@@ -12,6 +12,9 @@ import { getEventSeverity } from '../lib/auditEventTypes.js';
 const BATCH_SIZE = 50;
 const FLUSH_INTERVAL_MS = 2000;
 
+export const MAX_AUDIT_EXPORT_ROWS = 10000;
+const AUDIT_EXPORT_PAGE_SIZE = 1000;
+
 let logBuffer = [];
 let flushTimer = null;
 
@@ -171,7 +174,28 @@ export async function queryAuditLogs(filters = {}) {
  * @param {object} filters 
  * @returns {Promise<string>} JSON string
  */
-export async function exportAuditLogsJSON(filters) {
-    const { logs } = await queryAuditLogs({ ...filters, limit: 10000 });
-    return JSON.stringify(logs, null, 2);
+export async function exportAuditLogsJSON(filters = {}) {
+    const exported = [];
+    let offset = filters.offset || 0;
+
+    while (exported.length < MAX_AUDIT_EXPORT_ROWS) {
+        const pageSize = Math.min(AUDIT_EXPORT_PAGE_SIZE, MAX_AUDIT_EXPORT_ROWS - exported.length);
+        const { logs } = await queryAuditLogs({
+            ...filters,
+            limit: pageSize,
+            offset,
+        });
+
+        exported.push(...logs);
+        if (logs.length < pageSize) break;
+        offset += logs.length;
+    }
+
+    if (exported.length >= MAX_AUDIT_EXPORT_ROWS) {
+        logger.warn(
+            `[AuditService] Audit export reached the ${MAX_AUDIT_EXPORT_ROWS} row cap; later records were not exported.`,
+        );
+    }
+
+    return JSON.stringify(exported, null, 2);
 }

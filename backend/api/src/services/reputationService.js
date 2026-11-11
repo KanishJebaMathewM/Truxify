@@ -1,3 +1,5 @@
+import logger from '../middleware/logger.js';
+
 // Inside backend/api/src/services/reputationService.js
 
 export async function aggregateRating(userId, roleScore) {

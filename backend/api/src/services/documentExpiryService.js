@@ -5,8 +5,6 @@ import crypto from 'crypto';
 // backend/api/src/services/documentExpiryService.js (Excerpt)
 
 import { v4 as uuidv4 } from 'uuid';
-import { redisClient } from '../config/redis.js';
-import logger from '../middleware/logger.js';
 
 // Lua script for atomic compare-and-delete (ensures we only delete our own lock)
 const RELEASE_LOCK_LUA = `

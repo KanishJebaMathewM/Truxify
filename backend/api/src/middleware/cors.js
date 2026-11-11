@@ -1,8 +1,7 @@
 import cors from "cors";
 
-const allowedOrigins = (process.env.ALLOWED_ORIGINS?.split(',') ?? ['*'])
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+
+// Inside CORS origin validation logic:
 
 export const corsOptionsDelegate = (req, callback) => {
   const rawOrigin = req.header('Origin');

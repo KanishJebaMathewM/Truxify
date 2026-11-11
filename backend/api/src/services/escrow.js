@@ -1,6 +1,41 @@
-// backend/api/src/services/escrow.js
+/**
+ * Polygon Blockchain — Escrow Payment Service
+ *
+ * Wraps the deployed TruxifyEscrow.sol contract so the order routes can
+ * call createBooking(), releasePayment(), and cancelBooking() during the
+ * order lifecycle.
+ *
+ * The contract uses OpenZeppelin's Ownable pattern. The backend's
+ * relayer wallet (RELAYER_WALLET_PRIVATE_KEY) calls releasePayment
+ * and cancelBooking. createBooking() is sent by the **customer's wallet**
+ * directly — the contract requires msg.sender == customer to
+ * prevent the relayer from bearing the escrow cost — but the call is only
+ * valid with an owner-signed EIP-191 commitment binding the customer wallet,
+ * bookingId, and a per-customer nonce, so a third party cannot front-run a
+ * pending bookingId (issue #7734). buildDepositTx() mints that commitment.
+ *
+ * The buildDepositTx() function below builds the deposit transaction
+ * and returns it as an unsigned populated transaction so the
+ * customer's wallet can sign and submit it. After the customer
+ * confirms the on-chain deposit, the backend records the txHash.
+ *
+ * Startup validation:
+ *   When all env vars are set, the module performs two checks:
+ *   1. provider.getCode(contractAddress) — verifies bytecode exists at the address
+ *   2. bookings(0) eth_call — verifies the contract responds with the expected ABI
+ *
+ * Required env vars (see .env.example):
+ *   POLYGON_RPC_URL             — JSON-RPC endpoint
+ *   ESCROW_CONTRACT_ADDRESS     — Deployed TruxifyEscrow.sol address
+ *   RELAYER_WALLET_PRIVATE_KEY  — Private key of the authorised relayer
+ */
 
-import logger from '../middleware/logger.js';
+import { ethers } from 'ethers'
+import * as Sentry from '@sentry/node'
+import logger from '../middleware/logger.js'
+import { measureExecution } from '../core/performanceMetrics.js'
+import { isEscrowPaused, escrowPausedResult } from './escrowCircuitBreaker.js'
+import { supabaseAdmin } from '../config/db.js'
 
 /**
  * Verifies an escrow deposit transaction.
@@ -72,141 +107,7 @@ class EscrowAmountMismatchError extends Error {
     this.code = 'ESCROW_AMOUNT_MISMATCH';
   }
 }
-// backend/api/src/services/escrow.js
 
-import { ethers } from 'ethers';
-import logger from '../middleware/logger.js';
-
-/**
- * Updates the on-chain booking amount when a drop location is modified.
- * Added per issue #11240.
- */
-export async function escrowUpdateAmount(bookingId, newAmountWei) {
-  try {
-    logger.info('Initiating on-chain escrow booking amount update', { bookingId, newAmountWei });
-
-    const contract = getEscrowContractInstance();
-    const tx = await contract.updateBookingAmount(bookingId, newAmountWei);
-    const receipt = await tx.wait();
-
-    logger.info('Successfully updated on-chain escrow booking amount', {
-      bookingId,
-      txHash: receipt.transactionHash
-    });
-
-    return {
-      success: true,
-      txHash: receipt.transactionHash
-    };
-  } catch (err) {
-    logger.error('Failed to update on-chain escrow amount', {
-      error: err.message,
-      bookingId,
-      newAmountWei
-    });
-    throw err;
-  }
-}
-/**
- * Polygon Blockchain — Escrow Payment Service
- *
- * Wraps the deployed TruxifyEscrow.sol contract so the order routes can
- * call createBooking(), releasePayment(), and cancelBooking() during the
- * order lifecycle.
- *
- * The contract uses OpenZeppelin's Ownable pattern. The backend's
- * relayer wallet (RELAYER_WALLET_PRIVATE_KEY) calls releasePayment
- * and cancelBooking. createBooking() is sent by the **customer's wallet**
- * directly — the contract requires msg.sender == customer to
- * prevent the relayer from bearing the escrow cost — but the call is only
- * valid with an owner-signed EIP-191 commitment binding the customer wallet,
- * bookingId, and a per-customer nonce, so a third party cannot front-run a
- * pending bookingId (issue #7734). buildDepositTx() mints that commitment.
- *
- * The buildDepositTx() function below builds the deposit transaction
- * and returns it as an unsigned populated transaction so the
- * customer's wallet can sign and submit it. After the customer
- * confirms the on-chain deposit, the backend records the txHash.
- *
- * Startup validation:
- *   When all env vars are set, the module performs two checks:
- *   1. provider.getCode(contractAddress) — verifies bytecode exists at the address
- *   2. bookings(0) eth_call — verifies the contract responds with the expected ABI
- *
- * Required env vars (see .env.example):
- *   POLYGON_RPC_URL             — JSON-RPC endpoint
- *   ESCROW_CONTRACT_ADDRESS     — Deployed TruxifyEscrow.sol address
- *   RELAYER_WALLET_PRIVATE_KEY  — Private key of the authorised relayer
- */
-
-import { ethers } from 'ethers'
-import * as Sentry from '@sentry/node'
-import logger from '../middleware/logger.js'
-import { measureExecution } from '../core/performanceMetrics.js'
-import { isEscrowPaused, escrowPausedResult } from './escrowCircuitBreaker.js'
-import { supabaseAdmin } from '../config/db.js'
-// backend/api/src/services/escrow.js (Excerpt)
-
-import { ethers } from 'ethers';
-import logger from '../middleware/logger.js';
-
-const ESCROW_ABI = [
-  'function createBooking(bytes32 bookingId, address payable driver) external payable',
-  'function releasePayment(bytes32 bookingId) external',
-  'function cancelBooking(bytes32 bookingId, uint256 penaltyAmount) external',
-  'function bookings(bytes32 bookingId) external view returns (address customer, address driver, uint256 amount, bool active)'
-];
-
-export async function createEscrowDeposit(bookingId, customerWallet, driverWallet, amountWei) {
-  try {
-    const escrowContract = getEscrowContractInstance();
-    
-    // ✅ Fixed: Updated from deprecated .deposit() to ABI-correct .createBooking()
-    // Note: customer address is msg.sender in TruxifyEscrow.sol, so only bookingId, driver, and value are passed.
-    const txData = await escrowContract.createBooking.populateTransaction(
-      bookingId, 
-      driverWallet, 
-      { value: amountWei }
-    );
-    
-    return { success: true, txData };
-  } catch (err) {
-    logger.error({ err, bookingId }, 'Failed to populate escrow deposit transaction');
-    throw new Error(`Escrow deposit creation failed: ${err.message}`);
-  }
-}
-
-export async function releaseEscrowPayment(bookingId) {
-  try {
-    const escrowContract = getEscrowContractInstance();
-    
-    // ✅ Fixed: Updated from .releaseFunds() to .releasePayment()
-    const tx = await escrowContract.releasePayment(bookingId);
-    await tx.wait();
-    
-    logger.info({ bookingId, txHash: tx.hash }, 'Escrow payment released successfully on-chain');
-    return { success: true, txHash: tx.hash };
-  } catch (err) {
-    logger.error({ err, bookingId }, 'Failed to release escrow payment on-chain');
-    throw new Error(`Escrow release failed: ${err.message}`);
-  }
-}
-
-export async function cancelEscrowBooking(bookingId, penaltyAmount = 0) {
-  try {
-    const escrowContract = getEscrowContractInstance();
-    
-    // ✅ Fixed: Updated from .refundFunds() to .cancelBooking() with penalty parameter
-    const tx = await escrowContract.cancelBooking(bookingId, penaltyAmount);
-    await tx.wait();
-    
-    logger.info({ bookingId, penaltyAmount, txHash: tx.hash }, 'Escrow cancelled and refunded successfully on-chain');
-    return { success: true, txHash: tx.hash };
-  } catch (err) {
-    logger.error({ err, bookingId }, 'Failed to cancel escrow booking on-chain');
-    throw new Error(`Escrow cancellation failed: ${err.message}`);
-  }
-}
 const RPC_TIMEOUT_MS = 30_000;
 
 function withTimeout(promise, ms = RPC_TIMEOUT_MS) {

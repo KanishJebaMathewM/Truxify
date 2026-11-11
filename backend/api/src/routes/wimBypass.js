@@ -21,8 +21,6 @@ import {
 import logger from '../middleware/logger.js';
 // backend/api/src/routes/wimBypass.js (Refactored Solution)
 
-import { buildTrustedMeasurement } from '../services/trustedMeasurement.js';
-import { logger } from '../utils/logger.js';
 
 const LBS_PER_TONNE = 2204.62; // Ensure constant is defined locally or imported
 

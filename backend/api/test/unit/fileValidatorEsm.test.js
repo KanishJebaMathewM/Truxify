@@ -34,12 +34,36 @@ describe('fileValidator (ES module)', () => {
     expect(detectFileType(PNG_BYTES)).toBe('image/png');
   });
 
-  it('rejects bad MIME type, extension and oversized files before inspecting bytes', () => {
+  it('rejects bad MIME type and extension before inspecting bytes', () => {
     const ok = { size: PDF_BYTES.length, buffer: PDF_BYTES, mimetype: 'application/pdf', originalname: 'rc.pdf' };
     expect(() => validateFile(null)).toThrow('No file provided');
     expect(() => validateFile({ ...ok, mimetype: 'text/html' })).toThrow('Invalid file type');
     expect(() => validateFile({ ...ok, originalname: 'rc.exe' })).toThrow('Invalid file extension');
-    expect(() => validateFile({ ...ok, size: MAX_FILE_SIZE_BYTES + 1 })).toThrow('File size exceeds');
+  });
+
+  it('measures the size limit from the buffer instead of the caller-supplied size', () => {
+    const oversized = Buffer.alloc(MAX_FILE_SIZE_BYTES + 1);
+    oversized.write('%PDF-', 0, 'ascii');
+
+    expect(() => validateFile({
+      size: 100,
+      buffer: oversized,
+      mimetype: 'application/pdf',
+      originalname: 'rc.pdf',
+    })).toThrow('File size exceeds');
+
+    expect(() => validateFile({
+      buffer: oversized,
+      mimetype: 'application/pdf',
+      originalname: 'rc.pdf',
+    })).toThrow('File size exceeds');
+
+    expect(validateFile({
+      size: MAX_FILE_SIZE_BYTES + 1,
+      buffer: PDF_BYTES,
+      mimetype: 'application/pdf',
+      originalname: 'rc.pdf',
+    })).toBe(true);
   });
 
   it('rejects HTML, SVG and truncated payloads disguised as documents', () => {

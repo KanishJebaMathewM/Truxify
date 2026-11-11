@@ -24,7 +24,6 @@ export async function checkKafkaHealth() {
     };
   }
 }import { HealthStatus, executeCheck } from '../HealthCheck.js';
-import logger from '../../../middleware/logger.js';
 
 const NAME = 'kafka';
 const KAFKA_HEALTH_TIMEOUT_MS = 3000;

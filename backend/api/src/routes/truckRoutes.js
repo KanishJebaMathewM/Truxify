@@ -78,13 +78,7 @@
  *         number_plate:
  *           type: string
  */
-// backend/api/src/routes/truckRoutes.js (Excerpt around line 83)
 
-// ❌ Previous import:
-// import { supabase, mongoDb } from '../config/db.js';
-
-// ✅ Updated import including redisClient:
-import { supabase, mongoDb, redisClient } from '../config/db.js';
 import express from 'express';
 import crypto from 'crypto';
 import {

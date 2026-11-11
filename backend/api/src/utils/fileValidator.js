@@ -52,10 +52,6 @@ export const validateFile = (file) => {
         throw new Error('No file provided');
     }
 
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-        throw new Error(`File size exceeds maximum limit of ${MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB`);
-    }
-
     if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
         throw new Error(`Invalid file type. Allowed types: ${ALLOWED_MIME_TYPES.join(', ')}`);
     }
@@ -71,6 +67,12 @@ export const validateFile = (file) => {
 
     if (!Buffer.isBuffer(file.buffer)) {
         throw new Error('File content is required for type validation');
+    }
+
+    // The multipart size field is caller-controlled and may be missing, so the
+    // limit has to come from the bytes that will actually be stored.
+    if (file.buffer.length > MAX_FILE_SIZE_BYTES) {
+        throw new Error(`File size exceeds maximum limit of ${MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB`);
     }
 
     const detectedType = detectFileType(file.buffer);

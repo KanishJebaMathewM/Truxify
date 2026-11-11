@@ -41,7 +41,7 @@ export function correlationIdMiddleware(req, res, next) {
     },
     `Correlation ID ${correlationId} ${
       isPropagated ? 'propagated from client' : 'generated'
-    }`,
+    }`
   );
 
   const store = { correlationId };

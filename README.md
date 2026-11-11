@@ -124,9 +124,17 @@ Truxify is built in 6 distinct layers, each solving a specific trust or efficien
 
 ### Architecture Decision Records
 
-Detailed design decisions for the backend application layer — service decomposition, repository pattern, order lifecycle orchestration, validation workflow, timeline management, and notification/OTP workflow — are documented as Architecture Decision Records:
+For core technology stack choices, trade-offs, and contributor FAQs (Polygon PoS, FastAPI ML, OSRM routing, n8n automation, Supabase+PostGIS/MongoDB hybrid, and Hardhat), see:
+
+👉 [docs/ARCHITECTURE_DECISIONS.md](docs/ARCHITECTURE_DECISIONS.md)
+
+Detailed design decisions for the backend application layer — service decomposition, repository pattern, order lifecycle orchestration, validation workflow, timeline management, and notification/OTP workflow — are documented as domain ADRs:
 
 👉 [docs/architecture/adr/](docs/architecture/adr/)
+
+For the comprehensive documentation index covering APIs, schemas, blockchain, ML, and operations:
+
+👉 [docs/README.md](docs/README.md)
 
 ## 🧠 ML Layer
 10 connected models running on FastAPI:

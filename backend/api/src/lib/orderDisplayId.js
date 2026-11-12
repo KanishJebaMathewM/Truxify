@@ -14,6 +14,7 @@ const DISPLAY_ID_RANDOM_LENGTH = 12;
 // Upper bound on how many times a caller will re-roll the display id when an
 // insert fails with a unique-constraint violation (issue #5740).
 export const ORDER_DISPLAY_ID_MAX_RETRIES = 5;
+
 /**
  * Generate a globally unique order display id of the form
  * `#FF<YYYYMMDD><12-char alphanumeric>` (e.g. `#FF20260802K9X2Q7Z4M1A3`).

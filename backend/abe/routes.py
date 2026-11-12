@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 from abe_core import (
@@ -19,18 +19,13 @@ router = APIRouter(
     tags=["Attribute-Based Encryption"],
 )
 
-# --------------------------------------------------------------------------
 # Initialize ABE systems
-# --------------------------------------------------------------------------
-
 cp_abe = CPABE()
 kp_abe = KPABE()
 dabe = DecentralizedABE()
 
-# --------------------------------------------------------------------------
-# Request Models
-# --------------------------------------------------------------------------
 
+# Request Models
 class PolicyRequest(BaseModel):
     expression: str
     attributes: List[str]
@@ -66,40 +61,34 @@ class IssueAttributeRequest(BaseModel):
     attribute: str
     user: str
 
-# --------------------------------------------------------------------------
-# Helper Functions
-# --------------------------------------------------------------------------
 
+# Helper Functions
 def success_response(data: Any) -> Dict[str, Any]:
     return {
         "success": True,
         "data": data,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
-def handle_exception(message: str, exc: Exception) -> None:
-    logger.exception("%s: %s", message, exc)
-    raise HTTPException(status_code=500, detail=str(exc))
+def handle_exception(message: str, exc: Exception):
+    logger.exception("%s", message)
+    raise HTTPException(
+        status_code=500,
+        detail=message
+    ) from exc
 
-# --------------------------------------------------------------------------
+
 # CP-ABE
-# --------------------------------------------------------------------------
-
 @router.post("/cp-abe/encrypt")
 async def cp_abe_encrypt(request: EncryptRequest):
-    """Encrypt data using CP-ABE."""
     try:
         policy = AccessPolicy(
             expression=request.policy.expression,
             attributes=request.policy.attributes,
         )
 
-        result = cp_abe.encrypt(
-            request.plaintext,
-            policy,
-        )
-
+        result = cp_abe.encrypt(request.plaintext, policy)
         return success_response(result)
 
     except Exception as exc:
@@ -108,7 +97,6 @@ async def cp_abe_encrypt(request: EncryptRequest):
 
 @router.post("/cp-abe/decrypt")
 async def cp_abe_decrypt(request: DecryptRequest):
-    """Decrypt CP-ABE encrypted data."""
     try:
         user_attributes = [
             Attribute(
@@ -132,24 +120,17 @@ async def cp_abe_decrypt(request: DecryptRequest):
 
 @router.post("/cp-abe/user-key")
 async def generate_cp_abe_user_key(request: UserKeyRequest):
-    """Generate a CP-ABE user key."""
     try:
-        result = cp_abe.generate_user_key(
-            request.attributes
-        )
-
+        result = cp_abe.generate_user_key(request.attributes)
         return success_response(result)
 
     except Exception as exc:
         handle_exception("CP-ABE user key generation failed", exc)
 
-# --------------------------------------------------------------------------
-# KP-ABE
-# --------------------------------------------------------------------------
 
+# KP-ABE
 @router.post("/kp-abe/encrypt")
 async def kp_abe_encrypt(request: EncryptRequest):
-    """Encrypt data using KP-ABE."""
     try:
         result = kp_abe.encrypt(
             request.plaintext,
@@ -164,7 +145,6 @@ async def kp_abe_encrypt(request: EncryptRequest):
 
 @router.post("/kp-abe/decrypt")
 async def kp_abe_decrypt(request: DecryptRequest):
-    """Decrypt KP-ABE encrypted data."""
     try:
         policy = AccessPolicy(
             expression=request.encrypted_data.get("policy", ""),
@@ -182,13 +162,9 @@ async def kp_abe_decrypt(request: DecryptRequest):
         handle_exception("KP-ABE decryption failed", exc)
 
 
-# --------------------------------------------------------------------------
 # Decentralized ABE (DABE)
-# --------------------------------------------------------------------------
-
 @router.post("/dabe/authority/add")
 async def add_authority(request: AddAuthorityRequest):
-    """Register a new authority."""
     try:
         result = dabe.add_authority(
             request.authority_id,
@@ -203,7 +179,6 @@ async def add_authority(request: AddAuthorityRequest):
 
 @router.post("/dabe/attribute/issue")
 async def issue_attribute(request: IssueAttributeRequest):
-    """Issue an attribute from an authority."""
     try:
         result = dabe.issue_attribute(
             request.authority_id,
@@ -219,7 +194,6 @@ async def issue_attribute(request: IssueAttributeRequest):
 
 @router.post("/dabe/encrypt")
 async def dabe_encrypt(request: MultiAuthorityRequest):
-    """Encrypt using decentralized ABE."""
     try:
         policy = AccessPolicy(
             expression=request.policy.expression,
@@ -238,13 +212,9 @@ async def dabe_encrypt(request: MultiAuthorityRequest):
         handle_exception("DABE encryption failed", exc)
 
 
-# --------------------------------------------------------------------------
 # Statistics
-# --------------------------------------------------------------------------
-
 @router.get("/stats")
 async def get_abe_stats():
-    """Get statistics for all ABE systems."""
     try:
         stats = {
             "cp_abe": {

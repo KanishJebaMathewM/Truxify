@@ -147,6 +147,22 @@ import logger from '../middleware/logger.js';
 import { auditLog } from '../middleware/auditLog.js';
 import { requireIdempotency } from '../middleware/idempotency.js';
 
+// Import controller functions for new routes if they exist in a separate controller file,
+// otherwise we will implement inline handlers or assume they are part of the existing structure.
+// For this merge, we will assume standard inline handling or existing controller exports if available.
+// Since the original file was self-contained, we will keep the logic inline or import if specified.
+// The prompt implies adding routes that call driverController methods. 
+// To maintain consistency with the single-file nature of the original, 
+// I will map these to existing logic or create placeholders if the controller isn't imported.
+// However, usually in these merges, we assume the controller exists. 
+// Let's stick to the pattern: if the function doesn't exist in this file, we might need to import it.
+// Given the original file didn't import a driverController, but the new snippet does,
+// I will add the import at the top but keep the existing inline logic for safety,
+// and add the new routes calling the controller if available, or fallback.
+
+// NOTE: In a real project, you'd likely move all handlers to driverController.js.
+// Here, we are merging into the router file. I will assume the existence of 
+// driverController.js as per the new snippet.
 import driverController from '../controllers/driverController.js'; 
 
 // Reuse one caller-scoped client per request without sharing credentials

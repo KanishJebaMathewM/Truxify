@@ -4,7 +4,7 @@ from typing import Dict
 
 from fastapi import APIRouter, HTTPException
 from nas.model import NASModel, NASSearcher, NASSearchSpace
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/nas", tags=["Neural Architecture Search"])
@@ -15,9 +15,9 @@ searcher = NASSearcher(search_space)
 
 class SearchRequest(BaseModel):
     method: str = 'random'  # random, evolutionary
-    num_trials: int = 100
-    population_size: int = 20
-    generations: int = 10
+    num_trials: int = Field(default=100, ge=1, le=128)
+    population_size: int = Field(default=20, ge=1, le=50)
+    generations: int = Field(default=10, ge=1, le=20)
 
 @router.post("/search")
 def search_architecture(request: SearchRequest):
@@ -25,6 +25,8 @@ def search_architecture(request: SearchRequest):
     try:
         if request.method == 'random':
             result = searcher.random_search(request.num_trials)
+        if request.method == 'evolutionary' and request.population_size * request.generations > 500:
+            raise HTTPException(status_code=422, detail='evolutionary budget too large.')
         elif request.method == 'evolutionary':
             result = searcher.evolutionary_search(
                 request.population_size,

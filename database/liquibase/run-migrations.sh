@@ -6,6 +6,8 @@
 # Supabase's "postgres"), whose schema is owned by supabase/migrations.
 # They therefore target a dedicated, clearly separate database.
 LIQUIBASE_DB="${LIQUIBASE_DATABASE:-truxify_liquibase}"
+LIQUIBASE_USER="${LIQUIBASE_USERNAME:-postgres}"
+LIQUIBASE_PASS="${LIQUIBASE_PASSWORD:-password}"
 
 if [ "$LIQUIBASE_DB" = "truxify" ] || [ "$LIQUIBASE_DB" = "postgres" ]; then
     echo "Refusing to run Liquibase against the application database '${LIQUIBASE_DB}'." >&2
@@ -31,15 +33,15 @@ fi
 # Run migrations
 liquibase --changeLogFile=changelog-master.xml \
     --url="jdbc:postgresql://localhost:5432/${LIQUIBASE_DB}" \
-    --username=postgres \
-    --password=password \
+    --username="${LIQUIBASE_USER}" \
+    --password="${LIQUIBASE_PASS}" \
     update
 
 # Check status
 liquibase --changeLogFile=changelog-master.xml \
     --url="jdbc:postgresql://localhost:5432/${LIQUIBASE_DB}" \
-    --username=postgres \
-    --password=password \
+    --username="${LIQUIBASE_USER}" \
+    --password="${LIQUIBASE_PASS}" \
     status
 
 echo "✅ Migrations completed successfully!"

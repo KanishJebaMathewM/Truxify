@@ -2,9 +2,18 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { randomUUID } from 'crypto';
 import logger from './logger.js';
 
+const SAFE_CORRELATION_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
 export const correlationContext = new AsyncLocalStorage();
 
-const SAFE_CORRELATION_ID = /^[A-Za-z0-9_-]{1,64}$/;
+export function getCorrelationStore() {
+  return correlationContext.getStore() ?? {};
+}
+
+export function runWithCorrelationId(correlationId, fn) {
+  const store = { correlationId: correlationId || randomUUID() };
+  return correlationContext.run(store, fn);
+}
 
 export function correlationIdMiddleware(req, res, next) {
   const headers = req?.headers || {};
@@ -36,17 +45,11 @@ export function correlationIdMiddleware(req, res, next) {
     },
     `Correlation ID ${correlationId} ${
       isPropagated ? 'propagated from client' : 'generated'
-    }`,
+    }`
   );
 
   const store = { correlationId };
   correlationContext.run(store, next);
 }
 
-export function runWithCorrelationId(correlationId, fn) {
-  return correlationContext.run({ correlationId }, fn);
-}
-
-export function getCorrelationStore() {
-  return correlationContext.getStore() ?? {};
-}
+export default correlationIdMiddleware;

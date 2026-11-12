@@ -136,7 +136,9 @@ class ConflictResolver {
         } else if (item is Map) {
           yield Map<String, dynamic>.from(item);
         }
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[ConflictResolver] dropped malformed attachment row: $e');
+      }
     }
   }
 

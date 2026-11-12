@@ -40,7 +40,8 @@ jobs:
           python -m pytest backend/ml/tests/test_federated_subscription_owner.py
           backend/ml/tests/test_federated_round_recovery.py
           backend/ml/tests/test_federated_model_admission.py backend/ml/tests/test_federated.py
-          backend/ml/tests/test_federated_client_round_protocol.py -q
+          backend/ml/tests/test_federated_client_round_protocol.py
+          backend/ml/tests/test_federated_update_delivery.py -q
       - run: |
           python -m ruff check backend/ml/federated/subscription_owner.py backend/ml/tests/test_federated_subscription_owner.py
           python -m ruff check backend/ml/federated/federated_server.py --ignore I001,F401,UP035,UP045,UP006,BLE001,S110,SIM102,DTZ005,C401,RUF010

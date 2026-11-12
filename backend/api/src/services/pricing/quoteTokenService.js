@@ -10,7 +10,11 @@ export class QuoteTokenService {
    * @param {number} [options.ttlSeconds=900] - 15 minutes
    */
   constructor(options = {}) {
-    this.secret = options.secret || process.env.PRICING_QUOTE_SECRET || 'truxify_pricing_quote_hmac_secret_2026';
+    const secret = options.secret || process.env.PRICING_QUOTE_SECRET;
+    if (!secret || secret.length < 32) {
+      throw new Error('PRICING_QUOTE_SECRET must be set to a value of at least 32 characters.');
+    }
+    this.secret = secret;
     this.ttlSeconds = options.ttlSeconds || DEFAULT_QUOTE_TTL_SECONDS;
   }
 

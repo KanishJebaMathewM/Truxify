@@ -3,10 +3,67 @@ import logger from '../../middleware/logger.js';
 import { getRouteEstimate } from '../osrm.js';
 import { getHaversineDistance } from '../routingService.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
+import { DomainError } from './domainError.js';
 
 const DEFAULT_MAX_DETOUR_KM = 45;
 const DEFAULT_MAX_DETOUR_MINUTES = 60;
 const ESTIMATED_FUEL_COST_PER_KM_INR = 14.5; // Average Indian logistics commercial diesel rate per km
+const ALLOWED_OFFER_STATUSES = ['available'];
+const ACTIVE_ORDER_STATUSES = new Set([
+  'active',
+  'assigned',
+  'accepted',
+  'truck_assigned',
+  'en_route',
+  'en_route_pickup',
+  'arrived_pickup',
+  'at_pickup',
+  'loading',
+  'picked_up',
+  'in_transit',
+  'arriving',
+]);
+
+function normalizeIdentifier(value, field) {
+  if (typeof value !== 'string' || value.trim() === '' || value.trim().length > 100) {
+    throw new DomainError(400, { error: `${field} must be a non-empty string of at most 100 characters` });
+  }
+  return value.trim();
+}
+
+function parseCoordinate(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'boolean') return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function validateOfferCoordinates(loadOffer) {
+  const pickupLat = parseCoordinate(loadOffer.pickup_lat);
+  const pickupLng = parseCoordinate(loadOffer.pickup_lng);
+  const dropLat = parseCoordinate(loadOffer.drop_lat);
+  const dropLng = parseCoordinate(loadOffer.drop_lng);
+
+  if (
+    pickupLat === null ||
+    pickupLng === null ||
+    dropLat === null ||
+    dropLng === null ||
+    pickupLat < -90 ||
+    pickupLat > 90 ||
+    dropLat < -90 ||
+    dropLat > 90 ||
+    pickupLng < -180 ||
+    pickupLng > 180 ||
+    dropLng < -180 ||
+    dropLng > 180
+  ) {
+    throw new DomainError(422, { error: 'Load offer has invalid pickup or drop coordinates' });
+  }
+
+  return { pickupLat, pickupLng, dropLat, dropLng };
+}
 
 function routeDurationMinutes(route, distanceKm) {
   return Number.isFinite(route?.durationSeconds) && route.durationSeconds >= 0
@@ -80,7 +137,7 @@ class DeadheadMatchingService {
       const { data: availableOffers, error: offersError } = await client
         .from('load_offers')
         .select('*')
-        .in('status', ['active', 'open', 'pending'])
+        .in('status', ALLOWED_OFFER_STATUSES)
         .limit(50);
 
       if (offersError || !availableOffers || availableOffers.length === 0) {
@@ -180,92 +237,149 @@ class DeadheadMatchingService {
    */
   async insertMidTripLoad({ orderId, loadOfferId, driverId }) {
     return measureExecution('DeadheadMatchingService.insertMidTripLoad', async () => {
+      const normalizedOrderId = normalizeIdentifier(orderId, 'orderId');
+      const normalizedLoadOfferId = normalizeIdentifier(loadOfferId, 'loadOfferId');
+      const normalizedDriverId = normalizeIdentifier(driverId, 'driverId');
+
       const client = supabaseAdmin ?? supabase;
       if (!client) {
         throw new Error('Database client unconfigured');
       }
 
-      // 1. Fetch the order
+      // 1. Fetch the order and enforce that the caller is its assigned driver.
       const { data: order, error: orderError } = await client
         .from('orders')
         .select('*')
-        .eq('id', orderId)
+        .eq('id', normalizedOrderId)
         .single();
 
       if (orderError || !order) {
-        throw new Error(`Order ${orderId} not found`);
+        throw new DomainError(404, { error: `Order ${normalizedOrderId} not found` });
       }
 
-      // 2. Fetch the load offer
+      if (order.driver_id !== normalizedDriverId) {
+        throw new DomainError(403, { error: 'Access Denied: Order is not assigned to this driver' });
+      }
+
+      if (!ACTIVE_ORDER_STATUSES.has(String(order.status || '').toLowerCase())) {
+        throw new DomainError(409, { error: 'Cannot insert a mid-trip load into an inactive order' });
+      }
+
+      // 2. Fetch the load offer and require an insertable state.
       const { data: loadOffer, error: loadError } = await client
         .from('load_offers')
         .select('*')
-        .eq('id', loadOfferId)
+        .eq('id', normalizedLoadOfferId)
         .single();
 
       if (loadError || !loadOffer) {
-        throw new Error(`Load offer ${loadOfferId} not found`);
+        throw new DomainError(404, { error: `Load offer ${normalizedLoadOfferId} not found` });
       }
 
-      const existingWaypoints = Array.isArray(order.waypoints) ? [...order.waypoints] : [];
+      if (!ALLOWED_OFFER_STATUSES.includes(loadOffer.status)) {
+        throw new DomainError(409, { error: 'Load offer is no longer available for insertion' });
+      }
 
+      const { pickupLat, pickupLng, dropLat, dropLng } = validateOfferCoordinates(loadOffer);
+
+      const existingWaypoints = Array.isArray(order.waypoints) ? [...order.waypoints] : [];
+      if (existingWaypoints.some((waypoint) => waypoint?.load_id === normalizedLoadOfferId)) {
+        throw new DomainError(409, { error: 'Load offer has already been inserted into this order' });
+      }
+
+      const now = new Date().toISOString();
       const newWaypoints = [
         ...existingWaypoints,
         {
-          id: `wp-pickup-${loadOfferId.slice(0, 8)}`,
+          id: `wp-pickup-${normalizedLoadOfferId.slice(0, 8)}`,
           type: 'mid_trip_pickup',
-          load_id: loadOfferId,
-          lat: Number(loadOffer.pickup_lat),
-          lng: Number(loadOffer.pickup_lng),
+          load_id: normalizedLoadOfferId,
+          lat: pickupLat,
+          lng: pickupLng,
           address: loadOffer.pickup_location,
           status: 'pending',
-          created_at: new Date().toISOString(),
+          created_at: now,
         },
         {
-          id: `wp-drop-${loadOfferId.slice(0, 8)}`,
+          id: `wp-drop-${normalizedLoadOfferId.slice(0, 8)}`,
           type: 'mid_trip_drop',
-          load_id: loadOfferId,
-          lat: Number(loadOffer.drop_lat),
-          lng: Number(loadOffer.drop_lng),
+          load_id: normalizedLoadOfferId,
+          lat: dropLat,
+          lng: dropLng,
           address: loadOffer.drop_location,
           status: 'pending',
-          created_at: new Date().toISOString(),
+          created_at: now,
         },
       ];
 
-      // 3. Atomically update the order's waypoints
+      // 3. Claim the offer first with a conditional status update. If another
+      // request claimed it concurrently, no row is returned and the order is
+      // left untouched.
+      const { data: claimedOffer, error: claimError } = await client
+        .from('load_offers')
+        .update({
+          status: 'claimed',
+          updated_at: now,
+        })
+        .eq('id', normalizedLoadOfferId)
+        .in('status', ALLOWED_OFFER_STATUSES)
+        .select('id')
+        .maybeSingle();
+
+      if (claimError) {
+        logger.error({ err: claimError }, '[DeadheadMatching] Failed to claim load offer');
+        throw new DomainError(500, { error: 'Failed to claim load offer' });
+      }
+      if (!claimedOffer) {
+        throw new DomainError(409, { error: 'Load offer is no longer available for insertion' });
+      }
+
+      // 4. Update the order only after the offer claim succeeds. The driver
+      // predicate is repeated here so a stale order object cannot bypass the
+      // authorization check above.
       const { data: updatedOrder, error: updateOrderErr } = await client
         .from('orders')
         .update({
           waypoints: newWaypoints,
-          updated_at: new Date().toISOString(),
+          updated_at: now,
         })
-        .eq('id', orderId)
+        .eq('id', normalizedOrderId)
+        .eq('driver_id', normalizedDriverId)
+        .in('status', [...ACTIVE_ORDER_STATUSES])
         .select()
         .single();
 
-      if (updateOrderErr) {
+      if (updateOrderErr || !updatedOrder) {
         logger.error({ err: updateOrderErr }, '[DeadheadMatching] Failed to update order waypoints');
-        throw updateOrderErr;
+
+        // Compensate the offer claim so a transient order failure does not
+        // leave the offer permanently matched with no waypoints.
+        try {
+          const { error: rollbackError } = await client
+            .from('load_offers')
+            .update({
+              status: loadOffer.status,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', normalizedLoadOfferId)
+            .eq('status', 'claimed');
+
+          if (rollbackError) {
+            logger.error({ err: rollbackError }, '[DeadheadMatching] Failed to roll back load offer claim');
+          }
+        } catch (rollbackException) {
+          logger.error({ err: rollbackException }, '[DeadheadMatching] Failed to roll back load offer claim');
+        }
+
+        throw new DomainError(500, { error: 'Failed to update order waypoints' });
       }
 
-      // 4. Update load_offer status
-      await client
-        .from('load_offers')
-        .update({
-          status: 'matched',
-          matched_order_id: orderId,
-          matched_driver_id: driverId,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', loadOfferId);
-
-      logger.info(`[DeadheadMatching] Successfully inserted mid-trip load ${loadOfferId} into Order ${orderId}`);
+      logger.info(`[DeadheadMatching] Successfully inserted mid-trip load ${normalizedLoadOfferId} into Order ${normalizedOrderId}`);
 
       return {
         success: true,
-        orderId,
-        loadOfferId,
+        orderId: normalizedOrderId,
+        loadOfferId: normalizedLoadOfferId,
         waypoints: newWaypoints,
         order: updatedOrder,
       };

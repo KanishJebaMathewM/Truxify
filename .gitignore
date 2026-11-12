@@ -62,6 +62,9 @@ backend/api/coverage/
 __pycache__/
 *.pyc
 venv/
+# SQLite files the ML service creates at startup (sqlite:///./traffic.db,
+# sqlite:///./ab_testing.db in backend/ml/routes). Local runs write to them.
+*.db
 
 # Local Docker Compose overrides — may contain real credentials
 docker-compose.override.yml
@@ -69,11 +72,10 @@ docker-compose.override.yml
 # Google Services config (contains API keys/secrets)
 **/google-services.json
 
-# Dart define env files (may contain API keys/secrets)
+# Dart define env files (contain API keys)
 dart_defines/*.env
 !dart_defines/*.env.example
-
-.git_corrupted/
-
-# Local VC status-list allocation state
 **/.truxify-vc-status-index.json
+
+*.sqlite
+*.sqlite-journal

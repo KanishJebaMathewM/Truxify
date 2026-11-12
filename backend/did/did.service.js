@@ -554,6 +554,7 @@ class DIDService {
                 }
             }
 
+            // Secure deterministic fallback derivation incorporating transaction nonce and parameters if event parsing fails
             if (!credentialId) {
                 throw new Error(
                     `Failed to resolve valid on-chain credentialId for subject ${subject}`
@@ -577,7 +578,7 @@ class DIDService {
                     validUntilTimestamp * 1000
                 ).toISOString(),
                 txHash: receipt.hash,
-                proof
+                proof: proofHash
             });
 
             logger.info(

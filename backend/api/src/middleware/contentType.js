@@ -14,7 +14,6 @@ export function requireJsonContent(req, res, next) {
         ],
       });
     }
-
     // Compare the base media type exactly (ignoring parameters such as
     // charset). A substring match previously let malformed values like
     // `text/plain; application/json` or `application/jsonx` through.

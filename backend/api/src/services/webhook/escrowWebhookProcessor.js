@@ -64,17 +64,6 @@ async function reconcileWalletLedger(order, txHash, targetStatus = 'confirmed') 
   if (!order.driver_id) {
     return { matched: true };
   }
-  const { data, error } = await requireDb()                      
-  
-    // Before:
-// catch (err) {
-//   throw new Error('OCR processing failed.');
-// }
-
-// After:
-catch (err) {
-  throw new Error('OCR processing failed.', { cause: err });
-}
   const db = requireDb();
   const { data, error } = await db
     .from('wallet_transactions')

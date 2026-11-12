@@ -1,5 +1,5 @@
 {
- "type": "module",
+  "type": "module",
   "private": true,
   "workspaces": [
     "backend/api",

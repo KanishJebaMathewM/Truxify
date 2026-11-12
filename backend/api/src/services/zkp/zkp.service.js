@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import logger from '../../middleware/logger.js';
 import { supabase, supabaseAdmin, redisClient } from '../../config/db.js';
+import { getJwtSecret } from '../../config/jwtSecret.js';
 import { acquireLock, releaseLock, LockAcquisitionError } from '../../lib/redisLock.js';
 
 /**
@@ -480,7 +481,7 @@ class ZKPService {
     }
 
     // 5. Issue Verifiable Signed Session Token
-    const jwtSecret = process.env.JWT_SECRET || 'truxify-dev-secret-change-in-prod';
+    const jwtSecret = getJwtSecret();
     const sessionToken = jwt.sign(
       {
         sub: userId,

@@ -135,6 +135,10 @@ contract FreightSettlement is Ownable, Pausable, ReentrancyGuard {
         require(settlementId != bytes32(0), "FreightSettlement: Invalid settlementId");
         require(settlements[settlementId].shipper == address(0), "FreightSettlement: Settlement already exists");
         require(carrier != address(0), "FreightSettlement: Invalid carrier address");
+        require(broker != address(0), "FreightSettlement: Invalid broker address");
+        require(insurer != address(0), "FreightSettlement: Invalid insurer address");
+        require(carbonFund != address(0), "FreightSettlement: Invalid carbon fund address");
+        require(taxAuthority != address(0), "FreightSettlement: Invalid tax authority address");
         require(totalAmountWei > 0, "FreightSettlement: Total amount must be > 0");
 
         uint256 totalDeductionBps = splits.brokerFeeBps + splits.insuranceFeeBps + splits.carbonOffsetBps + splits.gstRateBps + splits.tdsRateBps;

@@ -25,7 +25,6 @@ import '../services/trip_service.dart';
 import '../services/sync_service.dart';
 import '../services/truck_repository.dart';
 import 'pod_screen.dart';
-
 class TripsScreen extends StatefulWidget {
   const TripsScreen({super.key});
 

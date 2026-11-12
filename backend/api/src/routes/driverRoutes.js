@@ -147,23 +147,6 @@ import logger from '../middleware/logger.js';
 import { auditLog } from '../middleware/auditLog.js';
 import { requireIdempotency } from '../middleware/idempotency.js';
 
-// Import controller functions for new routes if they exist in a separate controller file,
-// otherwise we will implement inline handlers or assume they are part of the existing structure.
-// For this merge, we will assume standard inline handling or existing controller exports if available.
-// Since the original file was self-contained, we will keep the logic inline or import if specified.
-// The prompt implies adding routes that call driverController methods. 
-// To maintain consistency with the single-file nature of the original, 
-// I will map these to existing logic or create placeholders if the controller isn't imported.
-// However, usually in these merges, we assume the controller exists. 
-// Let's stick to the pattern: if the function doesn't exist in this file, we might need to import it.
-// Given the original file didn't import a driverController, but the new snippet does,
-// I will add the import at the top but keep the existing inline logic for safety,
-// and add the new routes calling the controller if available, or fallback.
-
-// NOTE: In a real project, you'd likely move all handlers to driverController.js.
-// Here, we are merging into the router file. I will assume the existence of 
-// driverController.js as per the new snippet.
-
 import driverController from '../controllers/driverController.js'; 
 
 // Reuse one caller-scoped client per request without sharing credentials
@@ -185,7 +168,6 @@ const router = express.Router();
 const hosStatusSchema = z.object({
   status: z.enum(['off_duty', 'on_duty', 'driving', 'resting'])
 });
-
 // ============================================================================
 // ACTIVE DRIVERS (B2B, consumed by the n8n document-integrity workflow)
 // ============================================================================
@@ -301,7 +283,30 @@ function requireDriverRole(req, res, next) {
   }
   next();
 }
+router.get('/driver/:id/earnings', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { period = 'week' } = req.query;
 
+    // Calculate date filter based on period
+    const startDate = getStartDateForPeriod(period);
+
+    const { data: trips, error } = await supabase
+      .from('trips')
+      .select('*, route_details, gross_payment, estimated_fuel_cost, deadhead_saved, tx_hash')
+      .eq('driver_id', id)
+      .gte('completed_at', startDate.toISOString())
+      .order('completed_at', { ascending: false });
+
+    if (error) throw error;
+
+    const summary = computeEarningsSummary(trips);
+
+    return res.status(200).json({ success: true, period, summary, trips });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
 function parseIntegerQuery(value) {
   if (value === undefined) return undefined;
   if (!/^\d+$/.test(String(value))) return NaN;
@@ -449,6 +454,13 @@ router.put('/online', authenticate, userLimiter, requirePolicy('driver:toggle-on
   } catch (err) {
     logger.error({ event: 'DRIVER_ONLINE_STATUS_UPDATE_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver online status update error');
     res.status(500).json({ error: 'Internal Server Error' });
+    // backend/api/src/routes/driverRoutes.js (Excerpt from earnings report handler)
+
+// BEFORE:
+// const avg_earning_per_km = totalKm > 0 ? (totalNetEarnings / 100.0) / totalKm : 0;
+
+// FIXED (Per issue #8818 - keeping units consistent in paisa):
+const avg_earning_per_km = totalKm > 0 ? totalNetEarnings / totalKm : 0;
   }
 });
 
@@ -1642,7 +1654,7 @@ async function handleDriverEarningsAndStatement(req, res, filename, errorLabel) 
         drop_address: trip.drop_address,
         pickup_date: trip.pickup_date,
         base_freight: baseFreight,
-        platform_fee: platformFee;
+        platform_fee: platformFee,
         toll_estimate: tollEstimate,
         net_earnings: netEarnings,
         status: trip.status
@@ -1650,7 +1662,6 @@ async function handleDriverEarningsAndStatement(req, res, filename, errorLabel) 
     });
 
     // Apply sorting before formatting output
-    avg_earning_per_km: totalKm > 0 ? totalNetEarnings / totalKm : 0,
     if (sort_by === 'net_earnings') {
       tripsList.sort((a, b) => (b.net_earnings - a.net_earnings) || new Date(b.pickup_date) - new Date(a.pickup_date));
     } else if (sort_by === 'base_freight') {

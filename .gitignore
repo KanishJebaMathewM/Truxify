@@ -62,6 +62,9 @@ backend/api/coverage/
 __pycache__/
 *.pyc
 venv/
+# SQLite files the ML service creates at startup (sqlite:///./traffic.db,
+# sqlite:///./ab_testing.db in backend/ml/routes). Local runs write to them.
+*.db
 
 # Local Docker Compose overrides — may contain real credentials
 docker-compose.override.yml

@@ -62,6 +62,62 @@ describe('auditService', () => {
     for (const l of res.logs) expect(l.user_id).toBe('driver-1');
   });
 
+  it('exports all rows across pages instead of truncating at the query clamp', async () => {
+    const rows = Array.from({ length: 1500 }, (_, index) => ({ id: `log-${index}` }));
+    const ranges = [];
+    const builder = {
+      select: () => builder,
+      eq: () => builder,
+      gte: () => builder,
+      lte: () => builder,
+      order: () => builder,
+      range: (from, to) => {
+        ranges.push([from, to]);
+        return Promise.resolve({
+          data: rows.slice(from, to + 1),
+          error: null,
+          count: rows.length,
+        });
+      },
+    };
+    global.__auditSupabase = { from: () => builder };
+
+    const exported = JSON.parse(await audit.exportAuditLogsJSON({ userId: 'u1' }));
+
+    expect(exported).toHaveLength(1500);
+    expect(ranges).toEqual([[0, 999], [1000, 1999]]);
+  });
+
+  it('caps an export at MAX_AUDIT_EXPORT_ROWS', async () => {
+    const rows = Array.from(
+      { length: audit.MAX_AUDIT_EXPORT_ROWS + 500 },
+      (_, index) => ({ id: `log-${index}` }),
+    );
+    const ranges = [];
+    const builder = {
+      select: () => builder,
+      eq: () => builder,
+      gte: () => builder,
+      lte: () => builder,
+      order: () => builder,
+      range: (from, to) => {
+        ranges.push([from, to]);
+        return Promise.resolve({
+          data: rows.slice(from, to + 1),
+          error: null,
+          count: rows.length,
+        });
+      },
+    };
+    global.__auditSupabase = { from: () => builder };
+
+    const exported = JSON.parse(await audit.exportAuditLogsJSON({}));
+
+    expect(exported).toHaveLength(audit.MAX_AUDIT_EXPORT_ROWS);
+    expect(ranges).toHaveLength(10);
+    expect(ranges[9]).toEqual([9000, 9999]);
+  });
+
   it('the flush timer flushes on the interval and stopAuditFlushTimer cleans up', async () => {
     audit.startAuditFlushTimer();
     audit.queueAuditLog({ eventType: AUDIT_EVENTS.ORDER_CREATED, userId: 'timer-user' });

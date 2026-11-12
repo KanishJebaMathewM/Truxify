@@ -78,7 +78,7 @@ async function getBookingContext(bookingId, userId) {
 
     return order;
   } catch (err) {
-      logger.warn({ event: 'VOICE_ORDER_LOOKUP_ERROR', error: err.message }, 'Orders table check failed in voiceService');
+    logger.warn({ event: 'VOICE_ORDER_LOOKUP_ERROR', error: err.message }, 'Orders table check failed in voiceService');
   }
   return null;
 }
@@ -183,7 +183,7 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     });
     transcript = whisperResponse.data.text;
   } catch (err) {
-      logger.error({ event: 'WHISPER_TRANSCRIPTION_FAILED', error: err.message }, 'Whisper transcription failed');
+    logger.error({ event: 'WHISPER_TRANSCRIPTION_FAILED', error: err.message }, 'Whisper transcription failed');
     throw new Error('Transcription failed: ' + (err?.message ?? String(err)), { cause: err });
   }
 

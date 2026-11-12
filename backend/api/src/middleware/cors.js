@@ -1,6 +1,4 @@
 import cors from "cors";
-import logger from "./logger.js";
-// backend/api/src/middleware/cors.js (Excerpt)
 
 
 // Inside CORS origin validation logic:

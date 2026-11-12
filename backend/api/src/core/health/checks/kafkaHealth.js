@@ -46,7 +46,7 @@ async function check() {
     logger.warn('[kafkaHealth] Failed to import kafka config:', err?.message);
     return { status: HealthStatus.DEGRADED, message: 'module_not_available' };
   }
-} // <-- This closing brace was missing
+}
 
 export default function kafkaHealth(opts) {
   return executeCheck(NAME, check, {

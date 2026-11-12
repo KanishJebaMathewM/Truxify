@@ -1,6 +1,7 @@
 import { redisClient } from '../config/db.js';
 import CircuitBreaker from 'opossum';
 import { measureExecution } from '../core/performanceMetrics.js';
+import logger from '../middleware/logger.js';
 import { validateCoordinate } from '../utils/coordinates.js';
 
 const osrmBreaker = new CircuitBreaker(async (url, options) => {

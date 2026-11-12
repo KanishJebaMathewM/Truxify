@@ -1,29 +1,28 @@
-# Root-context image build for the API, referenced by k8s/README.md and
-# snyk/snyk-github-actions.yaml:
-#
-#   docker build -t truxify/api:latest -f Dockerfile.api .
-#
-# Mirrors backend/api/Dockerfile, which docker-compose builds with
-# ./backend/api as its context.
+
+# ==========================================
+# Truxify API - Root Context Dockerfile
+# ==========================================
+# Build command:
+# docker build -t truxify/api:latest -f Dockerfile.api .
+
 FROM node:20-alpine
 
+# Set application working directory
 WORKDIR /app
 
-RUN addgroup -g 1001 -S appgroup && \
-    adduser -S appuser -u 1001 -G appgroup
+# Create a non-root user for security
+RUN addgroup -g 1001 -S appgroup \
+    && adduser -S appuser -u 1001 -G appgroup
 
+# Copy API package configuration
 COPY backend/api/package.json ./
 
-# `npm install`, not `npm ci`: backend/api is an npm workspace with no
-# package-lock.json of its own, and no lockfile is committed at the
-# repository root either, so `npm ci` has nothing to install from.
-# --legacy-peer-deps matches backend/api/Dockerfile and the CI workflows.
+# Install production dependencies
+# npm install is used because the project has no committed package-lock.json.
 RUN npm install --omit=dev --legacy-peer-deps
 
-# The API source imports modules that live outside backend/api/src (the
-# earnings router, the did service, the web3 subsystems, and the root subsystem routers), so the
-# repository layout is mirrored inside the image to keep those relative
-# imports valid.
+# Copy required application directories
+# Preserve the repository structure for relative imports.
 COPY --chown=appuser:appgroup backend ./backend
 COPY --chown=appuser:appgroup ebpf ./ebpf
 COPY --chown=appuser:appgroup wasi ./wasi
@@ -31,15 +30,19 @@ COPY --chown=appuser:appgroup wasm ./wasm
 COPY --chown=appuser:appgroup snyk ./snyk
 COPY --chown=appuser:appgroup database/liquibase ./database/liquibase
 
-# No .env is copied. Configuration is supplied at runtime through the
-# container environment (k8s Secret / ConfigMap, or `docker run --env-file`),
-# so credentials never become part of an image layer.
+# Environment variables and secrets must be supplied at runtime.
+# Do not copy .env files into the image.
 
+# Run the application as a non-root user
 USER appuser
 
+# Expose API port
 EXPOSE 5000
 
+# Configure container health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD ["node", "-e", "fetch('http://localhost:5000/api/health/live').then(r=>{if(!r.ok)throw 1}).catch(()=>process.exit(1))"]
+    CMD ["node", "-e", "fetch('http://localhost:5000/api/health/live').then(r => { if (!r.ok) throw new Error('Health check failed') }).catch(() => process.exit(1))"]
 
+# Start the API server
 CMD ["node", "backend/api/src/index.js"]
+

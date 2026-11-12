@@ -71,7 +71,7 @@
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8",
     "@eslint/js": "^10.0.1",
-    "@vitest/coverage-v8": "^5.0.2",
+    "@vitest/coverage-v8": "^5.1.0",
     "eslint": "^9.39.1",
     "eslint-plugin-import": "^2.29.1",
     "globals": "^17.12.0",

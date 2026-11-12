@@ -1,11 +1,14 @@
+
 import base64
 import os
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from policy_builder import policy_builder
+
 
 NONCE_SIZE = 12
 TAG_SIZE = 16
@@ -19,9 +22,11 @@ class CpAbeCipherEngine:
 
         if not master_secret:
             raise RuntimeError(
-                "ABE_MASTER_SECRET is not configured; refusing to encrypt/decrypt "
-                "logistics documents without a master secret key."
+                "ABE_MASTER_SECRET is not configured."
             )
+
+        if len(nonce) != NONCE_SIZE:
+            raise ValueError("Invalid nonce length")
 
         return HKDF(
             algorithm=hashes.SHA256(),
@@ -30,7 +35,18 @@ class CpAbeCipherEngine:
             info=f"truxify-cpabe:{policy_str}".encode("utf-8"),
         ).derive(master_secret.encode("utf-8"))
 
-    def encrypt_document(self, plaintext_bytes: bytes, policy_str: str) -> dict:
+    def encrypt_document(
+        self,
+        plaintext_bytes: bytes,
+        policy_str: str
+    ) -> dict:
+
+        if not isinstance(plaintext_bytes, bytes):
+            raise TypeError("Plaintext must be bytes")
+
+        if not isinstance(policy_str, str) or not policy_str.strip():
+            raise ValueError("Invalid access policy")
+
         nonce = os.urandom(NONCE_SIZE)
         key = self._derive_key(policy_str, nonce)
 
@@ -44,28 +60,35 @@ class CpAbeCipherEngine:
 
         return {
             "policy": policy_str,
-            "ciphertext_b64": base64.b64encode(encrypted).decode("utf-8"),
+            "ciphertext_b64": base64.b64encode(
+                encrypted
+            ).decode("utf-8"),
         }
 
     def decrypt_document(
         self,
         ciphertext_b64: str,
         policy_str: str,
-        user_attributes: set,
+        user_attributes: set
     ) -> bytes:
+
+        if not isinstance(policy_str, str) or not policy_str.strip():
+            raise ValueError("Invalid access policy")
+
+        if not isinstance(user_attributes, set):
+            raise TypeError("User attributes must be a set")
 
         if not policy_builder.evaluate_user_attributes(
             user_attributes, policy_str
         ):
             raise PermissionError(
-                "CP-ABE Policy Evaluation Failed: "
-                "User attributes do not satisfy ciphertext access policy."
+                "User attributes do not satisfy access policy."
             )
 
         try:
             encrypted = base64.b64decode(
                 ciphertext_b64,
-                validate=True,
+                validate=True
             )
         except (ValueError, TypeError):
             raise ValueError("Invalid base64 ciphertext") from None
@@ -78,11 +101,17 @@ class CpAbeCipherEngine:
 
         key = self._derive_key(policy_str, nonce)
 
-        return AESGCM(key).decrypt(
-            nonce,
-            ciphertext,
-            policy_str.encode("utf-8"),
-        )
+        try:
+            return AESGCM(key).decrypt(
+                nonce,
+                ciphertext,
+                policy_str.encode("utf-8"),
+            )
+        except InvalidTag:
+            raise ValueError(
+                "Decryption failed: invalid key, policy or ciphertext."
+            ) from None
 
 
 abe_cipher = CpAbeCipherEngine()
+

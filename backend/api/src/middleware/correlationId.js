@@ -2,19 +2,15 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { randomUUID } from 'crypto';
 import logger from './logger.js';
 
-const SAFE_CORRELATION_ID = /^[A-Za-z0-9_-]{1,64}$/;
-
 export const correlationContext = new AsyncLocalStorage();
 
-export function getCorrelationStore() {
-  return correlationContext.getStore() ?? {};
-}
+// Enforce safe character set and length cap matching requestId.js
+const SAFE_CORRELATION_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
-export function runWithCorrelationId(correlationId, fn) {
-  const store = { correlationId: correlationId || randomUUID() };
-  return correlationContext.run(store, fn);
-}
-
+/**
+ * Middleware to extract, validate, or generate a secure correlation ID.
+ * Updated per issue #10492 to prevent log injection and unbounded header reflection.
+ */
 export function correlationIdMiddleware(req, res, next) {
   const headers = req?.headers || {};
   const rawHeader =
@@ -50,6 +46,14 @@ export function correlationIdMiddleware(req, res, next) {
 
   const store = { correlationId };
   correlationContext.run(store, next);
+}
+
+export function runWithCorrelationId(correlationId, fn) {
+  return correlationContext.run({ correlationId }, fn);
+}
+
+export function getCorrelationStore() {
+  return correlationContext.getStore() ?? {};
 }
 
 export default correlationIdMiddleware;

@@ -1,0 +1,31 @@
+name: ETA publication protocol
+on:
+  pull_request:
+    paths:
+      - backend/api/src/services/order/etaService.js
+      - backend/api/src/services/order/deliveryDelayService.js
+      - backend/api/test/unit/deliveryDelayService.test.js
+      - backend/api/src/repositories/orderRepository.js
+      - backend/api/test/unit/orderRepository.test.js
+      - supabase/migrations/20261002174206_eta_calculation_generation.sql
+      - tools/eta-publication-tests/**
+      - .github/workflows/eta-publication.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  protocol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tools/eta-publication-tests/package-lock.json
+      - run: npm ci --no-fund
+        working-directory: tools/eta-publication-tests
+      - run: bash tools/eta-publication-tests/run.sh

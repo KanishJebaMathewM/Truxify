@@ -1,7 +1,11 @@
-
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+
+/// Filters invalid entries and returns only valid ticket maps.
+List<dynamic> _filterValidTickets(List<dynamic> tickets) {
+  return tickets.whereType<Map<String, dynamic>>().toList();
+}
 
 /// Parses the support tickets response body safely.
 ///
@@ -18,7 +22,7 @@ List<dynamic> parseSupportTicketsResponse(String responseBody) {
 
     // Handle legacy API responses containing a direct list.
     if (decoded is List) {
-      return decoded;
+      return _filterValidTickets(decoded);
     }
 
     // Handle API responses containing a tickets field.
@@ -26,7 +30,7 @@ List<dynamic> parseSupportTicketsResponse(String responseBody) {
       final dynamic tickets = decoded['tickets'];
 
       if (tickets is List) {
-        return tickets;
+        return _filterValidTickets(tickets);
       }
     }
 

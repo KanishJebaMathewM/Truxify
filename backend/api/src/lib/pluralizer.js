@@ -33,8 +33,17 @@ const PLURAL_RULES = {
  * @returns {string} 'zero', 'one', 'two', 'few', 'many', or 'other'
  */
 export function getPluralCategory(count, locale) {
-    const rule = PLURAL_RULES[locale] || PLURAL_RULES.en;
-    return rule(Math.abs(count));
+    const language = typeof locale === 'string' ? locale.split('-')[0] : 'en';
+    const rule = PLURAL_RULES[language] || PLURAL_RULES.en;
+
+    let numeric;
+    if (typeof count === 'symbol') {
+        numeric = NaN;
+    } else {
+        numeric = Number(count);
+    }
+    const safeCount = Number.isFinite(numeric) ? Math.abs(numeric) : 0;
+    return rule(safeCount);
 }
 
 /**
@@ -58,6 +67,10 @@ export function pluralize(count, forms, locale) {
         template = keys.length > 0 ? forms[keys[0]] : '';
     }
 
+    if (typeof template !== 'string') {
+        template = String(template ?? '');
+    }
+
     // Simple variable replacement
     return template.replace(/\{count\}/g, String(count));
 }
@@ -69,9 +82,10 @@ export function pluralize(count, forms, locale) {
  * @returns {string}
  */
 export function formatMessage(message, variables = {}) {
-    if (!message) return '';
+    if (typeof message !== 'string' || message.length === 0) return '';
 
+    const vars = variables && typeof variables === 'object' ? variables : {};
     return message.replace(/\{(\w+)\}/g, (match, key) => {
-        return variables[key] !== undefined ? String(variables[key]) : match;
+        return vars[key] !== undefined ? String(vars[key]) : match;
     });
 }

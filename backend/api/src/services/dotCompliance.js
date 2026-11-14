@@ -9,6 +9,28 @@ const DOT_CERTIFIED_CLINICS = [
 
 const DEFAULT_WARNING_THRESHOLD_DAYS = 30;
 
+function validationError(message) {
+    const error = new RangeError(message);
+    error.statusCode = 400;
+    return error;
+}
+
+function assertNonEmptyDriverId(driverId) {
+    if (typeof driverId !== 'string' || driverId.trim().length === 0) {
+        throw validationError('driverId must be a non-empty string.');
+    }
+}
+
+function assertValidExpirationDate(fieldName, value) {
+    if (value === undefined || value === null) return;
+    if (typeof value !== 'string' && !(value instanceof Date)) {
+        throw validationError(`${fieldName} must be a valid date string.`);
+    }
+    if (!Number.isFinite(new Date(value).getTime())) {
+        throw validationError(`${fieldName} must be a valid date string.`);
+    }
+}
+
 /**
  * Calculates days remaining until expiration.
  * @param {String|Date} dateStr - Expiration date
@@ -34,6 +56,11 @@ export function evaluateDriverCompliance(driverComplianceData) {
         hazmatExpiration,
         currentRoute = {}
     } = driverComplianceData;
+
+    assertNonEmptyDriverId(driverId);
+    assertValidExpirationDate('cdlExpiration', cdlExpiration);
+    assertValidExpirationDate('medicalCardExpiration', medicalCardExpiration);
+    assertValidExpirationDate('hazmatExpiration', hazmatExpiration);
 
     const documents = [
         { type: 'MEDICAL_CARD', expDate: medicalCardExpiration },

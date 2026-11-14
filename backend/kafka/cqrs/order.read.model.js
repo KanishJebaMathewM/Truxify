@@ -63,7 +63,40 @@ import {
   deriveOrderStatus,
   deriveEventTypeFromTimeline,
 } from '../../api/src/core/orders/read-model-schema.js';
+// backend/kafka/cqrs/order.read.model.js (Excerpt)
 
+import { supabase } from '../config/supabase.js';
+import logger from '../middleware/logger.js';
+
+export async function getOrderStats() {
+  try {
+    // ✅ Fixed: Replaced unsupported .groupBy('status') with safe query and JS reduction
+    const { data, error } = await supabase
+      .from('order_read_model')
+      .select('status');
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (!data || data.length === 0) {
+      return {};
+    }
+
+    // Aggregate counts by status in JavaScript
+    const stats = data.reduce((acc, row) => {
+      const status = row.status || 'unknown';
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
+
+    logger.info({ statsCount: Object.keys(stats).length }, 'Successfully aggregated order read model stats');
+    return stats;
+  } catch (err) {
+    logger.error({ err }, 'Failed to fetch order stats from read model');
+    return {};
+  }
+}
 class OrderReadModel {
   constructor(client = supabaseAdmin) {
     this.client = client;

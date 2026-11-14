@@ -19,11 +19,9 @@ import compression from 'compression';
  * header and trailer are added.
  */
 const _parsedThreshold = Number(process.env.COMPRESSION_THRESHOLD_BYTES || 1024);
-export const COMPRESSION_THRESHOLD_BYTES =
-  Number.isFinite(_parsedThreshold) && _parsedThreshold > 0
-    ? Math.floor(_parsedThreshold)
-    : 1024;
-
+export const COMPRESSION_THRESHOLD_BYTES = Number.isFinite(_parsedThreshold) && _parsedThreshold > 0
+  ? Math.floor(_parsedThreshold)
+  : 1024;
 /**
  * zlib level, 1 (fastest) to 9 (smallest). 6 is zlib's default and sits at
  * the knee of the curve: levels above it cost noticeably more CPU for very
@@ -34,6 +32,11 @@ export const COMPRESSION_LEVEL =
   Number.isFinite(_parsedLevel) && _parsedLevel >= 1 && _parsedLevel <= 9
     ? Math.round(_parsedLevel)
     : 6;
+
+export const compressionConfig = {
+  threshold: COMPRESSION_THRESHOLD_BYTES,
+  level: COMPRESSION_LEVEL,
+};
 
 /**
  * Content types that are already compressed. Re-compressing them burns CPU

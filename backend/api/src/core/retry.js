@@ -75,7 +75,6 @@ export function isRetryable(error) {
   if (isNonRetryableSupabaseError(error)) return false;
   return isTransientError(error);
 }
-
 export async function executeWithRetry(asyncFn, options = {}) {
   const maxRetries = retryCountOrDefault(options.maxRetries, DEFAULT_MAX_RETRIES);
   const baseDelayMs = options.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;

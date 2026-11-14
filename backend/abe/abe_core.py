@@ -1,26 +1,24 @@
-import hashlib
-import json
 import base64
 import os
-from typing import Dict, List, Tuple, Any, Optional
-from dataclasses import dataclass
-import numpy as np
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.primitives import serialization
+import json
 import logging
-from datetime import datetime
+
+from typing import Dict, List, Optional
+from dataclasses import dataclass
+from datetime import datetime, timezone
+
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
 
 logger = logging.getLogger(__name__)
 
-def _derive_attribute_mask(attributes: List[str]) -> bytes:
-    """Derive a deterministic 32-byte mask from the given attribute names."""
-    combined = b'\x00' * 32
-    for attr in sorted(attributes):
-        attr_hash = hashlib.sha256(attr.encode()).digest()
-        combined = hashlib.sha256(combined + attr_hash).digest()
-    return combined
+NONCE_SIZE = 12
+KEY_SIZE = 32
+TAG_SIZE = 16
+
 
 @dataclass
 class Attribute:
@@ -28,407 +26,307 @@ class Attribute:
     value: str
     issuer: str
 
+
 @dataclass
 class AccessPolicy:
     expression: str
     attributes: List[str]
 
-class CPABE:
-    """Ciphertext-Policy Attribute-Based Encryption"""
-    
-    def __init__(self):
-        # In production: use proper pairing-based cryptography
-        # For now: simulate ABE using ECC
-        self.private_key = None
-        self.public_key = None
-        self.master_secret = None
-        self.attributes = {}
-        
-        self._initialize_keys()
-        
-        logger.info("✅ CP-ABE initialized")
-    
-    def _initialize_keys(self):
-        """Initialize ABE keys"""
-        # Generate master keys
-        self.master_secret = ec.generate_private_key(ec.SECP256R1())
-        self.public_key = self.master_secret.public_key()
-        
-        # Generate attribute keys
-        self._generate_attribute_keys()
-    
-    def _generate_attribute_keys(self):
-        """Generate keys for attributes"""
-        # In production: generate keys for each attribute
-        attributes = ['admin', 'driver', 'customer', 'manager', 'analyst']
-        
-        for attr in attributes:
-            # Generate key for attribute
-            private_key = ec.generate_private_key(ec.SECP256R1())
-            public_key = private_key.public_key()
-            self.attributes[attr] = {
-                'private': private_key,
-                'public': public_key
-            }
-    
-    def encrypt(self, plaintext: str, policy: AccessPolicy) -> Dict:
-        """Encrypt data with access policy"""
-        try:
-            # Convert policy to attributes
-            required_attrs = policy.attributes
-            
-            # Generate symmetric key
-            symmetric_key = self._generate_symmetric_key()
-            
-            # Encrypt plaintext with symmetric key
-            encrypted_data = self._symmetric_encrypt(plaintext, symmetric_key)
-            
-            # Encrypt symmetric key with policy
-            encrypted_key = self._encrypt_key_with_policy(symmetric_key, required_attrs)
-            
-            return {
-                'success': True,
-                'encrypted_data': encrypted_data,
-                'encrypted_key': encrypted_key,
-                'policy': policy.expression,
-                'attributes': required_attrs,
-                'timestamp': datetime.now().isoformat()
-            }
-        except Exception as e:
-            logger.error(f"Encryption failed: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def decrypt(self, encrypted_data: Dict, user_attributes: List[Attribute]) -> str:
-        """Decrypt data if user has required attributes"""
-        try:
-            # Check if user has required attributes
-            required_attrs = encrypted_data.get('attributes', [])
-            
-            if not self._check_attributes(user_attributes, required_attrs):
-                raise ValueError("User lacks required attributes")
-            
-            # Decrypt symmetric key
-            symmetric_key = self._decrypt_key_with_policy(
-                encrypted_data['encrypted_key'],
-                required_attrs
-            )
-            
-            # Decrypt data
-            plaintext = self._symmetric_decrypt(
-                encrypted_data['encrypted_data'],
-                symmetric_key
-            )
-            
-            return {
-                'success': True,
-                'plaintext': plaintext,
-                'timestamp': datetime.now().isoformat()
-            }
-        except Exception as e:
-            logger.error(f"Decryption failed: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def _generate_symmetric_key(self) -> bytes:
-        """Generate symmetric encryption key"""
-        return base64.b64encode(os.urandom(32))
-    
-    def _symmetric_encrypt(self, plaintext: str, key: bytes) -> str:
-        """Symmetric encryption of data"""
-        # In production: use AES-GCM
-        # For now: use XOR with key (simplified)
-        text_bytes = plaintext.encode()
-        key_bytes = base64.b64decode(key)
-        
-        encrypted = bytes([text_bytes[i] ^ key_bytes[i % len(key_bytes)] for i in range(len(text_bytes))])
-        return base64.b64encode(encrypted).decode()
-    
-    def _symmetric_decrypt(self, encrypted: str, key: bytes) -> str:
-        """Symmetric decryption of data"""
-        encrypted_bytes = base64.b64decode(encrypted)
-        key_bytes = base64.b64decode(key)
-        
-        decrypted = bytes([encrypted_bytes[i] ^ key_bytes[i % len(key_bytes)] for i in range(len(encrypted_bytes))])
-        return decrypted.decode()
-    
-    def _encrypt_key_with_policy(self, key: bytes, attributes: List[str]) -> str:
-        """Encrypt symmetric key with attribute policy"""
-        # In production: use ABE encryption
-        # For now: XOR key with a mask derived from the policy attributes
-        mask = _derive_attribute_mask(attributes)
-        encrypted = bytes([k ^ m for k, m in zip(key, mask)])
-        return base64.b64encode(encrypted).decode()
-    
-    def _decrypt_key_with_policy(self, encrypted_key: str, attributes: List[str]) -> bytes:
-        """Decrypt symmetric key if user has required attributes"""
-        # In production: use ABE decryption
-        # For now: XOR key back using the same attribute-derived mask
-        key_bytes = base64.b64decode(encrypted_key)
-        mask = _derive_attribute_mask(attributes)
-        return bytes([k ^ m for k, m in zip(key_bytes, mask)])
-    
-    def _check_attributes(self, user_attributes: List[Attribute], required_attrs: List[str]) -> bool:
-        """Check if user has all required attributes"""
-        user_attr_names = {attr.name for attr in user_attributes}
-        required_set = set(required_attrs)
-        return required_set.issubset(user_attr_names)
-    
-    def generate_user_key(self, attributes: List[str]) -> Dict:
-        """Generate key for user with specific attributes"""
-        user_key = {}
-        for attr in attributes:
-            if attr in self.attributes:
-                user_key[attr] = self.attributes[attr]['private']
-            else:
-                # Generate new key for attribute
-                private_key = ec.generate_private_key(ec.SECP256R1())
-                user_key[attr] = private_key
-        
-        return {
-            'success': True,
-            'user_key': {k: self._serialize_key(v) for k, v in user_key.items()},
-            'attributes': attributes
-        }
-    
-    def _serialize_key(self, key: ec.EllipticCurvePrivateKey) -> str:
-        """Serialize private key to string"""
-        pem = key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption()
-        )
-        return pem.decode()
 
-class KPABE:
-    """Key-Policy Attribute-Based Encryption"""
-    
-    def __init__(self):
-        self.policies = {}
-        self.master_secret = None
-        self.public_key = None
-        
-        self._initialize_keys()
-        
-        logger.info("✅ KP-ABE initialized")
-    
-    def _initialize_keys(self):
-        """Initialize KP-ABE keys"""
-        self.master_secret = ec.generate_private_key(ec.SECP256R1())
-        self.public_key = self.master_secret.public_key()
-    
-    def encrypt(self, plaintext: str, attributes: List[str]) -> Dict:
-        """Encrypt data with attribute set"""
+class CPABE:
+    """
+    Attribute-based access control prototype.
+
+    Uses AES-256-GCM for authenticated encryption
+    and application-level attribute validation.
+
+    This is not production-grade cryptographic CP-ABE.
+    """
+
+    def __init__(self, master_secret: Optional[bytes] = None):
+
+        if master_secret is None:
+            master_secret = os.urandom(KEY_SIZE)
+
+        if not isinstance(master_secret, bytes) or len(master_secret) < 32:
+            raise ValueError(
+                "Master secret must contain at least 32 bytes."
+            )
+
+        self.master_secret = master_secret
+
+        logger.info("CP-ABE encryption engine initialized")
+
+    def _derive_key(self, nonce: bytes, context: bytes) -> bytes:
+
+        if len(nonce) != NONCE_SIZE:
+            raise ValueError("Invalid nonce length.")
+
+        return HKDF(
+            algorithm=hashes.SHA256(),
+            length=KEY_SIZE,
+            salt=nonce,
+            info=b"truxify-cpabe:" + context
+        ).derive(self.master_secret)
+
+    @staticmethod
+    def _encode(data: bytes) -> str:
+        return base64.b64encode(data).decode("utf-8")
+
+    @staticmethod
+    def _decode(data: str) -> bytes:
+
+        if not isinstance(data, str):
+            raise TypeError("Encoded data must be a string.")
+
         try:
-            # Generate symmetric key
-            symmetric_key = base64.b64encode(os.urandom(32))
-            
-            # Encrypt data
-            encrypted_data = self._symmetric_encrypt(plaintext, symmetric_key)
-            
-            # Encrypt key with attributes
-            encrypted_key = self._encrypt_key_with_attributes(symmetric_key, attributes)
-            
+            return base64.b64decode(data, validate=True)
+        except (ValueError, TypeError):
+            raise ValueError("Invalid Base64 data.") from None
+
+    @staticmethod
+    def _check_attributes(
+        user_attributes: List[Attribute],
+        required_attributes: List[str]
+    ) -> bool:
+
+        if not isinstance(user_attributes, list):
+            raise TypeError("User attributes must be a list.")
+
+        if not all(isinstance(attr, Attribute) for attr in user_attributes):
+            raise TypeError("Invalid user attribute object.")
+
+        available_attributes = {
+            attr.name for attr in user_attributes
+        }
+
+        return set(required_attributes).issubset(
+            available_attributes
+        )
+
+    def _encrypt_key_with_policy(
+        self,
+        symmetric_key: bytes,
+        required_attributes: List[str]
+    ) -> str:
+
+        nonce = os.urandom(NONCE_SIZE)
+
+        context = json.dumps(
+            sorted(required_attributes),
+            separators=(",", ":")
+        ).encode("utf-8")
+
+        key = self._derive_key(nonce, context)
+
+        encrypted_key = AESGCM(key).encrypt(
+            nonce,
+            symmetric_key,
+            context
+        )
+
+        return self._encode(nonce + encrypted_key)
+
+    def _decrypt_key_with_policy(
+        self,
+        encrypted_key: str,
+        required_attributes: List[str]
+    ) -> bytes:
+
+        encrypted = self._decode(encrypted_key)
+
+        if len(encrypted) < NONCE_SIZE + TAG_SIZE:
+            raise ValueError("Encrypted key is too short.")
+
+        nonce = encrypted[:NONCE_SIZE]
+        ciphertext = encrypted[NONCE_SIZE:]
+
+        context = json.dumps(
+            sorted(required_attributes),
+            separators=(",", ":")
+        ).encode("utf-8")
+
+        key = self._derive_key(nonce, context)
+
+        try:
+            return AESGCM(key).decrypt(
+                nonce,
+                ciphertext,
+                context
+            )
+        except InvalidTag:
+            raise ValueError(
+                "Key decryption failed."
+            ) from None
+
+    def _symmetric_encrypt(
+        self,
+        plaintext: str,
+        symmetric_key: bytes,
+        policy: str
+    ) -> str:
+
+        nonce = os.urandom(NONCE_SIZE)
+
+        ciphertext = AESGCM(symmetric_key).encrypt(
+            nonce,
+            plaintext.encode("utf-8"),
+            policy.encode("utf-8")
+        )
+
+        return self._encode(nonce + ciphertext)
+
+    def _symmetric_decrypt(
+        self,
+        encrypted_data: str,
+        symmetric_key: bytes,
+        policy: str
+    ) -> str:
+
+        encrypted = self._decode(encrypted_data)
+
+        if len(encrypted) < NONCE_SIZE + TAG_SIZE:
+            raise ValueError("Encrypted data is too short.")
+
+        nonce = encrypted[:NONCE_SIZE]
+        ciphertext = encrypted[NONCE_SIZE:]
+
+        try:
+            plaintext = AESGCM(symmetric_key).decrypt(
+                nonce,
+                ciphertext,
+                policy.encode("utf-8")
+            )
+
+            return plaintext.decode("utf-8")
+
+        except (InvalidTag, UnicodeDecodeError):
+            raise ValueError(
+                "Data decryption failed."
+            ) from None
+
+    def encrypt(
+        self,
+        plaintext: str,
+        policy: AccessPolicy
+    ) -> Dict:
+
+        if not isinstance(plaintext, str):
+            raise TypeError("Plaintext must be a string.")
+
+        if not isinstance(policy, AccessPolicy):
+            raise TypeError("Invalid access policy.")
+
+        if not policy.expression.strip():
+            raise ValueError("Policy expression cannot be empty.")
+
+        if (
+            not isinstance(policy.attributes, list)
+            or not policy.attributes
+            or not all(
+                isinstance(attr, str) and attr.strip()
+                for attr in policy.attributes
+            )
+        ):
+            raise ValueError("Invalid required attributes.")
+
+        if len(set(policy.attributes)) != len(policy.attributes):
+            raise ValueError("Duplicate policy attributes.")
+
+        try:
+            symmetric_key = AESGCM.generate_key(
+                bit_length=256
+            )
+
+            encrypted_data = self._symmetric_encrypt(
+                plaintext,
+                symmetric_key,
+                policy.expression
+            )
+
+            encrypted_key = self._encrypt_key_with_policy(
+                symmetric_key,
+                policy.attributes
+            )
+
             return {
-                'success': True,
-                'encrypted_data': encrypted_data,
-                'encrypted_key': encrypted_key,
-                'attributes': attributes,
-                'timestamp': datetime.now().isoformat()
+                "success": True,
+                "encrypted_data": encrypted_data,
+                "encrypted_key": encrypted_key,
+                "policy": policy.expression,
+                "attributes": policy.attributes.copy(),
+                "timestamp": datetime.now(
+                    timezone.utc
+                ).isoformat()
             }
-        except Exception as e:
-            logger.error(f"Encryption failed: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def decrypt(self, encrypted_data: Dict, policy: AccessPolicy) -> str:
-        """Decrypt data if policy is satisfied"""
+
+        except Exception:
+            logger.exception("Encryption failed.")
+            raise
+
+    def decrypt(
+        self,
+        encrypted_data: Dict,
+        user_attributes: List[Attribute]
+    ) -> Dict:
+
+        if not isinstance(encrypted_data, dict):
+            raise TypeError("Encrypted data must be a dictionary.")
+
+        required_fields = {
+            "encrypted_data",
+            "encrypted_key",
+            "policy",
+            "attributes"
+        }
+
+        if not required_fields.issubset(encrypted_data):
+            raise ValueError("Incomplete encrypted document.")
+
+        policy = encrypted_data["policy"]
+        required_attributes = encrypted_data["attributes"]
+
+        if not isinstance(policy, str) or not policy.strip():
+            raise ValueError("Invalid access policy.")
+
+        if (
+            not isinstance(required_attributes, list)
+            or not required_attributes
+            or not all(
+                isinstance(attr, str) and attr.strip()
+                for attr in required_attributes
+            )
+        ):
+            raise ValueError("Invalid policy attributes.")
+
         try:
-            # Check if policy is satisfied
-            if not self._check_policy(policy, encrypted_data['attributes']):
-                raise ValueError("Policy not satisfied")
-            
-            # Decrypt symmetric key
+            if not self._check_attributes(
+                user_attributes,
+                required_attributes
+            ):
+                raise PermissionError(
+                    "User lacks required attributes."
+                )
+
             symmetric_key = self._decrypt_key_with_policy(
-                encrypted_data['encrypted_key'],
+                encrypted_data["encrypted_key"],
+                required_attributes
+            )
+
+            plaintext = self._symmetric_decrypt(
+                encrypted_data["encrypted_data"],
+                symmetric_key,
                 policy
             )
-            
-            # Decrypt data
-            plaintext = self._symmetric_decrypt(
-                encrypted_data['encrypted_data'],
-                symmetric_key
-            )
-            
-            return {
-                'success': True,
-                'plaintext': plaintext,
-                'timestamp': datetime.now().isoformat()
-            }
-        except Exception as e:
-            logger.error(f"Decryption failed: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def _symmetric_encrypt(self, plaintext: str, key: bytes) -> str:
-        """Symmetric encryption"""
-        text_bytes = plaintext.encode()
-        key_bytes = base64.b64decode(key)
-        
-        encrypted = bytes([text_bytes[i] ^ key_bytes[i % len(key_bytes)] for i in range(len(text_bytes))])
-        return base64.b64encode(encrypted).decode()
-    
-    def _symmetric_decrypt(self, encrypted: str, key: bytes) -> str:
-        """Symmetric decryption"""
-        encrypted_bytes = base64.b64decode(encrypted)
-        key_bytes = base64.b64decode(key)
-        
-        decrypted = bytes([encrypted_bytes[i] ^ key_bytes[i % len(key_bytes)] for i in range(len(encrypted_bytes))])
-        return decrypted.decode()
-    
-    def _encrypt_key_with_attributes(self, key: bytes, attributes: List[str]) -> str:
-        """Encrypt key with attributes"""
-        mask = _derive_attribute_mask(attributes)
-        encrypted = bytes([k ^ m for k, m in zip(key, mask)])
-        return base64.b64encode(encrypted).decode()
-    
-    def _decrypt_key_with_policy(self, encrypted_key: str, policy: AccessPolicy) -> bytes:
-        """Decrypt key if policy satisfied"""
-        key_bytes = base64.b64decode(encrypted_key)
-        mask = _derive_attribute_mask(policy.attributes)
-        return bytes([k ^ m for k, m in zip(key_bytes, mask)])
-    
-    def _check_policy(self, policy: AccessPolicy, attributes: List[str]) -> bool:
-        """Check if attributes satisfy policy"""
-        required_attrs = policy.attributes
-        attr_set = set(attributes)
-        required_set = set(required_attrs)
-        
-        # Check if all required attributes are present
-        return required_set.issubset(attr_set)
 
-class DecentralizedABE:
-    """Decentralized Multi-Authority ABE"""
-    
-    def __init__(self):
-        self.authorities = {}
-        self.global_public_key = None
-        
-        logger.info("✅ Decentralized ABE initialized")
-    
-    def add_authority(self, authority_id: str, public_key: str) -> bool:
-        """Add a new authority"""
-        if authority_id in self.authorities:
-            return False
-        
-        self.authorities[authority_id] = {
-            'public_key': public_key,
-            'attributes': [],
-            'created_at': datetime.now().isoformat()
-        }
-        return True
-    
-    def issue_attribute(self, authority_id: str, attribute: str, user: str) -> Dict:
-        """Issue attribute from authority"""
-        if authority_id not in self.authorities:
-            return {'success': False, 'error': 'Authority not found'}
-        
-        # Issue attribute
-        self.authorities[authority_id]['attributes'].append({
-            'user': user,
-            'attribute': attribute,
-            'issued_at': datetime.now().isoformat()
-        })
-        
-        return {
-            'success': True,
-            'user': user,
-            'attribute': attribute,
-            'authority': authority_id
-        }
-    
-    def encrypt(self, plaintext: str, policy: AccessPolicy, authorities: List[str]) -> Dict:
-        """Encrypt with multi-authority policy"""
-        try:
-            # Check authorities
-            for auth in authorities:
-                if auth not in self.authorities:
-                    return {'success': False, 'error': f'Authority {auth} not found'}
-            
-            # Generate symmetric key
-            symmetric_key = base64.b64encode(os.urandom(32))
-            
-            # Encrypt data
-            encrypted_data = self._symmetric_encrypt(plaintext, symmetric_key)
-            
-            # Encrypt key with multi-authority policy
-            encrypted_key = self._encrypt_key_multi_authority(symmetric_key, policy, authorities)
-            
             return {
-                'success': True,
-                'encrypted_data': encrypted_data,
-                'encrypted_key': encrypted_key,
-                'policy': policy.expression,
-                'authorities': authorities,
-                'timestamp': datetime.now().isoformat()
+                "success": True,
+                "plaintext": plaintext,
+                "timestamp": datetime.now(
+                    timezone.utc
+                ).isoformat()
             }
-        except Exception as e:
-            logger.error(f"Encryption failed: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def decrypt(self, encrypted_data: Dict, user_attributes: Dict) -> str:
-        """Decrypt with multi-authority attributes"""
-        try:
-            # Check attributes from all authorities
-            if not self._check_multi_authority_attributes(user_attributes, encrypted_data['policy']):
-                raise ValueError("Insufficient attributes")
-            
-            # Decrypt key
-            symmetric_key = self._decrypt_key_multi_authority(
-                encrypted_data['encrypted_key'],
-                encrypted_data.get('authorities', [])
-            )
-            
-            # Decrypt data
-            plaintext = self._symmetric_decrypt(
-                encrypted_data['encrypted_data'],
-                symmetric_key
-            )
-            
-            return {
-                'success': True,
-                'plaintext': plaintext,
-                'timestamp': datetime.now().isoformat()
-            }
-        except Exception as e:
-            logger.error(f"Decryption failed: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def _symmetric_encrypt(self, plaintext: str, key: bytes) -> str:
-        """Symmetric encryption"""
-        text_bytes = plaintext.encode()
-        key_bytes = base64.b64decode(key)
-        
-        encrypted = bytes([text_bytes[i] ^ key_bytes[i % len(key_bytes)] for i in range(len(text_bytes))])
-        return base64.b64encode(encrypted).decode()
-    
-    def _symmetric_decrypt(self, encrypted: str, key: bytes) -> str:
-        """Symmetric decryption"""
-        encrypted_bytes = base64.b64decode(encrypted)
-        key_bytes = base64.b64decode(key)
-        
-        decrypted = bytes([encrypted_bytes[i] ^ key_bytes[i % len(key_bytes)] for i in range(len(encrypted_bytes))])
-        return decrypted.decode()
-    
-    def _encrypt_key_multi_authority(self, key: bytes, policy: AccessPolicy, authorities: List[str]) -> str:
-        """Encrypt key with multi-authority policy"""
-        mask = _derive_attribute_mask(authorities)
-        encrypted = bytes([k ^ m for k, m in zip(key, mask)])
-        return base64.b64encode(encrypted).decode()
-    
-    def _decrypt_key_multi_authority(self, encrypted_key: str, authorities: List[str]) -> bytes:
-        """Decrypt key with multi-authority attributes"""
-        key_bytes = base64.b64decode(encrypted_key)
-        mask = _derive_attribute_mask(authorities)
-        return bytes([k ^ m for k, m in zip(key_bytes, mask)])
-    
-    def _check_multi_authority_attributes(self, user_attributes: Dict, policy: str) -> bool:
-        """Check if user has required attributes from all authorities"""
-        # In production: implement proper policy checking
-        return True
+
+        except Exception:
+            logger.exception("Decryption failed.")
+            raise

@@ -1,4 +1,5 @@
 import logging
+import os
 from datetime import datetime
 from typing import Literal
 
@@ -117,16 +118,25 @@ async def get_model_info():
 
         raise HTTPException(status_code=500, detail="Internal server error")
 
+def _safe_ssl_path(path: str) -> str:
+    if not isinstance(path, str) or chr(92) in path:
+        raise HTTPException(status_code=422, detail='Invalid model path.')
+    name = os.path.basename(path)
+    if not name.endswith('.pth') or len(name) > 64:
+        raise HTTPException(status_code=422, detail='Invalid model path.')
+    return os.path.join('models', name)
+
+
 @router.post("/save")
 async def save_model(model_type: str = 'simclr', path: str = "models/ssl_model.pth"):
     """Save pre-trained model"""
     try:
         if model_type == 'simclr':
-            simclr_trainer.save(path)
+            simclr_trainer.save(_safe_ssl_path(path))
         elif model_type == 'moco':
-            moco_trainer.save(path)
+            moco_trainer.save(_safe_ssl_path(path))
         elif model_type == 'mae':
-            mae_trainer.save(path)
+            mae_trainer.save(_safe_ssl_path(path))
         else:
             return {
                 'success': False,
@@ -149,11 +159,11 @@ async def load_model(model_type: str = 'simclr', path: str = "models/ssl_model.p
     """Load pre-trained model"""
     try:
         if model_type == 'simclr':
-            simclr_trainer.load(path)
+            simclr_trainer.load(_safe_ssl_path(path))
         elif model_type == 'moco':
-            moco_trainer.load(path)
+            moco_trainer.load(_safe_ssl_path(path))
         elif model_type == 'mae':
-            mae_trainer.load(path)
+            mae_trainer.load(_safe_ssl_path(path))
         else:
             return {
                 'success': False,

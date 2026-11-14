@@ -120,7 +120,7 @@ contract StateChannel is ReentrancyGuard {
         require(sequence > channel.sequence, "Sequence must be higher");
         require(balanceA + balanceB == channel.balanceA + channel.balanceB, "Invalid balance sum");
 
-        bytes32 stateHash = keccak256(abi.encodePacked(channelId, sequence, balanceA, balanceB)).toEthSignedMessageHash();
+        bytes32 stateHash = keccak256(abi.encodePacked(block.chainid, address(this), channelId, sequence, balanceA, balanceB)).toEthSignedMessageHash();
         
         if (msg.sender == channel.userA) {
             require(stateHash.recover(sig) == channel.userB, "Invalid signature from userB");

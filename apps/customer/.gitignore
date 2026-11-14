@@ -1,32 +1,37 @@
-# Customer app specific ignores
+
+# Customer App Specific Ignores
+
+# Dart and Flutter
 .dart_tool/
 .build/
 build/
 .flutter-plugins
-.flutter-plugins-dependencies
+.flutter-plugins-dependencies/
 
-# Android/iOS
+# Android and iOS
 **/local.properties
 .android/
 .ios/
+
+# iOS Build Artifacts
+ios/Flutter/ephemeral/
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+ios/Runner/GeneratedPluginRegistrant.*
 
 # IDE
 .idea/
 .vscode/
 
-# OS
+# Operating System
 .DS_Store
 Thumbs.db
 
-# Secrets
+# Secrets and Credentials
 .env
+.env.*
 *.keystore
+*.jks
 
-# Misc
+# Miscellaneous
 pubspec.lock
-
-# iOS build artifacts (Flutter ephemeral + plugin registrant)
-ios/Flutter/ephemeral/
-ios/Flutter/Generated.xcconfig
-ios/Flutter/flutter_export_environment.sh
-ios/Runner/GeneratedPluginRegistrant.*

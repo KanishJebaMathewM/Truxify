@@ -29,7 +29,10 @@ import { validateQuery } from '../middleware/validate.js';
 const router = express.Router();
 
 const shipmentDetailsQuerySchema = z.object({
-  shipmentId: z.string().trim().min(1).max(100).optional(),
+  // orders.id is a UUID. Forwarding an arbitrary string to PostgREST turns a
+  // malformed client request into a database error and a 500; validate the
+  // shape here and make the parameter required to match the controller.
+  shipmentId: z.string().uuid(),
 }).strict();
 
 // ──────────────────────────────────────────────────────────────────────────

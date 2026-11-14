@@ -85,7 +85,7 @@ function parsePositiveFloat(raw, fallback, label) {
   return fallback;
 }
 
-function readRateCard() {
+export function readRateCard() {
   return {
     ratePerTonneKm: parsePositiveInt(process.env.TRUXIFY_RATE_PER_TONNE_KM, DEFAULTS.RATE_PER_TONNE_KM, 'TRUXIFY_RATE_PER_TONNE_KM'),
     fragileMultiplier: parsePositiveFloat(process.env.TRUXIFY_FRAGILE_MULTIPLIER, DEFAULTS.FRAGILE_MULTIPLIER, 'TRUXIFY_FRAGILE_MULTIPLIER'),

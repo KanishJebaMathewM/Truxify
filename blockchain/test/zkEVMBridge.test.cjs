@@ -8,12 +8,23 @@ async function assertRejectsWith(promise, message) {
 describe("zkEVMBridge", function () {
   async function deployBridge() {
     const [owner, user, attacker] = await ethers.getSigners();
+
+    // MockZkEVM binds to the bridge in its constructor while the bridge needs
+    // the MockZkEVM address, so predict the bridge address from the deployer
+    // nonce before deploying either contract.
+    const deployerNonce = await ethers.provider.getTransactionCount(owner.address);
+    const predictedBridge = ethers.getCreateAddress({
+      from: owner.address,
+      nonce: deployerNonce + 1,
+    });
+
     const MockZkEVM = await ethers.getContractFactory("MockZkEVM");
-    const zkEVM = await MockZkEVM.deploy();
+    const zkEVM = await MockZkEVM.deploy(predictedBridge);
     await zkEVM.waitForDeployment();
     const Bridge = await ethers.getContractFactory("zkEVMBridge");
     const bridge = await Bridge.deploy(await zkEVM.getAddress());
     await bridge.waitForDeployment();
+    assert.equal(await bridge.getAddress(), predictedBridge);
     return { bridge, zkEVM, owner, user, attacker };
   }
 

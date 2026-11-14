@@ -12,6 +12,7 @@ import { calculateAdaptiveInterval, getQueueDepth } from './adaptivePoller.js';
 import { saveChatMessage, isChatRateLimited, verifyChatAccess, markMessagesAsRead } from '../services/chatService.js';
 import { enqueueOfflineMessage, drainOfflineQueue } from '../lib/messageQueue.js';
 
+
 const TELEMETRY_SCHEMA = {
   lat: { type: 'number', required: false, min: -90, max: 90 },
   lng: { type: 'number', required: false, min: -180, max: 180 },

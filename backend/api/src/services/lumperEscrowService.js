@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import logger from '../middleware/logger.js';
-import { ValidationError } from '../utils/errors.js';
+import { ForbiddenError, ValidationError } from '../utils/errors.js';
 
 /**
  * Asserts a monetary amount is a real, strictly positive, finite number.
@@ -30,13 +30,15 @@ class LumperEscrowService {
   /**
    * Deposits lumper fee into escrow contract for a given booking/load
    */
-  async depositLumperFee({ bookingId, brokerAddress, estimatedFeeAmount }) {
+  async depositLumperFee({ bookingId, brokerAddress, estimatedFeeAmount, brokerUserId = null, driverId = null }) {
     const feeAmount = assertPositiveAmount(estimatedFeeAmount, 'estimatedFeeAmount');
     const escrowId = `LMP-${bookingId}-${Date.now()}`;
     const record = {
       escrowId,
       bookingId,
       brokerAddress,
+      brokerUserId,
+      driverId,
       estimatedFeeAmount: feeAmount,
       status: 'HELD_IN_ESCROW',
       txHash: `0x${crypto.randomBytes(32).toString('hex')}`,
@@ -52,7 +54,14 @@ class LumperEscrowService {
   /**
    * Processes uploaded receipt, parses with AI, and releases funds to driver
    */
-  async processReceiptAndRelease({ escrowId, driverWallet, receiptImageUrl, claimedAmount }) {
+  async processReceiptAndRelease({
+    escrowId,
+    driverWallet,
+    receiptImageUrl,
+    claimedAmount,
+    callerId = null,
+    callerRole = null,
+  }) {
     if (!this.escrows.has(escrowId)) {
       throw new ValidationError('Lumper fee escrow not found');
     }
@@ -66,6 +75,10 @@ class LumperEscrowService {
     }
 
     const escrow = this.escrows.get(escrowId);
+
+    if (escrow.driverId && callerRole !== 'admin' && callerId !== escrow.driverId) {
+      throw new ForbiddenError('Only the assigned driver or an admin can release this escrow');
+    }
 
     if (escrow.status === 'RELEASED') {
       throw new ValidationError('Lumper fee escrow has already been released');

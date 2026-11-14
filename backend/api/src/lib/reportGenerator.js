@@ -36,6 +36,25 @@ export function generateCSV(data, columns) {
 }
 
 /**
+ * Escape user-controlled values before interpolating them into HTML.
+ *
+ * Report titles, metric labels and table cells originate from fleet/order
+ * data, so treating them as trusted markup turns an exported report into a
+ * stored-XSS vector when it is opened in a browser.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+/**
  * Generates a simple HTML report that can be printed to PDF.
  * @param {object} reportData 
  * @returns {string} HTML content
@@ -48,7 +67,7 @@ export function generateHTMLReport(reportData) {
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>${title}</title>
+  <title>${escapeHtml(title)}</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 40px; color: #333; }
     h1 { color: #2563eb; border-bottom: 2px solid #2563eb; padding-bottom: 10px; }
@@ -66,7 +85,7 @@ export function generateHTMLReport(reportData) {
   </style>
 </head>
 <body>
-  <h1>${title}</h1>
+  <h1>${escapeHtml(title)}</h1>
   <p>Generated: ${new Date(generatedAt).toLocaleString()}</p>
   
   <div class="summary">
@@ -78,8 +97,8 @@ export function generateHTMLReport(reportData) {
         for (const [key, value] of Object.entries(summary)) {
             html += `
       <div class="metric">
-        <div class="metric-value">${value}</div>
-        <div class="metric-label">${key}</div>
+        <div class="metric-value">${escapeHtml(value)}</div>
+        <div class="metric-label">${escapeHtml(key)}</div>
       </div>
       `;
         }
@@ -92,11 +111,11 @@ export function generateHTMLReport(reportData) {
 
     if (tables && tables.length > 0) {
         for (const table of tables) {
-            html += `<h2>${table.title}</h2>`;
+            html += `<h2>${escapeHtml(table.title)}</h2>`;
             html += `<table><thead><tr>`;
 
             for (const col of table.columns) {
-                html += `<th>${col.label}</th>`;
+                html += `<th>${escapeHtml(col.label)}</th>`;
             }
             html += `</tr></thead><tbody>`;
 
@@ -104,9 +123,15 @@ export function generateHTMLReport(reportData) {
                 html += `<tr>`;
                 for (const col of table.columns) {
                     let val = row[col.key];
-                    if (col.format === 'currency') val = `₹${(val / 100).toFixed(2)}`;
-                    if (col.format === 'percent') val = `${val}%`;
-                    html += `<td>${val !== undefined ? val : '-'}</td>`;
+                    if (val === null || val === undefined || val === '') {
+                        val = '-';
+                    } else if (col.format === 'currency') {
+                        const amount = Number(val);
+                        val = Number.isFinite(amount) ? `₹${(amount / 100).toFixed(2)}` : '-';
+                    } else if (col.format === 'percent') {
+                        val = `${val}%`;
+                    }
+                    html += `<td>${escapeHtml(val)}</td>`;
                 }
                 html += `</tr>`;
             }

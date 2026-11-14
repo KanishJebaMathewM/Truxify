@@ -16,7 +16,7 @@ beforeEach(() => {
   boundary.redis.set.mockReset().mockImplementation(async (key, value) => { boundary.cache.set(key, value); });
   boundary.from.mockReset().mockImplementation(table => {
     let columns;
-    const query = { select: value => { columns = value; return query; }, eq: vi.fn(() => query), gte: () => query, lte: () => query,
+    const query = { select: value => { columns = value; return query; }, eq: vi.fn(() => query), gte: () => query, lte: () => query, limit: () => query,
       then: resolve => Promise.resolve({ data: table === 'driver_telemetry_daily' ? boundary.telemetry : columns.includes('estimated_delivery_at') ? boundary.deliveries : [], error: null }).then(resolve) };
     return query;
   });

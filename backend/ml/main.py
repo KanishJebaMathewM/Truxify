@@ -4,21 +4,24 @@ import os
 import time
 
 # Initialize Sentry as early as possible
-import sentry_sdk
-from sentry_sdk.integrations.fastapi import FastApiIntegration
+try:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
 
-sentry_dsn = os.environ.get("SENTRY_DSN")
-if sentry_dsn:
-    sentry_sdk.init(
-        dsn=sentry_dsn,
-        environment=os.environ.get("ENVIRONMENT", "development"),
-        integrations=[
-            FastApiIntegration(
-                transaction_style="endpoint"
-            ),
-        ],
-        traces_sample_rate=1.0,
-    )
+    sentry_dsn = os.environ.get("SENTRY_DSN")
+    if sentry_dsn:
+        sentry_sdk.init(
+            dsn=sentry_dsn,
+            environment=os.environ.get("ENVIRONMENT", "development"),
+            integrations=[
+                FastApiIntegration(
+                    transaction_style="endpoint"
+                ),
+            ],
+            traces_sample_rate=1.0,
+        )
+except ImportError:
+    sentry_sdk = None
 
 import numpy as np
 from datetime import datetime, timedelta
@@ -908,7 +911,11 @@ async def verify_kyc_endpoint(file: UploadFile = File(...), _auth=Depends(verify
                 extracted_number=None,
                 raw_text="",
             )
+# backend/ml/main.py (Excerpt)
 
+# REMOVED:
+# MAX_CONCURRENT_INFERENCE = int(os.getenv("MAX_CONCURRENT_INFERENCE", 4))
+# INFERENCE_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_INFERENCE)
         result = ocr_verifier.verify_license(text)
         return KYCVerificationOutput(**result)
     except HTTPException:

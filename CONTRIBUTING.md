@@ -54,7 +54,7 @@ Ensure you have the following installed on your local machine:
 | Tool | Recommended Version | Download Link |
 |---|---|---|
 | **Flutter SDK** | `>= 3.19.0` | [flutter.dev](https://flutter.dev) |
-| **Node.js** | `>= 20.x` (LTS) | [nodejs.org](https://nodejs.org) |
+| **Node.js** | `>= 22.x` (LTS) | [nodejs.org](https://nodejs.org) |
 | **Python** | `>= 3.11.x` | [python.org](https://python.org) |
 | **Docker & Compose** | Latest | [docker.com](https://www.docker.com) |
 | **Git** | Latest | [git-scm.com](https://git-scm.com) |

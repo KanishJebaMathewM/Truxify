@@ -11,35 +11,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock database config export with both supabase and supabaseAdmin to prevent module destructuring errors
-vi.mock('../../../src/config/db.js', () => {
-  const mockSupabase = {
-    from: vi.fn().mockReturnThis(),
-    select: vi.fn().mockReturnThis(),
-    insert: vi.fn().mockReturnThis(),
-    update: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    single: vi.fn().mockResolvedValue({ data: null, error: null }),
-  };
 
-  return {
-    supabase: mockSupabase,
-    supabaseAdmin: mockSupabase, // Fix: provide supabaseAdmin matching the destructuring in voiceService.js
-  };
-});
-
-// Import the service under test after setting up the mock
-const VoiceService = require('../../../src/services/voiceService');
-
-describe('VoiceService Unit Tests', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('should load successfully and initialize voice service pipeline', () => {
-    expect(VoiceService).toBeDefined();
-  });
-});
 const mockSupabaseFrom = vi.fn();
 const mockEq = vi.fn();
 const mockOr = vi.fn();

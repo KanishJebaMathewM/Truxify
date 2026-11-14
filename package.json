@@ -1,16 +1,10 @@
 {
- "type": "module",
+  "type": "module",
   "private": true,
   "workspaces": [
     "backend/api",
     "blockchain"
   ],
-  {
-  "devDependencies": {
-    "hardhat": "^3.12.0",
-    "@nomicfoundation/hardhat-verify": "^3.12.0"
-  }
-}
   "overrides": {
     "lodash-es": "4.18.1",
     "undici": "^5.14.0",

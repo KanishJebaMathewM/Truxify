@@ -1,4 +1,5 @@
 import logger from '../middleware/logger.js';
+
 export const CircuitState = {
   CLOSED: 'CLOSED',
   OPEN: 'OPEN',

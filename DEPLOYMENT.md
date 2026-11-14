@@ -99,7 +99,7 @@ docker stack deploy -c docker-compose.prod.yml truxify_stack
 
 For massive scale, high availability, and self-healing, Kubernetes is the recommended orchestration engine.
 
-The example below mirrors the current API deployment contract in `k8s/deployments/api-deployement.yaml` and the matching `api-service.yaml` manifest.
+The example below mirrors the current API deployment contract in `k8s/deployments/api-deployment.yaml` and the matching `api-service.yaml` manifest.
 
 ### API Service Account
 
@@ -217,7 +217,7 @@ spec:
 Apply the API ServiceAccount, Deployment, and Service using the repository manifests:
 ```bash
 kubectl apply -f k8s/authorization/api-service-account.yaml \
-  -f k8s/deployments/api-deployement.yaml \
+  -f k8s/deployments/api-deployment.yaml \
   -f k8s/services/api-service.yaml
 ```
 

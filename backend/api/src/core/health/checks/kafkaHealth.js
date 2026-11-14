@@ -24,7 +24,6 @@ export async function checkKafkaHealth() {
     };
   }
 }import { HealthStatus, executeCheck } from '../HealthCheck.js';
-import logger from '../../../middleware/logger.js';
 
 const NAME = 'kafka';
 const KAFKA_HEALTH_TIMEOUT_MS = 3000;
@@ -47,7 +46,7 @@ async function check() {
     logger.warn('[kafkaHealth] Failed to import kafka config:', err?.message);
     return { status: HealthStatus.DEGRADED, message: 'module_not_available' };
   }
-} // <-- This closing brace was missing
+}
 
 export default function kafkaHealth(opts) {
   return executeCheck(NAME, check, {

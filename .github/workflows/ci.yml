@@ -1,9 +1,5 @@
 name: Truxify CI
-# .github/workflows/ci.yml (Excerpt)
-- name: Install Backend Dependencies
-  run: npm install
-  working-directory: backend/api
-  # Remove cache-dependency-path if package-lock.json is absent
+
 on:
   pull_request:
     paths:
@@ -49,7 +45,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Node.js 22
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 22
 
@@ -77,7 +73,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Python 3.11
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
         with:
           python-version: "3.11"
           cache: pip
@@ -119,7 +115,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Node.js 20
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 20
           cache: npm

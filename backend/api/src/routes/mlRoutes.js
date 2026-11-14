@@ -1,8 +1,7 @@
 import express from 'express';
 import crypto from 'crypto';
 import { cacheMiddleware } from '../middleware/cacheMiddleware.js';
-// Verified single import for predictEta to prevent SyntaxError (#14873)
-import { predictDemand, predictPrice, predictEta, matchEnRouteLoads, getAbTestingStatus, rollbackAbTest } from '../services/ml.js';
+import { predictDemand, predictPrice, predictEta, matchEnRouteLoads, getAbTestingStatus, rollbackAbTest, optimiseLoads } from '../services/ml.js';
 import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
@@ -495,6 +494,31 @@ router.post(
     } catch (err) {
       logger.error({ err: err.message }, '[ML] Failed to rollback A/B test');
       return res.status(502).json({ error: 'Failed to trigger rollback on ML engine.' });
+    }
+  }
+);
+
+/**
+ * POST /api/ml/load-optimiser
+ * Model #16: Cargo & Payload Multi-Load Optimiser
+ */
+router.post(
+  '/load-optimiser',
+  authenticate,
+  userLimiter,
+  async (req, res) => {
+    try {
+      const { truck_payload_kg, truck_volume_m3, available_loads, driver_location } = req.body;
+      if (!truck_payload_kg || !truck_volume_m3 || !available_loads || !driver_location) {
+        return res.status(400).json({
+          error: 'Missing required fields: truck_payload_kg, truck_volume_m3, available_loads, driver_location'
+        });
+      }
+      const result = await optimiseLoads(req.body);
+      return res.json(result);
+    } catch (err) {
+      logger.error({ err: err.message }, '[ML] Failed to run cargo load optimiser');
+      return res.status(502).json({ error: 'Failed to compute optimal load combination.' });
     }
   }
 );

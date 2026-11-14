@@ -68,16 +68,13 @@ class AppLocalizationsTa extends AppLocalizations {
   }
 
   @override
-  String get phoneMustBeDigits =>
-      'தொலைபேசி எண் இலக்கங்களை மட்டும் கொண்டிருக்க வேண்டும்';
+  String get phoneMustBeDigits => 'தொலைபேசி எண் இலக்கங்களை மட்டும் கொண்டிருக்க வேண்டும்';
 
   @override
-  String get autoVerificationFailed =>
-      'தானியங்கு சரிபார்ப்பு தோல்வியடைந்தது. தயவுசெய்து OTP ஐ கைமுறையாக உள்ளிடவும்.';
+  String get autoVerificationFailed => 'தானியங்கு சரிபார்ப்பு தோல்வியடைந்தது. தயவுசெய்து OTP ஐ கைமுறையாக உள்ளிடவும்.';
 
   @override
-  String get protectedDriverAccess =>
-      'இப்பகுதி பதிவுசெய்யப்பட்ட ஓட்டுநர்களுக்கு மட்டுமே.';
+  String get protectedDriverAccess => 'இப்பகுதி பதிவுசெய்யப்பட்ட ஓட்டுநர்களுக்கு மட்டுமே.';
 
   @override
   String get verifyOtp => 'OTP ஐ சரிபார்';
@@ -94,16 +91,13 @@ class AppLocalizationsTa extends AppLocalizations {
   String get invalidOtp => 'தவறான OTP. தயவுசெய்து மீண்டும் முயற்சிக்கவும்.';
 
   @override
-  String get codeExpired =>
-      'OTP காலாவதியாகிவிட்டது. தயவுசெய்து புதியதைக் கோருங்கள்.';
+  String get codeExpired => 'OTP காலாவதியாகிவிட்டது. தயவுசெய்து புதியதைக் கோருங்கள்.';
 
   @override
-  String get verificationFailedMsg =>
-      'சரிபார்ப்பு தோல்வியடைந்தது. தயவுசெய்து மீண்டும் முயற்சிக்கவும்.';
+  String get verificationFailedMsg => 'சரிபார்ப்பு தோல்வியடைந்தது. தயவுசெய்து மீண்டும் முயற்சிக்கவும்.';
 
   @override
-  String get couldNotVerifyOtp =>
-      'OTP ஐ சரிபார்க்க முடியவில்லை. தயவுசெய்து மீண்டும் முயற்சிக்கவும்.';
+  String get couldNotVerifyOtp => 'OTP ஐ சரிபார்க்க முடியவில்லை. தயவுசெய்து மீண்டும் முயற்சிக்கவும்.';
 
   @override
   String get verifying => 'சரிபார்க்கிறது...';
@@ -121,8 +115,7 @@ class AppLocalizationsTa extends AppLocalizations {
   String get profile => 'சுயவிவரம்';
 
   @override
-  String get offlineUsingCachedData =>
-      'நீங்கள் ஆஃப்லைனில் உள்ளீர்கள். தற்காலிக தரவைப் பயன்படுத்துகிறது.';
+  String get offlineUsingCachedData => 'நீங்கள் ஆஃப்லைனில் உள்ளீர்கள். தற்காலிக தரவைப் பயன்படுத்துகிறது.';
 
   @override
   String get newLoadAvailable => 'புதிய சரக்கு கிடைக்கிறது!';
@@ -163,16 +156,13 @@ class AppLocalizationsTa extends AppLocalizations {
   String get offline => 'ஆஃப்லைன்';
 
   @override
-  String get offlineGoOnline =>
-      'நீங்கள் ஆஃப்லைனில் உள்ளீர்கள். சரக்குகளைப் பெற ஆன்லைனில் செல்லுங்கள்.';
+  String get offlineGoOnline => 'நீங்கள் ஆஃப்லைனில் உள்ளீர்கள். சரக்குகளைப் பெற ஆன்லைனில் செல்லுங்கள்.';
 
   @override
-  String get radarActiveFetching =>
-      'ரேடார் செயலில் — அருகிலுள்ள சரக்குகளைப் பெறுகிறது...';
+  String get radarActiveFetching => 'ரேடார் செயலில் — அருகிலுள்ள சரக்குகளைப் பெறுகிறது...';
 
   @override
-  String get radarActiveLooking =>
-      'ரேடார் செயலில் — உங்கள் அருகில் சரக்குகளைத் தேடுகிறது.';
+  String get radarActiveLooking => 'ரேடார் செயலில் — உங்கள் அருகில் சரக்குகளைத் தேடுகிறது.';
 
   @override
   String get todayPay => 'இன்றைய ஊதியம்';
@@ -240,8 +230,7 @@ class AppLocalizationsTa extends AppLocalizations {
   String get pleaseGoOnline => 'தயவுசெய்து முதலில் ஆன்லைனில் செல்லுங்கள்';
 
   @override
-  String get noDestinationAvailable2 =>
-      'இலக்கு கிடைக்கவில்லை. தயவுசெய்து இலக்கை அமையுங்கள்.';
+  String get noDestinationAvailable2 => 'இலக்கு கிடைக்கவில்லை. தயவுசெய்து இலக்கை அமையுங்கள்.';
 
   @override
   String get locationPermissionRequired => 'இருப்பு அனுமதி தேவை';
@@ -250,8 +239,7 @@ class AppLocalizationsTa extends AppLocalizations {
   String get locationAccessDenied => 'இருப்பு அணுகல் மறுக்கப்பட்டது';
 
   @override
-  String get locationPermDenied =>
-      'இருப்பு அனுமதி நிரந்தரமாக மறுக்கப்பட்டது. தயவுசெய்து அமைப்புகளில் இயக்குங்கள்.';
+  String get locationPermDenied => 'இருப்பு அனுமதி நிரந்தரமாக மறுக்கப்பட்டது. தயவுசெய்து அமைப்புகளில் இயக்குங்கள்.';
 
   @override
   String get openSettings => 'அமைப்புகளைத் திற';
@@ -275,8 +263,7 @@ class AppLocalizationsTa extends AppLocalizations {
   String get saveChanges => 'மாற்றங்களைச் சேமி';
 
   @override
-  String get profileUpdatedSuccessfully =>
-      'சுயவிவரம் வெற்றிகரமாக புதுப்பிக்கப்பட்டது';
+  String get profileUpdatedSuccessfully => 'சுயவிவரம் வெற்றிகரமாக புதுப்பிக்கப்பட்டது';
 
   @override
   String get selectLanguage => 'மொழியைத் தேர்ந்தெடு';
@@ -297,8 +284,7 @@ class AppLocalizationsTa extends AppLocalizations {
   String get walletAddressUpdated => 'பணப்பை முகவரி புதுப்பிக்கப்பட்டது';
 
   @override
-  String get failedToUpdateWallet =>
-      'பணப்பை முகவரியைப் புதுப்பிக்க முடியவில்லை';
+  String get failedToUpdateWallet => 'பணப்பை முகவரியைப் புதுப்பிக்க முடியவில்லை';
 
   @override
   String get helpSupport => 'உதவி & ஆதரவு';
@@ -307,15 +293,13 @@ class AppLocalizationsTa extends AppLocalizations {
   String get browseFAQs => 'அடிக்கடி கேட்கப்படும் கேள்விகளை உலாவு';
 
   @override
-  String get instantAnswers =>
-      'பொதுவான கேள்விகளுக்கு உடனடி பதில்களைப் பெறுங்கள்';
+  String get instantAnswers => 'பொதுவான கேள்விகளுக்கு உடனடி பதில்களைப் பெறுங்கள்';
 
   @override
   String get aboutTruxifyDriverApp => 'Truxify ஓட்டுநர் பயன்பாடு பற்றி';
 
   @override
-  String get truxifyDescription =>
-      'Truxify என்பது கிழக்கு ஆப்பிரிக்கா முழுவதும் ஓட்டுநர்களை சரக்குகளுடன் இணைக்கும் லாரி தளவாட தளம்.';
+  String get truxifyDescription => 'Truxify என்பது கிழக்கு ஆப்பிரிக்கா முழுவதும் ஓட்டுநர்களை சரக்குகளுடன் இணைக்கும் லாரி தளவாட தளம்.';
 
   @override
   String get documents => 'ஆவணங்கள்';
@@ -348,8 +332,7 @@ class AppLocalizationsTa extends AppLocalizations {
   String get logout => 'வெளியேறு';
 
   @override
-  String get logoutFailed =>
-      'வெளியேற்றம் தோல்வியடைந்தது. தயவுசெய்து மீண்டும் முயற்சிக்கவும்.';
+  String get logoutFailed => 'வெளியேற்றம் தோல்வியடைந்தது. தயவுசெய்து மீண்டும் முயற்சிக்கவும்.';
 
   @override
   String get myTrips => 'என் பயணங்கள்';
@@ -409,8 +392,7 @@ class AppLocalizationsTa extends AppLocalizations {
   String get deliveryStops => 'டெலிவரி நிறுத்தங்கள்';
 
   @override
-  String get markCurrentStopCompleted =>
-      'தற்போதைய நிறுத்தத்தை நிறைவடைந்ததாகக் குறி';
+  String get markCurrentStopCompleted => 'தற்போதைய நிறுத்தத்தை நிறைவடைந்ததாகக் குறி';
 
   @override
   String get activeStatus => 'செயலில்';
@@ -431,8 +413,7 @@ class AppLocalizationsTa extends AppLocalizations {
   String get marketplaceLoads => 'சந்தை சரக்குகள்';
 
   @override
-  String get availableLoadsYouCanBidFor =>
-      'நீங்கள் ஏலம் கட்டக்கூடிய கிடைக்கும் சரக்குகள்';
+  String get availableLoadsYouCanBidFor => 'நீங்கள் ஏலம் கட்டக்கூடிய கிடைக்கும் சரக்குகள்';
 
   @override
   String get couldNotLoadMarketplace => 'சந்தையை ஏற்ற முடியவில்லை';
@@ -471,8 +452,7 @@ class AppLocalizationsTa extends AppLocalizations {
   String get couldNotLoadRecommendations => 'பரிந்துரைகளை ஏற்ற முடியவில்லை';
 
   @override
-  String get noActiveTripForRecommendations =>
-      'திரும்ப சரக்கு பரிந்துரைகளைக் காண ஒரு பயணத்தை நிறைவு செய்யுங்கள்';
+  String get noActiveTripForRecommendations => 'திரும்ப சரக்கு பரிந்துரைகளைக் காண ஒரு பயணத்தை நிறைவு செய்யுங்கள்';
 
   @override
   String get detourDistance => 'சுற்றுவழி';
@@ -517,8 +497,7 @@ class AppLocalizationsTa extends AppLocalizations {
   String get enterValidAmount => 'தயவுசெய்து சரியான தொகையை உள்ளிடவும்';
 
   @override
-  String get amountMustBePositive =>
-      'தொகை பூஜ்யத்தை விட அதிகமாக இருக்க வேண்டும்';
+  String get amountMustBePositive => 'தொகை பூஜ்யத்தை விட அதிகமாக இருக்க வேண்டும்';
 
   @override
   String get insufficientBalance => 'போதுமான இருப்பு இல்லை';
@@ -549,7 +528,7 @@ class AppLocalizationsTa extends AppLocalizations {
 
   @override
   String resendOtpIn(int seconds) {
-    return 'Resend in ${seconds}s';
+    return 'Resend in $secondss';
   }
 
   @override

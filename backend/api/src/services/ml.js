@@ -74,6 +74,11 @@ export async function matchEnRouteLoads(params) {
   return handleResponse(axios.post(url, params, { headers: getHeaders(), timeout: 5000 }), url, 'POST');
 }
 
+export async function optimiseLoads(params) {
+  const url = `${ML_BASE_URL}/api/ml/load-optimiser`;
+  return handleResponse(axios.post(url, params, { headers: getHeaders(), timeout: 15000 }), url, 'POST');
+}
+
 export async function optimisePacking(params) {
   const url = `${ML_BASE_URL}/optimise/packing`;
   return handleResponse(axios.post(url, params, { headers: getHeaders(), timeout: 5000 }), url, 'POST');

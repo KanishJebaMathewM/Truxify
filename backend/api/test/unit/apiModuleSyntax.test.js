@@ -6,6 +6,7 @@ it.each([
   'routes/publicTrackingRoutes.js',
   'routes/auditRoutes.js',
   'services/blockchain/eventListener.js',
+  'lib/circuitBreaker.js',
 ])('parses the API module %s before startup', (relativePath) => {
   const modulePath = fileURLToPath(new URL(`../../src/${relativePath}`, import.meta.url));
   expect(() => execFileSync(process.execPath, ['--check', modulePath], { stdio: 'pipe' })).not.toThrow();

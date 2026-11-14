@@ -1,5 +1,8 @@
-from datetime import datetime, timezone
+
+"""FastAPI router for the Logistics Digital Twin platform."""
+
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -70,16 +73,25 @@ class ResourceAllocationRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 def utc_timestamp() -> str:
-    """Return a timezone-aware UTC timestamp."""
+    """Return the current timezone-aware UTC timestamp."""
     return datetime.now(timezone.utc).isoformat()
 
 
-def handle_unexpected_error(operation: str, exc: Exception) -> HTTPException:
-    """
-    Log internal errors while returning a safe API response.
+def validate_non_empty(value: str, field_name: str) -> str:
+    """Validate and normalize a required string."""
+    if not isinstance(value, str) or not value.strip():
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field_name} cannot be empty",
+        )
+    return value.strip()
 
-    Internal exception messages should not be exposed directly to clients.
-    """
+
+def handle_unexpected_error(
+    operation: str,
+    exc: Exception,
+) -> HTTPException:
+    """Log internal errors without exposing implementation details."""
     logger.exception("%s failed", operation)
 
     return HTTPException(
@@ -95,14 +107,18 @@ def handle_unexpected_error(operation: str, exc: Exception) -> HTTPException:
 @router.post("/asset/add")
 async def add_asset(request: AssetRequest):
     try:
+        asset_id = validate_non_empty(request.id, "id")
+        asset_type = validate_non_empty(request.type, "type")
+        asset_status = validate_non_empty(request.status, "status")
+
         asset = LogisticsAsset(
-            id=request.id,
-            type=request.type,
+            id=asset_id,
+            type=asset_type,
             location={
                 "lat": request.lat,
                 "lng": request.lng,
             },
-            status=request.status,
+            status=asset_status,
             metadata=request.metadata,
         )
 
@@ -119,18 +135,20 @@ async def add_asset(request: AssetRequest):
     except HTTPException:
         raise
     except Exception as exc:
-        raise handle_unexpected_error("Add asset", exc)
+        raise handle_unexpected_error("Add asset", exc) from exc
 
 
 @router.post("/asset/update")
 async def update_asset(
-    asset_id: str,
-    request: AssetUpdateRequest,
+    asset_id: str = Query(..., min_length=1, max_length=100),
+    request: AssetUpdateRequest = ...,
 ):
-    if not asset_id.strip():
+    asset_id = validate_non_empty(asset_id, "asset_id")
+
+    if not request.updates:
         raise HTTPException(
             status_code=400,
-            detail="asset_id cannot be empty",
+            detail="At least one update field is required",
         )
 
     try:
@@ -139,7 +157,7 @@ async def update_asset(
             request.updates,
         )
 
-        if not result:
+        if result is None or result is False:
             raise HTTPException(
                 status_code=404,
                 detail=f"Asset '{asset_id}' not found",
@@ -156,16 +174,14 @@ async def update_asset(
     except HTTPException:
         raise
     except Exception as exc:
-        raise handle_unexpected_error("Update asset", exc)
+        raise handle_unexpected_error("Update asset", exc) from exc
 
 
 @router.get("/asset/{asset_id}")
-async def get_asset(asset_id: str):
-    if not asset_id.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="asset_id cannot be empty",
-        )
+async def get_asset(
+    asset_id: str,
+):
+    asset_id = validate_non_empty(asset_id, "asset_id")
 
     try:
         state = twin.get_asset_state(asset_id)
@@ -185,7 +201,7 @@ async def get_asset(asset_id: str):
     except HTTPException:
         raise
     except Exception as exc:
-        raise handle_unexpected_error("Get asset", exc)
+        raise handle_unexpected_error("Get asset", exc) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -195,17 +211,21 @@ async def get_asset(asset_id: str):
 @router.post("/event/add")
 async def add_event(request: EventRequest):
     try:
-        # Use microseconds so multiple events created within the same
-        # second do not receive the same ID.
+        event_type = validate_non_empty(request.type, "type")
+        asset_id = validate_non_empty(request.asset_id, "asset_id")
+
+        # Generate ID and timestamp from the same UTC datetime.
+        now = datetime.now(timezone.utc)
+
         event_id = (
-            f"event_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
+            f"event_{now.strftime('%Y%m%d%H%M%S%f')}"
         )
 
         event = LogisticsEvent(
             id=event_id,
-            type=request.type,
-            timestamp=datetime.now(timezone.utc),
-            asset_id=request.asset_id,
+            type=event_type,
+            timestamp=now,
+            asset_id=asset_id,
             location={
                 "lat": request.lat,
                 "lng": request.lng,
@@ -223,19 +243,28 @@ async def add_event(request: EventRequest):
             "timestamp": utc_timestamp(),
         }
 
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise handle_unexpected_error("Add event", exc)
+        raise handle_unexpected_error("Add event", exc) from exc
 
 
 @router.get("/events")
 async def get_events(
-    asset_id: Optional[str] = None,
+    asset_id: Optional[str] = Query(
+        default=None,
+        min_length=1,
+        max_length=100,
+    ),
     limit: int = Query(
         default=100,
         ge=1,
         le=1000,
     ),
 ):
+    if asset_id is not None:
+        asset_id = validate_non_empty(asset_id, "asset_id")
+
     try:
         events = twin.get_events(
             asset_id,
@@ -249,8 +278,10 @@ async def get_events(
             "timestamp": utc_timestamp(),
         }
 
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise handle_unexpected_error("Get events", exc)
+        raise handle_unexpected_error("Get events", exc) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -268,8 +299,10 @@ async def get_state():
             "timestamp": utc_timestamp(),
         }
 
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise handle_unexpected_error("Get state", exc)
+        raise handle_unexpected_error("Get state", exc) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -279,8 +312,13 @@ async def get_state():
 @router.post("/scenario/create")
 async def create_scenario(request: ScenarioRequest):
     try:
-        scenario_id = sim_engine.create_scenario(
+        scenario_name = validate_non_empty(
             request.name,
+            "name",
+        )
+
+        scenario_id = sim_engine.create_scenario(
+            scenario_name,
             request.params,
         )
 
@@ -292,24 +330,25 @@ async def create_scenario(request: ScenarioRequest):
             "timestamp": utc_timestamp(),
         }
 
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise handle_unexpected_error("Create scenario", exc)
+        raise handle_unexpected_error("Create scenario", exc) from exc
 
 
 @router.post("/scenario/run")
 async def run_scenario(
-    scenario_id: str,
+    scenario_id: str = Query(..., min_length=1),
     duration: int = Query(
         default=3600,
         ge=1,
         le=86400,
     ),
 ):
-    if not scenario_id.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="scenario_id cannot be empty",
-        )
+    scenario_id = validate_non_empty(
+        scenario_id,
+        "scenario_id",
+    )
 
     try:
         result = sim_engine.run_simulation(
@@ -328,8 +367,10 @@ async def run_scenario(
             "timestamp": utc_timestamp(),
         }
 
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise handle_unexpected_error("Run scenario", exc)
+        raise handle_unexpected_error("Run scenario", exc) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -338,18 +379,14 @@ async def run_scenario(
 
 @router.post("/predict/delays")
 async def predict_delays(
-    asset_id: str,
+    asset_id: str = Query(..., min_length=1, max_length=100),
     hours: int = Query(
         default=24,
         ge=1,
         le=168,
     ),
 ):
-    if not asset_id.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="asset_id cannot be empty",
-        )
+    asset_id = validate_non_empty(asset_id, "asset_id")
 
     try:
         prediction = predictive.predict_delays(
@@ -363,20 +400,22 @@ async def predict_delays(
             "timestamp": utc_timestamp(),
         }
 
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise handle_unexpected_error("Predict delays", exc)
+        raise handle_unexpected_error("Predict delays", exc) from exc
 
 
 @router.post("/predict/arrival")
-async def predict_arrival(asset_id: str):
-    if not asset_id.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="asset_id cannot be empty",
-        )
+async def predict_arrival(
+    asset_id: str = Query(..., min_length=1, max_length=100),
+):
+    asset_id = validate_non_empty(asset_id, "asset_id")
 
     try:
-        prediction = predictive.predict_arrival_time(asset_id)
+        prediction = predictive.predict_arrival_time(
+            asset_id
+        )
 
         return {
             "success": True,
@@ -384,8 +423,10 @@ async def predict_arrival(asset_id: str):
             "timestamp": utc_timestamp(),
         }
 
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise handle_unexpected_error("Predict arrival", exc)
+        raise handle_unexpected_error("Predict arrival", exc) from exc
 
 
 @router.post("/predict/demand")
@@ -413,8 +454,10 @@ async def predict_demand(
             "timestamp": utc_timestamp(),
         }
 
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise handle_unexpected_error("Predict demand", exc)
+        raise handle_unexpected_error("Predict demand", exc) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -429,19 +472,18 @@ async def optimize_routes(asset_ids: List[str]):
             detail="At least one asset_id is required",
         )
 
-    cleaned_asset_ids = [
-        asset_id.strip()
-        for asset_id in asset_ids
-        if isinstance(asset_id, str) and asset_id.strip()
-    ]
-
-    if not cleaned_asset_ids:
-        raise HTTPException(
-            status_code=400,
-            detail="asset_ids cannot be empty",
-        )
-
     try:
+        cleaned_asset_ids = []
+
+        for asset_id in asset_ids:
+            cleaned_id = validate_non_empty(
+                asset_id,
+                "asset_id",
+            )
+
+            if cleaned_id not in cleaned_asset_ids:
+                cleaned_asset_ids.append(cleaned_id)
+
         result = optimizer.optimize_routes(
             cleaned_asset_ids
         )
@@ -452,8 +494,10 @@ async def optimize_routes(asset_ids: List[str]):
             "timestamp": utc_timestamp(),
         }
 
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise handle_unexpected_error("Optimize routes", exc)
+        raise handle_unexpected_error("Optimize routes", exc) from exc
 
 
 @router.post("/optimize/resources")
@@ -471,8 +515,10 @@ async def optimize_resources(
             "timestamp": utc_timestamp(),
         }
 
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise handle_unexpected_error("Optimize resources", exc)
+        raise handle_unexpected_error("Optimize resources", exc) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -510,5 +556,8 @@ async def get_stats():
             "timestamp": utc_timestamp(),
         }
 
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise handle_unexpected_error("Get stats", exc)
+        raise handle_unexpected_error("Get stats", exc) from exc
+

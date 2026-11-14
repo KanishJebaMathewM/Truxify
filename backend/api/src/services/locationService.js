@@ -1,10 +1,6 @@
-const { createClient } = require('redis');
-const { createClient: createSupabaseClient } = require('@supabase/supabase-js');
-// backend/api/src/services/locationService.js (Excerpt)
+import { createClient } from 'redis';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import logger from '../middleware/logger.js';
-
-import { logger } from '../utils/logger.js';
 
 /**
  * Verifies latitude, longitude, and accuracy parameters for location tracking.
@@ -210,7 +206,6 @@ export const checkSpeedAnomaly = (driverId, newLon, newLat, currentTimestamp = D
     driverPositionCache.set(driverId, { lon: newLon, lat: newLat, timestamp: currentTimestamp });
     return { anomaly: false, calculatedSpeedKmh: Math.round(speedKmh) };
 };
-// backend/api/src/services/locationService.js (Excerpt)
 
 export function calculateRemainingEta(estimatedArrivalTime, currentTime = Date.now()) {
   const remainingMilliseconds = new Date(estimatedArrivalTime).getTime() - currentTime;
@@ -219,7 +214,6 @@ export function calculateRemainingEta(estimatedArrivalTime, currentTime = Date.n
   // ✅ Clamp ETA to a minimum of 0 to prevent negative values
   return Math.max(0, remainingMinutes);
 }
-const ensureIndexes = async () => {
 /**
  * Verifies or creates PostGIS geospatial indexes.
  */

@@ -4,28 +4,22 @@ import { VALID_LANGUAGES } from '../schemas/profile.js';
 
 import { z } from 'zod';
 
-export const updateProfileSchema = z.object({
-  name: z.string().min(2, 'Name must be at least 2 characters long.').optional(),
-  phone: z.string().regex(/^\+?[1-9]\d{1,14}$/, 'Invalid phone number format.').optional(),
-  avatar_url: z.string().url('Invalid avatar URL format.').optional(),
-  verification_status: z.enum(['pending', 'verified', 'rejected'], {
-    errorMap: () => ({ message: "Verification status must be one of: 'pending', 'verified', 'rejected'." })
-  }).optional(),
+export const withdrawSchema = z.object({
+  amount: z.number({
+    required_error: 'Withdrawal amount is required.',
+    invalid_type_error: 'Withdrawal amount must be a number.',
+  })
+  .positive('Withdrawal amount must be greater than zero.')
+  // ✅ Fixed: Replaced non-existent .safe() method with valid .safeInteger()
+  .safeInteger({ message: 'Amount must be a safe integer.' }),
+  
+  currency: z.string().length(3, 'Currency code must be 3 characters (e.g., INR, USD).').default('INR'),
+  bank_account_id: z.string().uuid('Invalid bank account ID format.'),
 });
 // Generic field validation helpers
 function isValidPhone(phone) {
   return /^\+?[\d\s\-()]{7,15}$/.test(phone);
 }
-// backend/api/src/validation/requestSchemas.js (Excerpt)
-
-// Keep primary declaration
-export const updateProfileSchema = z.object({
-  fullName: z.string().min(2, 'Full name must be at least 2 characters long').optional(),
-  phone: z.string().optional(),
-  avatarUrl: z.string().url('Invalid avatar URL').optional()
-});
-
-// Remove the redundant/duplicate export later in the file
 const coerceNumber = (schema) => z.preprocess(
   (val) => {
     if (val === undefined || val === null || val === '') {

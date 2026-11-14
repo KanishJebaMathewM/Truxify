@@ -210,14 +210,10 @@ describe('AlertRouter', () => {
       );
     });
 
-    it('warns on unknown alert channel and returns undefined', async () => {
+    it('rejects when the alert channel is unknown', async () => {
       const { router } = buildRouter();
-      const result = await router.sendToChannel('webhook', SAMPLE_CRITICAL_ALERT);
-      expect(result).toBeUndefined();
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        { channel: 'webhook' },
-        '[AlertRouter] Unknown alert channel'
-      );
+      await expect(router.sendToChannel('webhook', SAMPLE_CRITICAL_ALERT))
+        .rejects.toThrow('Unknown alert channel: webhook');
     });
 
     it('catches, logs, and re-throws when channel sending throws', async () => {

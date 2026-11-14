@@ -48,6 +48,10 @@ class Multicall3Service {
         throw new Error('Multicall3 service not initialized');
       }
 
+      if (!Array.isArray(calls)) {
+        throw new TypeError('calls must be an array');
+      }
+
       if (calls.length === 0) {
         return [];
       }
@@ -73,12 +77,15 @@ class Multicall3Service {
         callData: call.callData,
       }));
 
+      let timeoutHandle;
       try {
+        const timeout = new Promise((_, reject) => {
+          timeoutHandle = setTimeout(() => reject(new Error('Multicall timeout')), CALL_TIMEOUT_MS);
+          timeoutHandle.unref?.();
+        });
         const rawResult = await Promise.race([
           this.multicallContract.aggregate3(callsData),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Multicall timeout')), CALL_TIMEOUT_MS)
-          ),
+          timeout,
         ]);
 
         if (!rawResult || !rawResult.returnData) {
@@ -107,6 +114,11 @@ class Multicall3Service {
           error: err.message,
           callIndex: idx,
         }));
+      } finally {
+        // A successful multicall used to leave its 30-second timeout timer
+        // alive, keeping Jest/Node workers open and accumulating one handle
+        // per batch in long-running processes.
+        if (timeoutHandle) clearTimeout(timeoutHandle);
       }
     });
   }

@@ -33,6 +33,7 @@ backend/ml/
 | `recommendLoads` / `recommendTrucks` | `POST /recommend/loads` / `/recommend/trucks` |
 | `scoreTrust` | `POST /score/trust` |
 | `matchDeadhead` / `matchEnRouteLoads` | `POST /match/deadhead` + haversine fallback |
+| `optimiseLoads` (Model #16) | `POST /api/ml/load-optimiser` (multi-dimensional bin packing) |
 | `optimiseMidTrip`, `trainDemandModel`, `trainPriceModel`, `listModels` | various |
 
 ---

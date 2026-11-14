@@ -1,5 +1,54 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// backend/api/test/unit/osrm.test.js
 
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { getRouteEstimate } from '../../src/services/osrm.js';
+import logger from '../../src/middleware/logger.js';
+
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: {
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn()
+  }
+}));
+
+describe('OSRM Service Unit Tests', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('getRouteEstimate edge cases', () => {
+    // FIX: Stub global fetch before each test in the edge cases block
+    beforeEach(() => {
+      vi.stubGlobal('fetch', vi.fn());
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('should handle invalid JSON responses from OSRM gracefully and log structured error', async () => {
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => {
+          throw new Error('Invalid JSON payload');
+        }
+      });
+
+      const result = await getRouteEstimate({ lat: 13.0827, lng: 80.2707 }, { lat: 12.9716, lng: 77.5946 });
+
+      expect(result).toBeDefined();
+      // FIX: Assert against object-first signature matching the updated logger contract
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: expect.any(String),
+          message: expect.stringContaining('Invalid JSON')
+        })
+      );
+    });
+  });
+});
 const mockRedis = vi.hoisted(() => ({
   get: vi.fn(),
   set: vi.fn(),

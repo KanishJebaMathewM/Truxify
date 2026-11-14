@@ -1,3 +1,4 @@
+
 name: Remove Links from Non-Contributors
 
 on:
@@ -10,10 +11,10 @@ on:
   workflow_dispatch:
     inputs:
       scan_all:
-        description: 'Scan and clean all existing issues, PRs, and comments across the repository'
+        description: 'Scan and clean all existing issues, PRs, and comments'
         required: false
         type: boolean
-        default: true
+        default: false
 
 permissions:
   contents: read
@@ -36,8 +37,31 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
         with:
           script: |
-            const cleaner = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/remove-non-contributor-links.js`);
-            if (context.eventName === 'workflow_dispatch' || context.inputs?.scan_all) {
+            const path = `${process.env.GITHUB_WORKSPACE}/.github/scripts/remove-non-contributor-links.js`;
+            const cleaner = require(path);
+
+            core.info(`Loaded cleaner module from: ${path}`);
+            core.info(`Available exports: ${Object.keys(cleaner).join(', ')}`);
+            core.info(`typeof cleaner.run: ${typeof cleaner.run}`);
+            core.info(`typeof cleaner.scanAll: ${typeof cleaner.scanAll}`);
+
+            if (typeof cleaner.run !== 'function') {
+              throw new Error(
+                'remove-non-contributor-links.js must export run() using module.exports'
+              );
+            }
+
+            if (typeof cleaner.scanAll !== 'function') {
+              throw new Error(
+                'remove-non-contributor-links.js must export scanAll() using module.exports'
+              );
+            }
+
+            const scanAll =
+              context.eventName === 'workflow_dispatch' &&
+              context.payload.inputs?.scan_all === 'true';
+
+            if (scanAll) {
               await cleaner.scanAll({ github, context, core });
             } else {
               await cleaner.run({ github, context, core });

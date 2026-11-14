@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:signature/signature.dart';
@@ -6,9 +8,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:truxify_shared/truxify_shared.dart';
+import '../services/image_compression_service.dart';
 import '../services/sync_service.dart';
 import '../services/trip_service.dart';
-import '../services/image_compression_service.dart';
 import '../theme/app_theme.dart';
 
 class ProofOfDeliveryScreen extends StatefulWidget {
@@ -16,7 +18,8 @@ class ProofOfDeliveryScreen extends StatefulWidget {
   final String stopId;
   final String? orderId;
   final String? earnings;
-  final Future<void> Function(String? photoPath, String? signaturePath)? onComplete;
+  final Future<void> Function(String? photoPath, String? signaturePath)?
+      onComplete;
 
   const ProofOfDeliveryScreen({
     super.key,
@@ -35,9 +38,14 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
   CameraController? _cameraController;
   late SignatureController _signatureController;
   XFile? _capturedPhoto;
+  // On web we cannot take a photo, so we use a flag to let the user proceed
+  bool _webPhotoDone = false;
   bool _isProcessing = false;
   String _uploadStatus = '';
   double? _uploadProgress;
+
+  bool get _hasPhoto =>
+      kIsWeb ? _webPhotoDone : _capturedPhoto != null;
 
   @override
   void initState() {
@@ -47,14 +55,18 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
       penColor: Colors.black,
       exportBackgroundColor: Colors.white,
     );
-    _initCamera();
+    // Camera is not supported on web
+    if (!kIsWeb) {
+      _initCamera();
+    }
   }
 
   Future<void> _initCamera() async {
     try {
       final cameras = await availableCameras();
       if (cameras.isNotEmpty) {
-        _cameraController = CameraController(cameras.first, ResolutionPreset.medium);
+        _cameraController =
+            CameraController(cameras.first, ResolutionPreset.medium);
         await _cameraController!.initialize();
         if (mounted) setState(() {});
       } else {
@@ -69,7 +81,8 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
   void _showCameraError(String message) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message), backgroundColor: TruxifyColors.error),
+        SnackBar(
+            content: Text(message), backgroundColor: TruxifyColors.error),
       );
     }
   }
@@ -82,14 +95,30 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
   }
 
   Future<void> _takePhoto() async {
-    if (_cameraController == null || !_cameraController!.value.isInitialized) return;
+    if (kIsWeb) {
+      // Camera capture is not available on web — acknowledge and continue
+      setState(() => _webPhotoDone = true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Camera capture is not supported on web. Photo step skipped.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    if (_cameraController == null ||
+        !_cameraController!.value.isInitialized) {
+      return;
+    }
     try {
       final photo = await _cameraController!.takePicture();
-      final File rawImage = File(photo.path);
-      final File compressedImage = await ImageCompressionService.compressImage(rawImage) ?? rawImage;
-      setState(() {
-        _capturedPhoto = XFile(compressedImage.path);
-      });
+      final rawImage = File(photo.path);
+      final compressed =
+          await ImageCompressionService.compressImage(rawImage) ?? rawImage;
+      setState(() => _capturedPhoto = XFile(compressed.path));
     } catch (e) {
       debugPrint('Error taking photo: $e');
       if (mounted) {
@@ -113,12 +142,14 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
   }
 
   Future<void> _submit() async {
-    if (_capturedPhoto == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please capture a photo.')));
+    if (!_hasPhoto) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please capture a photo.')));
       return;
     }
     if (_signatureController.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please provide a signature.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please provide a signature.')));
       return;
     }
 
@@ -126,59 +157,51 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
     final tripService = TripService();
 
     try {
-      // 1. If orderId is provided, attempt payment release via geofence or OTP manual entry
+      // 1. Payment release via geofence or OTP
       if (widget.orderId != null) {
         _updateStatus('Checking GPS Geofence status...');
         double? lat;
         double? lng;
         try {
-          final position = await Geolocator.getCurrentPosition(
-            locationSettings: const LocationSettings(
-              accuracy: LocationAccuracy.high,
-              timeLimit: Duration(seconds: 4),
-            ),
+          final pos = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high,
+            timeLimit: const Duration(seconds: 4),
           );
-          lat = position.latitude;
-          lng = position.longitude;
+          lat = pos.latitude;
+          lng = pos.longitude;
         } catch (e) {
           debugPrint('Geolocator error: $e');
         }
 
         bool paymentReleased = false;
-        String? successMsg;
 
-        // Try geofence auto-release first
         try {
           final res = await tripService.confirmOtp(
             orderId: widget.orderId!,
             latitude: lat,
             longitude: lng,
           );
-          if (res['payment_released'] == true) {
-            paymentReleased = true;
-            successMsg = res['message'] ?? 'Delivery auto-confirmed via GPS Geofence!';
-          }
+          if (res['payment_released'] == true) paymentReleased = true;
         } catch (e) {
           debugPrint('Geofence auto-confirm failed: $e');
         }
 
-        // If geofence failed, request manual OTP
         if (!paymentReleased) {
           _updateStatus('Awaiting OTP verification...');
           if (!mounted) return;
           final enteredOtp = await showDialog<String>(
             context: context,
             barrierDismissible: false,
-            builder: (context) => const _DriverOtpEntryDialog(),
+            builder: (_) => const _DriverOtpEntryDialog(),
           );
 
           if (enteredOtp == null || enteredOtp.isEmpty) {
             setState(() => _isProcessing = false);
             _updateStatus('');
             if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Delivery confirmation cancelled. OTP required.')),
-              );
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text(
+                      'Delivery confirmation cancelled. OTP required.')));
             }
             return;
           }
@@ -189,61 +212,53 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
               orderId: widget.orderId!,
               otp: enteredOtp,
             );
-            if (res['payment_released'] == true) {
-              paymentReleased = true;
-              successMsg = res['message'] ?? 'OTP Verified!';
-            }
+            if (res['payment_released'] == true) paymentReleased = true;
           } catch (e) {
             setState(() => _isProcessing = false);
             _updateStatus('');
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('OTP verification failed: $e')),
-              );
+                  SnackBar(content: Text('OTP verification failed: $e')));
             }
             return;
           }
         }
 
-        // Show successful release notification
         if (paymentReleased && mounted) {
           final displayEarnings = widget.earnings ?? 'payout';
           await showDialog<void>(
             context: context,
-            builder: (context) => Dialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            builder: (_) => Dialog(
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
               child: Padding(
                 padding: const EdgeInsets.all(24.0),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.verified_user_rounded, color: Colors.green, size: 64),
+                    const Icon(Icons.verified_user_rounded,
+                        color: Colors.green, size: 64),
                     const SizedBox(height: 16),
-                    Text(
-                      'Payment Released! ✓',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.dmSans(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green,
-                      ),
-                    ),
+                    Text('Payment Released! ✓',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.dmSans(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green)),
                     const SizedBox(height: 8),
                     Text(
-                      '₹$displayEarnings has been credited to your wallet.',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.dmSans(
-                        fontSize: 15,
-                        color: TruxifyColors.hintText,
-                      ),
-                    ),
+                        '₹$displayEarnings has been credited to your wallet.',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.dmSans(
+                            fontSize: 15, color: TruxifyColors.hintText)),
                     const SizedBox(height: 24),
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton(
                         style: FilledButton.styleFrom(
                           backgroundColor: Colors.green,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
                         ),
                         onPressed: () => Navigator.of(context).pop(),
                         child: const Text('OK'),
@@ -257,25 +272,32 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
         }
       }
 
-      final signBytes = await _signatureController.toPngBytes();
+      // 2. Save signature & upload
+      // On web, dart:io / path_provider are unavailable — pass null paths.
       String? signPath;
-      if (signBytes != null) {
-        final dir = await getApplicationDocumentsDirectory();
-        final file = File('${dir.path}/sign_${widget.stopId}_${DateTime.now().millisecondsSinceEpoch}.png');
-        await file.writeAsBytes(signBytes);
-        signPath = file.path;
+      if (!kIsWeb) {
+        final signBytes = await _signatureController.toPngBytes();
+        if (signBytes != null) {
+          final dir = await getApplicationDocumentsDirectory();
+          final file = File(
+              '${dir.path}/sign_${widget.stopId}_${DateTime.now().millisecondsSinceEpoch}.png');
+          await file.writeAsBytes(signBytes);
+          signPath = file.path;
+        }
       }
+
+      final photoPath = kIsWeb ? null : _capturedPhoto?.path;
 
       _updateStatus('Uploading proof of delivery...');
 
       if (widget.onComplete != null) {
-        await widget.onComplete!(_capturedPhoto?.path, signPath);
+        await widget.onComplete!(photoPath, signPath);
       } else {
         await SyncService.instance.queueOrSyncPoD(
           tripDisplayId: widget.tripDisplayId,
           stopId: widget.stopId,
           orderId: widget.orderId,
-          photoPath: _capturedPhoto?.path,
+          photoPath: photoPath,
           signaturePath: signPath,
           onProgress: _updateStatus,
         );
@@ -294,12 +316,10 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
     } catch (e) {
       if (mounted) {
         _updateStatus('Upload failed, will retry when online.');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Upload failed. Will retry when online: $e'),
-            backgroundColor: Colors.orange,
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Upload failed. Will retry when online: $e'),
+          backgroundColor: Colors.orange,
+        ));
         Navigator.of(context).pop();
       }
     } finally {
@@ -326,10 +346,11 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
                     const CircularProgressIndicator(),
                     const SizedBox(height: 24),
                     Text(
-                      _uploadStatus.isNotEmpty ? _uploadStatus : 'Processing...',
-                      style: GoogleFonts.dmSans(fontSize: 16),
-                      textAlign: TextAlign.center,
-                    ),
+                        _uploadStatus.isNotEmpty
+                            ? _uploadStatus
+                            : 'Processing...',
+                        style: GoogleFonts.dmSans(fontSize: 16),
+                        textAlign: TextAlign.center),
                     if (_uploadProgress != null) ...[
                       const SizedBox(height: 16),
                       LinearProgressIndicator(value: _uploadProgress),
@@ -343,47 +364,121 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('1. Capture Photo of Goods', style: GoogleFonts.dmSans(fontSize: 16, fontWeight: FontWeight.bold)),
+                  Text('1. Capture Photo of Goods',
+                      style: GoogleFonts.dmSans(
+                          fontSize: 16, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 10),
-                  if (_capturedPhoto == null)
+
+                  // ── Photo section ─────────────────────────────────────
+                  if (kIsWeb)
+                    // Web: no native camera — show a status card
+                    Container(
+                      height: 120,
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: _webPhotoDone
+                            ? Colors.green.shade50
+                            : Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: _webPhotoDone
+                                ? Colors.green.shade300
+                                : Colors.blue.shade200),
+                      ),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _webPhotoDone
+                                  ? Icons.check_circle_outline
+                                  : Icons.photo_camera_outlined,
+                              size: 36,
+                              color: _webPhotoDone
+                                  ? Colors.green
+                                  : Colors.blueGrey,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _webPhotoDone
+                                  ? 'Photo step complete'
+                                  : 'Camera not available on web.\nTap the button below to continue.',
+                              style: GoogleFonts.dmSans(
+                                  fontSize: 13,
+                                  color: _webPhotoDone
+                                      ? Colors.green.shade700
+                                      : Colors.blueGrey),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  else if (_capturedPhoto == null)
                     Container(
                       height: 250,
                       width: double.infinity,
-                      decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(8)),
-                      child: _cameraController != null && _cameraController!.value.isInitialized
+                      decoration: BoxDecoration(
+                          color: Colors.grey[200],
+                          borderRadius: BorderRadius.circular(8)),
+                      child: _cameraController != null &&
+                              _cameraController!.value.isInitialized
                           ? ClipRRect(
                               borderRadius: BorderRadius.circular(8),
                               child: CameraPreview(_cameraController!),
                             )
-                          : const Center(child: Text('Camera initializing...')),
+                          : const Center(
+                              child: Text('Camera initializing...')),
                     )
                   else ...[
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
-                      child: Image.file(File(_capturedPhoto!.path), height: 250, width: double.infinity, fit: BoxFit.cover),
+                      child: Image.file(
+                        File(_capturedPhoto!.path),
+                        height: 250,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Center(
                       child: Text(
-                        'Uploading ${ImageCompressionService.getFileSize(File(_capturedPhoto!.path))}...',
-                        style: const TextStyle(color: Colors.grey, fontSize: 12),
+                        'Photo captured (${ImageCompressionService.getFileSize(File(_capturedPhoto!.path))})',
+                        style:
+                            const TextStyle(color: Colors.grey, fontSize: 12),
                       ),
                     ),
                   ],
                   const SizedBox(height: 10),
                   Center(
                     child: ElevatedButton.icon(
-                      onPressed: _capturedPhoto == null ? _takePhoto : () => setState(() => _capturedPhoto = null),
-                      icon: Icon(_capturedPhoto == null ? Icons.camera_alt : Icons.refresh),
-                      label: Text(_capturedPhoto == null ? 'Capture Photo' : 'Retake Photo'),
-                      style: ElevatedButton.styleFrom(backgroundColor: TruxifyColors.accent),
+                      onPressed: _hasPhoto
+                          ? () => setState(() {
+                                _capturedPhoto = null;
+                                _webPhotoDone = false;
+                              })
+                          : _takePhoto,
+                      icon: Icon(
+                          _hasPhoto ? Icons.refresh : Icons.camera_alt),
+                      label: Text(_hasPhoto
+                          ? 'Retake'
+                          : (kIsWeb
+                              ? 'Mark Photo Step Done'
+                              : 'Capture Photo')),
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: TruxifyColors.accent),
                     ),
                   ),
+
                   const SizedBox(height: 30),
-                  Text('2. Customer Signature', style: GoogleFonts.dmSans(fontSize: 16, fontWeight: FontWeight.bold)),
+                  Text('2. Customer Signature',
+                      style: GoogleFonts.dmSans(
+                          fontSize: 16, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 10),
                   Container(
-                    decoration: BoxDecoration(border: Border.all(color: Colors.grey), borderRadius: BorderRadius.circular(8)),
+                    decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey),
+                        borderRadius: BorderRadius.circular(8)),
                     child: Signature(
                       controller: _signatureController,
                       height: 150,
@@ -406,17 +501,23 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
                       onPressed: _submit,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: TruxifyColors.accent,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 16),
                       ),
-                      child: Text('Complete Delivery', style: GoogleFonts.dmSans(fontSize: 16, fontWeight: FontWeight.bold)),
+                      child: Text('Complete Delivery',
+                          style: GoogleFonts.dmSans(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold)),
                     ),
-                  )
+                  ),
                 ],
               ),
             ),
     );
   }
 }
+
+// ── OTP Entry Dialog ──────────────────────────────────────────────────────────
 
 class _DriverOtpEntryDialog extends StatefulWidget {
   const _DriverOtpEntryDialog();
@@ -426,29 +527,28 @@ class _DriverOtpEntryDialog extends StatefulWidget {
 }
 
 class _DriverOtpEntryDialogState extends State<_DriverOtpEntryDialog> {
-  final List<TextEditingController> _controllers = List.generate(4, (_) => TextEditingController());
+  final List<TextEditingController> _controllers =
+      List.generate(4, (_) => TextEditingController());
   final List<FocusNode> _focusNodes = List.generate(4, (_) => FocusNode());
 
   @override
   void dispose() {
-    for (final controller in _controllers) {
-      controller.dispose();
+    for (final c in _controllers) {
+      c.dispose();
     }
-    for (final node in _focusNodes) {
-      node.dispose();
+    for (final n in _focusNodes) {
+      n.dispose();
     }
     super.dispose();
   }
 
-  String _getOtp() {
-    return _controllers.map((c) => c.text).join();
-  }
+  String _getOtp() => _controllers.map((c) => c.text).join();
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Padding(
         padding: const EdgeInsets.all(24.0),
         child: Column(
@@ -457,24 +557,19 @@ class _DriverOtpEntryDialogState extends State<_DriverOtpEntryDialog> {
           children: [
             Row(
               children: [
-                const Icon(Icons.lock_person_rounded, color: TruxifyColors.accent, size: 28),
+                const Icon(Icons.lock_person_rounded,
+                    color: TruxifyColors.accent, size: 28),
                 const SizedBox(width: 12),
-                Text(
-                  'Enter Delivery OTP',
-                  style: GoogleFonts.dmSans(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+                Text('Enter Delivery OTP',
+                    style: GoogleFonts.dmSans(
+                        fontSize: 18, fontWeight: FontWeight.bold)),
               ],
             ),
             const SizedBox(height: 12),
             Text(
               'Please enter the 4-digit OTP provided by the customer to release payment.',
               style: GoogleFonts.dmSans(
-                fontSize: 14,
-                color: TruxifyColors.hintText,
-              ),
+                  fontSize: 14, color: TruxifyColors.hintText),
             ),
             const SizedBox(height: 24),
             Row(
@@ -490,17 +585,15 @@ class _DriverOtpEntryDialogState extends State<_DriverOtpEntryDialog> {
                     textAlign: TextAlign.center,
                     maxLength: 1,
                     style: GoogleFonts.dmSans(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                    ),
+                        fontSize: 22, fontWeight: FontWeight.bold),
                     decoration: InputDecoration(
                       counterText: '',
                       border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                          borderRadius: BorderRadius.circular(12)),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: TruxifyColors.accent, width: 2),
+                        borderSide: const BorderSide(
+                            color: TruxifyColors.accent, width: 2),
                       ),
                     ),
                     onChanged: (value) {
@@ -510,7 +603,6 @@ class _DriverOtpEntryDialogState extends State<_DriverOtpEntryDialog> {
                         _focusNodes[index - 1].requestFocus();
                       }
                       if (_getOtp().length == 4) {
-                        // Submit automatically when 4 digits are entered
                         Navigator.of(context).pop(_getOtp());
                       }
                     },
@@ -524,25 +616,25 @@ class _DriverOtpEntryDialogState extends State<_DriverOtpEntryDialog> {
               children: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                  child: const Text('Cancel',
+                      style: TextStyle(color: Colors.grey)),
                 ),
                 const SizedBox(width: 12),
                 FilledButton(
                   style: FilledButton.styleFrom(
                     backgroundColor: TruxifyColors.accent,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
                   ),
-                  onPressed: () {
-                    Navigator.of(context).pop(_getOtp());
-                  },
-                  child: const Text('Verify', style: TextStyle(fontWeight: FontWeight.w700)),
+                  onPressed: () => Navigator.of(context).pop(_getOtp()),
+                  child: const Text('Verify',
+                      style: TextStyle(fontWeight: FontWeight.w700)),
                 ),
               ],
-            )
+            ),
           ],
         ),
       ),
     );
   }
 }
-

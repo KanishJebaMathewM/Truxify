@@ -60,9 +60,10 @@ import { validateBody, validateParams, validateQuery } from '../middleware/valid
 import { paramIdSchema } from '../validation/requestSchemas.js';
 import { escapeLike } from '../lib/escapeLike.js';
 import { invalidateBookingCaches } from '../utils/cacheInvalidation.js';
+// backend/api/src/routes/loadRoutes.js
+// (Snippet illustrating removal of dead sanitizeLoadFilters helper)
 import { formatPaginationMeta } from '../utils/pagination.js';
 import { estimateTripProfit } from '../services/tripProfitEstimator.js';
-
 
 const router = express.Router();
 

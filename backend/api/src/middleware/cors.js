@@ -1,20 +1,23 @@
 import cors from "cors";
-import logger from "./logger.js";
 
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter((origin) => {
-    if (!origin) return false;
-    try {
-      const parsed = new URL(origin);
-      return parsed.protocol === "http:" || parsed.protocol === "https:";
-    } catch (err) {
-      logger.warn('[CORS] Origin check failed:', err);
-      return false;
-    }
-  });
 
+// Inside CORS origin validation logic:
+
+export const corsOptionsDelegate = (req, callback) => {
+  const rawOrigin = req.header('Origin');
+  
+  // FIX: Sanitize and trim the origin string per issue #6973
+  const origin = typeof rawOrigin === 'string' ? rawOrigin.trim() : '';
+
+  let corsOptions;
+  if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+    corsOptions = { origin: true };
+  } else {
+    corsOptions = { origin: false };
+  }
+  
+  callback(null, corsOptions);
+};
 const corsAllowedHeaders =
   process.env.NODE_ENV === "production"
     ? ["Content-Type", "Authorization"]

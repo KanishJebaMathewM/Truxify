@@ -93,12 +93,28 @@ export function sanitizeKey(k) {
   if (k.startsWith('__') || k.includes('..')) return null;
   return k;
 }
-export function sanitizeQueryParams(obj) {
+export function sanitizeQueryParams(obj, depth = 0, seen = new WeakSet()) {
   if (!obj || typeof obj !== 'object') return {};
+  if (depth > 10 || seen.has(obj)) return {};
+  seen.add(obj);
+
+  if (Array.isArray(obj)) {
+    return obj.map((item) => (
+      item && typeof item === 'object'
+        ? sanitizeQueryParams(item, depth + 1, seen)
+        : item
+    ));
+  }
+
   const out = {};
   for (const [k, v] of Object.entries(obj)) {
     const safe = sanitizeKey(k);
-    if (safe !== null) out[safe] = v;
+    if (safe === null) continue;
+    if (v && typeof v === 'object') {
+      out[safe] = sanitizeQueryParams(v, depth + 1, seen);
+    } else {
+      out[safe] = v;
+    }
   }
   return out;
 }

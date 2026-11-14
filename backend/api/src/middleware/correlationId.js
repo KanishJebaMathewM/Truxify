@@ -4,8 +4,13 @@ import logger from './logger.js';
 
 export const correlationContext = new AsyncLocalStorage();
 
+// Enforce safe character set and length cap matching requestId.js
 const SAFE_CORRELATION_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
+/**
+ * Middleware to extract, validate, or generate a secure correlation ID.
+ * Updated per issue #10492 to prevent log injection and unbounded header reflection.
+ */
 export function correlationIdMiddleware(req, res, next) {
   const headers = req?.headers || {};
   const rawHeader =
@@ -36,7 +41,7 @@ export function correlationIdMiddleware(req, res, next) {
     },
     `Correlation ID ${correlationId} ${
       isPropagated ? 'propagated from client' : 'generated'
-    }`,
+    }`
   );
 
   const store = { correlationId };
@@ -50,3 +55,5 @@ export function runWithCorrelationId(correlationId, fn) {
 export function getCorrelationStore() {
   return correlationContext.getStore() ?? {};
 }
+
+export default correlationIdMiddleware;

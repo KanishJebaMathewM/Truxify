@@ -90,4 +90,66 @@ describe('dlqWorker lifecycle', () => {
     await intervalCb();
     expect(processQueueMock).toHaveBeenCalledTimes(2);
   });
+  it('ignores a captured interval callback after stop', async () => {
+    processQueueMock.mockResolvedValue({});
+    startDlqWorker();
+    const stale = intervalCb;
+    stopDlqWorker();
+    await stale();
+    expect(processQueueMock).not.toHaveBeenCalled();
+  });
+
+  it('retains native cycle admission through stop and restart', async () => {
+    let release;
+    processQueueMock.mockReturnValueOnce(new Promise(resolve => { release = resolve; }));
+    processQueueMock.mockResolvedValue({});
+    startDlqWorker();
+    const stale = intervalCb;
+    const pending = stale();
+    stopDlqWorker();
+    startDlqWorker();
+    const fresh = intervalCb;
+    try {
+      await fresh();
+      expect(processQueueMock).toHaveBeenCalledTimes(1);
+      await stale();
+      expect(processQueueMock).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+      await pending;
+    }
+    await fresh();
+    expect(processQueueMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('old stopped callbacks cannot enter a newer idle worker generation', async () => {
+    processQueueMock.mockResolvedValue({});
+    startDlqWorker();
+    const stale = intervalCb;
+    stopDlqWorker();
+    startDlqWorker();
+    const fresh = intervalCb;
+    await stale();
+    expect(processQueueMock).not.toHaveBeenCalled();
+    await fresh();
+    expect(processQueueMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('failed native cycle releases admission after restart', async () => {
+    let reject;
+    processQueueMock.mockReturnValueOnce(new Promise((resolve, fail) => { reject = fail; }));
+    processQueueMock.mockResolvedValue({});
+    startDlqWorker();
+    const pending = intervalCb();
+    stopDlqWorker();
+    startDlqWorker();
+    const fresh = intervalCb;
+    await fresh();
+    expect(processQueueMock).toHaveBeenCalledTimes(1);
+    reject(new Error('late failure'));
+    await pending;
+    await fresh();
+    expect(processQueueMock).toHaveBeenCalledTimes(2);
+  });
+
 });

@@ -36,7 +36,7 @@ router.post('/evaluate-precool', (req, res) => {
             data: evaluation
         });
     } catch (error) {
-        return res.status(500).json({
+        return res.status(error.statusCode || 500).json({
             success: false,
             error: error.message
         });
@@ -64,7 +64,7 @@ router.post('/simulate-pulldown', (req, res) => {
             data: simulation
         });
     } catch (error) {
-        return res.status(500).json({
+        return res.status(error.statusCode || 500).json({
             success: false,
             error: error.message
         });
@@ -100,7 +100,7 @@ router.post('/evaluate-thermodynamic', (req, res) => {
             data: plan
         });
     } catch (error) {
-        return res.status(500).json({
+        return res.status(error.statusCode || 500).json({
             success: false,
             error: error.message
         });

@@ -1,85 +1,148 @@
+
 import os
 import sys
 import smtplib
-from datetime import datetime, timedelta
-from pymongo import MongoClient
+import logging
+from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 
-# Alert configuration
-MAE_ALERT_THRESHOLD = 500000  # Example: Alert if MAE > 5000 Rupees (stored in paisa)
-NOTIFICATION_EMAIL = os.environ.get('ALERT_EMAIL', 'admin@truxify.com')
-SMTP_HOST = os.environ.get('SMTP_HOST', 'smtp.gmail.com')
-SMTP_PORT = int(os.environ.get('SMTP_PORT', 587))
-SMTP_USER = os.environ.get('SMTP_USER')
-SMTP_PASS = os.environ.get('SMTP_PASS')
+from pymongo import MongoClient
+from pymongo.errors import PyMongoError
+
+# Alert Configuration
+MAE_ALERT_THRESHOLD = 500000  # Rs. 5000 in paisa
+NOTIFICATION_EMAIL = os.getenv("ALERT_EMAIL", "admin@truxify.com")
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER")
+SMTP_PASS = os.getenv("SMTP_PASS")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
 
 def send_alert_email(mae, threshold, count):
     if not SMTP_USER or not SMTP_PASS:
-        print("SMTP credentials missing, skipping email alert.")
-        return
+        logging.warning("SMTP credentials missing. Skipping email alert.")
+        return False
 
-    subject = f"ALERT: Truxify Dynamic Pricing Model Drift Detected"
-    body = (
+    message = EmailMessage()
+    message["Subject"] = "ALERT: Truxify Dynamic Pricing Model Drift Detected"
+    message["From"] = SMTP_USER
+    message["To"] = NOTIFICATION_EMAIL
+
+    message.set_content(
         f"Data drift detected in the ML dynamic pricing model.\n\n"
-        f"Over the last 7 days (based on {count} orders):\n"
-        f"Mean Absolute Error (MAE): {mae / 100:.2f} INR\n"
-        f"Threshold limit: {threshold / 100:.2f} INR\n\n"
-        f"Please consider retraining the model via the /admin/retrain endpoint."
+        f"Orders analyzed: {count}\n"
+        f"Mean Absolute Error: Rs. {mae / 100:.2f}\n"
+        f"Threshold: Rs. {threshold / 100:.2f}\n\n"
+        f"Please consider retraining the model through the "
+        f"/admin/retrain endpoint."
     )
-    message = f"Subject: {subject}\n\n{body}"
+
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
             server.starttls()
             server.login(SMTP_USER, SMTP_PASS)
-            server.sendmail(SMTP_USER, NOTIFICATION_EMAIL, message)
-        print("Alert email sent successfully.")
-    except Exception as e:
-        print(f"Failed to send email alert: {e}")
+            server.send_message(message)
 
-def main():
-    mongo_uri = os.environ.get('MONGODB_URI')
-    if not mongo_uri:
-        print("MONGODB_URI not set. Exiting.")
-        sys.exit(1)
+        logging.info("Alert email sent successfully.")
+        return True
 
-    db_name = os.environ.get('MONGODB_DB_NAME', 'truxify_telemetry')
-    client = MongoClient(mongo_uri)
-    db = client[db_name]
+    except (smtplib.SMTPException, OSError) as error:
+        logging.error("Failed to send alert email: %s", error)
+        return False
 
-    # Query last 7 days of price logs
-    seven_days_ago = datetime.utcnow() - timedelta(days=7)
-    
-    logs = db.pricelog.find({
-        "created_at": {"$gte": seven_days_ago}
-    })
 
+def calculate_mae(logs):
     total_error = 0
     count = 0
     missing_actual = 0
 
     for log in logs:
-        pred = log.get('predicted_price')
-        accepted = log.get('accepted_price')
-        if accepted is None or pred is None:
+        predicted = log.get("predicted_price")
+        accepted = log.get("accepted_price")
+
+        if (
+            isinstance(predicted, bool)
+            or isinstance(accepted, bool)
+            or not isinstance(predicted, (int, float))
+            or not isinstance(accepted, (int, float))
+        ):
             missing_actual += 1
             continue
-        total_error += abs(pred - accepted)
+
+        total_error += abs(predicted - accepted)
         count += 1
 
-    if missing_actual:
-        print(f"Skipped {missing_actual} price logs with missing actual/accepted price.")
+    return total_error / count if count else None, count, missing_actual
 
-    if count == 0:
-        print("No price logs found for the last 7 days. Nothing to analyze.")
-        sys.exit(0)
 
-    mae = total_error / count
-    print(f"Calculated MAE over {count} recent orders: {mae / 100:.2f} INR")
+def main():
+    mongo_uri = os.getenv("MONGODB_URI")
 
-    if mae > MAE_ALERT_THRESHOLD:
-        print(f"CRITICAL: MAE ({mae}) exceeds threshold ({MAE_ALERT_THRESHOLD})!")
-        send_alert_email(mae, MAE_ALERT_THRESHOLD, count)
-    else:
-        print("Model performance is within acceptable bounds.")
+    if not mongo_uri:
+        logging.error("MONGODB_URI is not configured.")
+        return 1
+
+    db_name = os.getenv("MONGODB_DB_NAME", "truxify_telemetry")
+    client = None
+
+    try:
+        client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+        client.admin.command("ping")
+
+        db = client[db_name]
+
+        seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+
+        logs = db.pricelog.find(
+            {"created_at": {"$gte": seven_days_ago}},
+            {"predicted_price": 1, "accepted_price": 1}
+        )
+
+        mae, count, missing = calculate_mae(logs)
+
+        if missing:
+            logging.warning(
+                "Skipped %d logs with missing or invalid prices.", missing
+            )
+
+        if mae is None:
+            logging.info("No valid price logs found in the last 7 days.")
+            return 0
+
+        logging.info(
+            "Calculated MAE over %d orders: Rs. %.2f",
+            count, mae / 100
+        )
+
+        if mae > MAE_ALERT_THRESHOLD:
+            logging.critical(
+                "MAE %.2f exceeds threshold %.2f.",
+                mae, MAE_ALERT_THRESHOLD
+            )
+            send_alert_email(mae, MAE_ALERT_THRESHOLD, count)
+        else:
+            logging.info("Model performance is within acceptable bounds.")
+
+        return 0
+
+    except PyMongoError as error:
+        logging.error("MongoDB error: %s", error)
+        return 1
+
+    except Exception:
+        logging.exception("Unexpected error during drift monitoring.")
+        return 1
+
+    finally:
+        if client is not None:
+            client.close()
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
+

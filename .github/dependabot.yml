@@ -2,42 +2,104 @@
 version: 2
 
 updates:
+
   # Flutter Customer App
   - package-ecosystem: "pub"
     directory: "/apps/customer"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Kolkata"
+    open-pull-requests-limit: 10
     labels:
       - "dependencies"
+      - "flutter"
+      - "customer-app"
     commit-message:
       prefix: "build"
+      include: "scope"
+    versioning-strategy: increase
+    groups:
+      flutter-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   # Flutter Driver App
   - package-ecosystem: "pub"
     directory: "/apps/driver"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "09:30"
+      timezone: "Asia/Kolkata"
+    open-pull-requests-limit: 10
     labels:
       - "dependencies"
+      - "flutter"
+      - "driver-app"
     commit-message:
       prefix: "build"
+      include: "scope"
+    versioning-strategy: increase
+    groups:
+      flutter-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   # Node.js Backend API
   - package-ecosystem: "npm"
     directory: "/backend/api"
     schedule:
       interval: "weekly"
+      day: "tuesday"
+      time: "09:00"
+      timezone: "Asia/Kolkata"
+    open-pull-requests-limit: 15
     labels:
       - "dependencies"
+      - "backend"
+      - "nodejs"
     commit-message:
       prefix: "chore"
+      include: "scope"
+    versioning-strategy: increase
+    groups:
+      production-dependencies:
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
+      development-dependencies:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
 
   # GitHub Actions Workflows
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "wednesday"
+      time: "09:00"
+      timezone: "Asia/Kolkata"
+    open-pull-requests-limit: 10
     labels:
       - "dependencies"
+      - "github-actions"
+      - "ci-cd"
     commit-message:
       prefix: "chore"
+      include: "scope"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+

@@ -1,170 +1,41 @@
+.global-search-result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 15px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
 
-[
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "string",
-        "name": "bookingId",
-        "type": "string"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "customer",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
-      }
-    ],
-    "name": "CustomerRefunded",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "string",
-        "name": "bookingId",
-        "type": "string"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "customer",
-        "type": "address"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "driver",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
-      }
-    ],
-    "name": "EscrowFunded",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "string",
-        "name": "bookingId",
-        "type": "string"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "driver",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
-      }
-    ],
-    "name": "PaymentReleased",
-    "type": "event"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "string",
-        "name": "bookingId",
-        "type": "string"
-      },
-      {
-        "internalType": "address payable",
-        "name": "driver",
-        "type": "address"
-      }
-    ],
-    "name": "createEscrow",
-    "outputs": [],
-    "stateMutability": "payable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "string",
-        "name": "bookingId",
-        "type": "string"
-      }
-    ],
-    "name": "confirmDeliveryAndRelease",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "string",
-        "name": "bookingId",
-        "type": "string"
-      }
-    ],
-    "name": "refundCustomer",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "string",
-        "name": "",
-        "type": "string"
-      }
-    ],
-    "name": "orders",
-    "outputs": [
-      {
-        "internalType": "address payable",
-        "name": "customer",
-        "type": "address"
-      },
-      {
-        "internalType": "address payable",
-        "name": "driver",
-        "type": "address"
-      },
-      {
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
-      },
-      {
-        "internalType": "bool",
-        "name": "isCompleted",
-        "type": "bool"
-      },
-      {
-        "internalType": "bool",
-        "name": "isRefunded",
-        "type": "bool"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  }
-]
+.global-search-result:hover,
+.global-search-result.active {
+  background: var(--search-hover-bg, #f1f5f9);
+}
 
-     
+.global-search-result strong {
+  font-size: 14px;
+}
 
+.global-search-result span,
+.global-search-result small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.global-search-loading,
+.global-search-empty,
+.global-search-error {
+  padding: 14px;
+  font-size: 13px;
+}
+
+.global-search-error {
+  color: #dc2626;
+}
+
+.global-search-retry {
+  margin-left: 10px;
+  cursor: pointer;
+}

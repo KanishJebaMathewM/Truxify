@@ -1,6 +1,13 @@
+
 {
-  "type": "module",
+  "name": "truxify",
+  "version": "1.0.0",
   "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
   "workspaces": [
     "backend/api",
     "blockchain"
@@ -13,6 +20,33 @@
     "elliptic": "^6.6.1",
     "circuit-breaker-js": "0.0.1",
     "tslib": "2.8.1"
+  },
+  "scripts": {
+    "prepare": "husky || echo 'Husky unavailable - skipping Git hook installation'",
+    "unassign:issues": "node .github/scripts/issue-unassigner.js",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm test --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "audit": "npm audit",
+    "check": "npm run format:check && npm run lint && npm run test"
+  },
+  "lint-staged": {
+    "backend/**/*.{js,mjs,cjs,ts}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "blockchain/**/*.{js,mjs,cjs,ts}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "apps/**/*.dart": [
+      "dart format"
+    ],
+    "*.{json,yml,yaml,md}": [
+      "prettier --write"
+    ]
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.1.2",
@@ -33,20 +67,6 @@
     "solidity-coverage": "^0.8.17",
     "ts-node": "^10.9.2",
     "typechain": "^8.3.2"
-  },
-  "scripts": {
-    "prepare": "husky || echo 'husky unavailable — skipping git hook installation'",
-    "unassign:issues": "node .github/scripts/issue-unassigner.js"
-  },
-  "lint-staged": {
-    "backend/**/*.js": [
-      "eslint --fix",
-      "prettier --write"
-    ],
-    "apps/**/*.dart": [
-      "dart format",
-      "flutter analyze"
-    ]
   },
   "dependencies": {
     "dataloader": "^2.2.3",

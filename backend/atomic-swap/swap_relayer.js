@@ -1,30 +1,26 @@
+
 import { ethers } from 'ethers';
 import crypto from 'crypto';
 
-/**
- * Cross-Chain HTLC Atomic Swap Preimage & Timelock Validation Relayer
- *
- * Implements rigorous cryptographic preimage validation, SHA-256 / Keccak-256
- * algorithm support, timelock boundaries to mitigate race conditions, and
- * formal state transition guards for cross-chain and intra-chain swaps.
- */
 export class AtomicSwapRelayer {
-  constructor() {
-    this.MIN_LOCK_DURATION = 3600; // 1 hour minimum to prevent front-running / griefing
-    this.MAX_LOCK_DURATION = 2592000; // 30 days maximum
-    this.MIN_CROSS_CHAIN_DELTA = 3600; // 1 hour safety margin between chain locks
-    this.MAX_SWAP_AMOUNT = 1000000; // Max 1,000,000 units per transaction
+
+  constructor(options = {}) {
+    this.MIN_LOCK_DURATION = options.minLockDuration ?? 3600;
+    this.MAX_LOCK_DURATION = options.maxLockDuration ?? 2592000;
+    this.MIN_CROSS_CHAIN_DELTA = options.minCrossChainDelta ?? 3600;
+    this.MAX_SWAP_AMOUNT = BigInt(options.maxSwapAmount ?? 1000000);
+    this.SWAP_VERSION = 'AtomicSwapRelayer:v1';
   }
 
-  /**
-   * Generates a cryptographically secure 32-byte secret and corresponding hashlock
-   * @param {'keccak256'|'sha256'} algorithm 
-   * @returns {{ secretHex: string, secretBytes: Uint8Array, hashLock: string, algorithm: string }}
-   */
+  // Generate cryptographically secure secret and hashlock
+
   generateHashLockSecret(algorithm = 'keccak256') {
+
     const secretBytes = ethers.randomBytes(32);
     const secretHex = ethers.hexlify(secretBytes);
+
     const hashLock = this.hashPreimage(secretBytes, algorithm);
+
     return {
       secretHex,
       secretBytes,
@@ -33,93 +29,117 @@ export class AtomicSwapRelayer {
     };
   }
 
-  /**
-   * Hashes a secret preimage using the designated hashing algorithm.
-   * Accepts 0x-prefixed hex, unprefixed hex, Uint8Array/Buffer, or UTF-8 strings.
-   * @param {string|Uint8Array|Buffer} secret 
-   * @param {'keccak256'|'sha256'} algorithm 
-   * @returns {string} 0x-prefixed hex hash
-   */
-  hashPreimage(secret, algorithm = 'keccak256') {
-    if (!secret) {
-      throw new Error('Preimage secret cannot be null or empty');
+  // Convert secret into bytes
+
+  normalizePreimage(secret) {
+
+    if (typeof secret === 'string') {
+
+      if (/^0x(?:[0-9a-fA-F]{2})+$/i.test(secret)) {
+        return ethers.getBytes(secret);
+      }
+
+      if (/^[0-9a-fA-F]{32,}$/.test(secret) &&
+          secret.length % 2 === 0) {
+        return ethers.getBytes('0x' + secret);
+      }
+
+      return ethers.toUtf8Bytes(secret);
     }
 
-    let bytes;
-    if (typeof secret === 'string') {
-      if (/^0x[0-9a-fA-F]+$/i.test(secret)) {
-        bytes = ethers.getBytes(secret);
-      } else if (/^[0-9a-fA-F]{32,}$/i.test(secret) && secret.length % 2 === 0) {
-        bytes = ethers.getBytes('0x' + secret);
-      } else {
-        bytes = ethers.toUtf8Bytes(secret);
-      }
-    } else if (secret instanceof Uint8Array || Buffer.isBuffer(secret)) {
-      bytes = secret;
-    } else {
-      throw new Error('Unsupported secret format: expected string, Buffer, or Uint8Array');
+    if (secret instanceof Uint8Array || Buffer.isBuffer(secret)) {
+      return Uint8Array.from(secret);
     }
+
+    throw new Error('Invalid preimage format');
+  }
+
+  // Hash preimage
+
+  hashPreimage(secret, algorithm = 'keccak256') {
+
+    if (secret === null || secret === undefined || secret === '') {
+      throw new Error('Preimage cannot be empty');
+    }
+
+    const bytes = this.normalizePreimage(secret);
 
     if (bytes.length < 16) {
-      throw new Error(`Preimage entropy too low: minimum 16 bytes required, received ${bytes.length} bytes`);
+      throw new Error('Preimage must contain at least 16 bytes');
     }
 
-    const algo = (algorithm || 'keccak256').toLowerCase();
-    if (algo === 'keccak256') {
-      return ethers.keccak256(bytes);
-    } else if (algo === 'sha256') {
-      return ethers.sha256(bytes);
-    } else {
-      throw new Error(`Unsupported hashlock algorithm: "${algorithm}". Expected "keccak256" or "sha256"`);
+    const algo = algorithm.toLowerCase();
+
+    switch (algo) {
+
+      case 'keccak256':
+        return ethers.keccak256(bytes);
+
+      case 'sha256':
+        return ethers.sha256(bytes);
+
+      default:
+        throw new Error('Unsupported hashing algorithm');
     }
   }
 
-  /**
-   * Verifies whether a given preimage matches an expected hashlock in constant-time
-   * @param {string|Uint8Array|Buffer} secret 
-   * @param {string} expectedHashLock 
-   * @param {'keccak256'|'sha256'} algorithm 
-   * @returns {boolean}
-   */
-  verifyPreimage(secret, expectedHashLock, algorithm = 'keccak256') {
-    if (!secret || !expectedHashLock) {
-      return false;
+  // Strict hashlock validation
+
+  validateHashLock(hashLock) {
+
+    if (!ethers.isHexString(hashLock, 32)) {
+      throw new Error('Hashlock must be exactly 32 bytes');
     }
 
+    return hashLock.toLowerCase();
+  }
+
+  // Verify preimage using constant-time comparison
+
+  verifyPreimage(secret, expectedHashLock, algorithm = 'keccak256') {
+
     try {
-      const computedHash = this.hashPreimage(secret, algorithm);
-      const computedBuf = Buffer.from(computedHash.replace(/^0x/i, '').toLowerCase(), 'hex');
-      const expectedBuf = Buffer.from(expectedHashLock.replace(/^0x/i, '').toLowerCase(), 'hex');
 
-      if (computedBuf.length !== expectedBuf.length || computedBuf.length === 0) {
-        return false;
-      }
+      const expected = this.validateHashLock(expectedHashLock);
 
-      return crypto.timingSafeEqual(computedBuf, expectedBuf);
+      const computed = this.hashPreimage(secret, algorithm);
+
+      const computedBuffer = Buffer.from(computed.slice(2), 'hex');
+      const expectedBuffer = Buffer.from(expected.slice(2), 'hex');
+
+      return crypto.timingSafeEqual(
+        computedBuffer,
+        expectedBuffer
+      );
+
     } catch {
       return false;
     }
   }
 
-  /**
-   * Validates timelock duration boundaries
-   * @param {number|string} lockDurationInSeconds 
-   * @param {number} minDuration 
-   * @param {number} maxDuration 
-   * @returns {{ valid: boolean, duration: number, error?: string }}
-   */
-  validateTimelock(lockDurationInSeconds, minDuration = this.MIN_LOCK_DURATION, maxDuration = this.MAX_LOCK_DURATION) {
-    const duration = Number(lockDurationInSeconds);
+  // Validate timelock duration
 
-    if (!Number.isInteger(duration) || duration <= 0) {
-      return { valid: false, duration: 0, error: 'Lock duration must be a positive integer in seconds' };
+  validateTimelock(
+    lockDuration,
+    minDuration = this.MIN_LOCK_DURATION,
+    maxDuration = this.MAX_LOCK_DURATION
+  ) {
+
+    const duration = Number(lockDuration);
+
+    if (!Number.isSafeInteger(duration) || duration <= 0) {
+      return {
+        valid: false,
+        duration: 0,
+        error: 'Invalid lock duration'
+      };
     }
 
     if (duration < minDuration) {
       return {
         valid: false,
         duration,
-        error: `Lock duration (${duration}s) below minimum safety threshold (${minDuration}s)`
+        error: 'Lock duration is below minimum threshold'
       };
     }
 
@@ -127,143 +147,256 @@ export class AtomicSwapRelayer {
       return {
         valid: false,
         duration,
-        error: `Lock duration (${duration}s) exceeds maximum allowed horizon (${maxDuration}s)`
+        error: 'Lock duration exceeds maximum threshold'
       };
     }
 
-    return { valid: true, duration };
+    return {
+      valid: true,
+      duration
+    };
   }
 
-  /**
-   * Validates cross-chain timelock safety delta.
-   * In cross-chain HTLC, the initiator (chain A) lock time MUST be strictly greater
-   * than the participant (chain B) lock time by at least minDelta to allow safe claim propagation.
-   * @param {number} initiatorDuration 
-   * @param {number} counterpartyDuration 
-   * @param {number} minDelta 
-   * @returns {{ safe: boolean, delta: number, error?: string }}
-   */
-  validateCrossChainTimelocks(initiatorDuration, counterpartyDuration, minDelta = this.MIN_CROSS_CHAIN_DELTA) {
+  // Validate cross-chain timelock difference
+
+  validateCrossChainTimelocks(
+    initiatorDuration,
+    counterpartyDuration,
+    minDelta = this.MIN_CROSS_CHAIN_DELTA
+  ) {
+
     const init = Number(initiatorDuration);
     const counter = Number(counterpartyDuration);
 
-    if (isNaN(init) || isNaN(counter)) {
-      return { safe: false, delta: 0, error: 'Timelocks must be valid numeric timestamps or durations' };
+    if (
+      !Number.isSafeInteger(init) ||
+      !Number.isSafeInteger(counter) ||
+      !Number.isSafeInteger(minDelta) ||
+      minDelta <= 0
+    ) {
+      return {
+        safe: false,
+        delta: 0,
+        error: 'Invalid timelock values'
+      };
     }
 
     const delta = init - counter;
+
     if (delta < minDelta) {
       return {
         safe: false,
         delta,
-        error: `Cross-chain timelock delta (${delta}s) is unsafe: initiator lock duration must exceed counterparty by at least ${minDelta}s`
+        error: 'Insufficient cross-chain safety margin'
       };
     }
 
-    return { safe: true, delta };
+    return {
+      safe: true,
+      delta
+    };
   }
 
-  /**
-   * Validates Ethereum/EVM participant address format and rejects ZeroAddress
-   * @param {string} address 
-   * @param {string} label 
-   * @returns {string} Checksummed address
-   */
+  // Validate participant addresses
+
   validateParticipantAddress(address, label = 'Address') {
+
     if (!address || typeof address !== 'string') {
-      throw new Error(`${label} must be a non-empty string`);
+      throw new Error(`${label} is required`);
     }
 
     if (!ethers.isAddress(address)) {
-      throw new Error(`${label} "${address}" is not a valid EVM address format`);
+      throw new Error(`${label} is invalid`);
     }
 
     const checksummed = ethers.getAddress(address);
+
     if (checksummed === ethers.ZeroAddress) {
-      throw new Error(`${label} cannot be the Zero Address (${ethers.ZeroAddress})`);
+      throw new Error(`${label} cannot be zero address`);
     }
 
     return checksummed;
   }
 
-  /**
-   * Validates swap amount format and bounds
-   * @param {number|string|bigint} amount 
-   * @returns {{ valid: boolean, parsed: number, error?: string }}
-   */
+  // Validate swap amount using BigInt
+
   validateAmount(amount) {
-    const num = Number(amount);
-    if (isNaN(num) || num <= 0) {
-      return { valid: false, parsed: 0, error: 'Swap amount must be a positive number greater than 0' };
-    }
 
-    if (num > this.MAX_SWAP_AMOUNT) {
-      return { valid: false, parsed: num, error: `Swap amount (${num}) exceeds maximum safety limit (${this.MAX_SWAP_AMOUNT})` };
-    }
+    try {
 
-    return { valid: true, parsed: num };
+      if (
+        typeof amount === 'number' &&
+        !Number.isSafeInteger(amount)
+      ) {
+        throw new Error('Unsafe numeric precision');
+      }
+
+      if (
+        typeof amount === 'string' &&
+        !/^[0-9]+$/.test(amount)
+      ) {
+        throw new Error('Amount must be an integer');
+      }
+
+      const parsed = BigInt(amount);
+
+      if (parsed <= 0n) {
+        throw new Error('Amount must be greater than zero');
+      }
+
+      if (parsed > this.MAX_SWAP_AMOUNT) {
+        throw new Error('Amount exceeds maximum limit');
+      }
+
+      return {
+        valid: true,
+        parsed: parsed.toString()
+      };
+
+    } catch (error) {
+
+      return {
+        valid: false,
+        parsed: '0',
+        error: error.message
+      };
+    }
   }
 
-  /**
-   * Validates swap lifecycle state transition
-   * @param {'pending'|'claimed'|'refunded'} currentStatus 
-   * @param {'claim'|'refund'} action 
-   * @param {{ now?: number, lockTimestamp: number }} context 
-   * @returns {{ allowed: boolean, reason?: string }}
-   */
-  validateStateTransition(currentStatus, action, { now = Math.floor(Date.now() / 1000), lockTimestamp }) {
+  // Validate swap state transition
+
+  validateStateTransition(
+    currentStatus,
+    action,
+    {
+      now = Math.floor(Date.now() / 1000),
+      lockTimestamp
+    }
+  ) {
+
     const status = (currentStatus || '').toLowerCase();
     const act = (action || '').toLowerCase();
 
     if (status !== 'pending') {
       return {
         allowed: false,
-        reason: `Cannot ${act} swap with current status "${status}". Only "pending" swaps can transition.`
+        reason: 'Only pending swaps can transition'
       };
     }
 
+    if (
+      !Number.isSafeInteger(now) ||
+      !Number.isSafeInteger(lockTimestamp) ||
+      lockTimestamp <= 0
+    ) {
+      return {
+        allowed: false,
+        reason: 'Invalid timestamp'
+      };
+    }
+
+    // Claim is permitted strictly before expiry
+
     if (act === 'claim') {
-      if (now > lockTimestamp) {
+
+      if (now >= lockTimestamp) {
         return {
           allowed: false,
-          reason: `Swap timelock has expired (expired at ${lockTimestamp}, current time ${now}). Claim rejected; swap is eligible for refund.`
+          reason: 'Timelock expired. Claim rejected.'
         };
       }
+
       return { allowed: true };
     }
 
+    // Refund is permitted at or after expiry
+
     if (act === 'refund') {
+
       if (now < lockTimestamp) {
         return {
           allowed: false,
-          reason: `Swap timelock has not expired yet (expires at ${lockTimestamp}, current time ${now}). Refund locked.`
+          reason: 'Timelock has not expired'
         };
       }
+
       return { allowed: true };
     }
 
-    return { allowed: false, reason: `Unknown swap action: "${action}"` };
+    return {
+      allowed: false,
+      reason: 'Unknown swap action'
+    };
   }
 
-  /**
-   * Computes deterministic canonical swap identifier
-   * @param {string} sender 
-   * @param {string} recipient 
-   * @param {string} tokenAddress 
-   * @param {string|number} amount 
-   * @param {string} hashLock 
-   * @param {number} lockDuration 
-   * @param {number} chainId 
-   * @returns {string} 0x-prefixed 32-byte hex hash
-   */
-  computeCanonicalSwapId(sender, recipient, tokenAddress, amount, hashLock, lockDuration, chainId = 137) {
-    const validSender = this.validateParticipantAddress(sender, 'Sender');
-    const validRecipient = this.validateParticipantAddress(recipient, 'Recipient');
-    const token = tokenAddress && ethers.isAddress(tokenAddress) ? ethers.getAddress(tokenAddress) : ethers.ZeroAddress;
-    
+  // Generate canonical swap ID
+
+  computeCanonicalSwapId(
+    sender,
+    recipient,
+    tokenAddress,
+    amount,
+    hashLock,
+    lockTimestamp,
+    chainId = 137
+  ) {
+
+    const validSender =
+      this.validateParticipantAddress(sender, 'Sender');
+
+    const validRecipient =
+      this.validateParticipantAddress(recipient, 'Recipient');
+
+    const token = tokenAddress === null ||
+                  tokenAddress === undefined
+      ? ethers.ZeroAddress
+      : this.validateParticipantAddress(tokenAddress, 'Token');
+
+    const validHashLock = this.validateHashLock(hashLock);
+
+    const amountResult = this.validateAmount(amount);
+
+    if (!amountResult.valid) {
+      throw new Error(amountResult.error);
+    }
+
+    if (
+      !Number.isSafeInteger(lockTimestamp) ||
+      lockTimestamp <= 0
+    ) {
+      throw new Error('Invalid lock timestamp');
+    }
+
+    if (
+      !Number.isSafeInteger(chainId) ||
+      chainId <= 0
+    ) {
+      throw new Error('Invalid chain ID');
+    }
+
     const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
-      ['address', 'address', 'address', 'string', 'bytes32', 'uint256', 'uint256'],
-      [validSender, validRecipient, token, amount.toString(), hashLock, lockDuration, chainId]
+      [
+        'string',
+        'uint256',
+        'address',
+        'address',
+        'address',
+        'uint256',
+        'bytes32',
+        'uint256',
+        'uint256'
+      ],
+      [
+        this.SWAP_VERSION,
+        chainId,
+        validSender,
+        validRecipient,
+        token,
+        BigInt(amountResult.parsed),
+        validHashLock,
+        lockTimestamp,
+        chainId
+      ]
     );
 
     return ethers.keccak256(encoded);

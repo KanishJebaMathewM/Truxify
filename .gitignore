@@ -1,60 +1,104 @@
 
 # ==========================================
-# Miscellaneous
+# Operating System & Miscellaneous
 # ==========================================
+.DS_Store
+Thumbs.db
+Desktop.ini
 *.class
 *.log
-*.pyc
+*.tmp
+*.temp
+*.bak
 *.swp
-.DS_Store
+*.swo
+*.orig
+*.rej
+*.pid
+*.seed
+*.stackdump
 .atom/
-.build/
-.buildlog/
-.history
+.history/
 .svn/
 .swiftpm/
 migrate_working_dir/
 
 # ==========================================
-# IntelliJ / Android Studio
+# IDEs & Editors
 # ==========================================
+.idea/
 *.iml
 *.ipr
 *.iws
-.idea/
-
-# VS Code
-# Uncomment if workspace settings should not be committed
-# .vscode/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/settings.example.json
+*.code-workspace
+*.sublime-workspace
 
 # ==========================================
 # Flutter / Dart / Pub
 # ==========================================
-**/doc/api/
-**/ios/Flutter/.last_build_id
 .dart_tool/
+.flutter-plugins
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
-/build/
-**/build/
-**/pubspec.lock
+.packages
+**/doc/api/
+**/ios/Flutter/.last_build_id
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/ServiceDefinitions.json
+**/ios/Runner/GeneratedPluginRegistrant.*
+**/android/local.properties
+**/android/key.properties
+**/android/.gradle/
+**/android/captures/
+**/android/gradle/wrapper/gradle-wrapper.jar
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/ephemeral/
+**/macos/Pods/
+**/macos/Flutter/ephemeral/
+**/linux/flutter/ephemeral/
+**/windows/flutter/ephemeral/
 
-# ==========================================
 # Flutter Build Artifacts
-# ==========================================
+.build/
+.buildlog/
+build/
+**/build/
 app.*.symbols
 app.*.map.json
 /android/app/debug/
 /android/app/profile/
 /android/app/release/
 
+# Preserve dependency lockfiles for reproducible builds.
+# Keep pubspec.lock committed for Flutter applications.
+
 # ==========================================
-# Environment Files and Secrets
+# Environment Variables & Secrets
 # ==========================================
+.env
+.env.*
 **/.env
 **/.env.*
+!.env.example
 !**/.env.example
+!.env.template
+!**/.env.template
+
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.jks
+secrets/
+**/secrets/
 
 apps/customer/dart_define.json
 apps/driver/dart_define.json
@@ -62,41 +106,113 @@ dart_defines/*.env
 !dart_defines/*.env.example
 
 # ==========================================
-# Node.js
+# Node.js / JavaScript / TypeScript
 # ==========================================
+node_modules/
 **/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm/
+.eslintcache
+.parcel-cache/
+.turbo/
+.next/
+.nuxt/
+dist/
+**/dist/
+*.tsbuildinfo
 
 # ==========================================
 # Python
 # ==========================================
+__pycache__/
 **/__pycache__/
+*.py[cod]
+*$py.class
 venv/
+.venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.ipynb_checkpoints/
+htmlcov/
+*.egg-info/
+.eggs/
+wheels/
 
 # ==========================================
-# Test and Coverage Reports
+# Test & Coverage Reports
 # ==========================================
 coverage/
-backend/api/coverage/
+**/coverage/
+.nyc_output/
 *.lcov
+test-results/
+playwright-report/
+junit.xml
 
 # ==========================================
-# Database Files
+# Database & Backup Files
 # ==========================================
 *.db
 *.sqlite
+*.sqlite3
 *.sqlite-journal
+*.dump
+*.bak.sql
+*.backup
 
 # ==========================================
-# Docker Local Configuration
+# Docker & Container Development
 # ==========================================
 docker-compose.override.yml
+.docker/
+*.tar
 
 # ==========================================
-# Google Services Configuration
+# Google Services & Firebase
 # ==========================================
 **/google-services.json
+**/GoogleService-Info.plist
+.firebase/
+firebase-debug.log
+firestore-debug.log
 
 # ==========================================
-# Truxify Local Files
+# Blockchain / Hardhat
+# ==========================================
+artifacts/
+cache/
+typechain-types/
+coverage.json
+.openzeppelin/
+
+# ==========================================
+# Logs & Runtime Data
+# ==========================================
+logs/
+*.log.*
+npm-cache/
+tmp/
+temp/
+
+# ==========================================
+# Truxify Local Application Files
 # ==========================================
 **/.truxify-vc-status-index.json
+```
+
+**Key enhancements:**
+- Expanded Flutter, Android, iOS, and platform-specific build exclusions.
+- Added Node.js, TypeScript, Python, and Hardhat generated files.
+- Strengthened secret, certificate, and environment-file protection.
+- Added Firebase, database, Docker, and test-report exclusions.
+- Preserved `.env.example` files and Flutter dependency lockfiles for team collaboration.
+
+**Important:** If any currently tracked files match these patterns, `.gitignore` alone will not untrack them. Also, commit `pubspec.lock` for Flutter applications to maintain reproducible dependency versions.

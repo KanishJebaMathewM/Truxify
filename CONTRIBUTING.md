@@ -4,6 +4,8 @@ Thank you for considering contributing to Truxify! We appreciate every contribut
 
 Truxify is a broker-free, ML-powered, blockchain-secured freight platform built to connect manufacturers directly with truck drivers across India. By contributing, you help empower India's 1.4 crore truck drivers with transparent pricing, instant payments, and route optimization.
 
+💬 **Join our Community**: Have questions, feature ideas, or want to collaborate on Truxify and other open-source projects? Join our [Discord Server](https://discord.gg/7MhyE48Au)!
+
 ---
 
 ## 📐 Table of Contents

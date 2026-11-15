@@ -9,19 +9,20 @@ import logger from '../middleware/logger.js';
 function isCacheEnabled() {
   return process.env.CACHE_ENABLED !== 'false';
 }
-// backend/api/src/services/profileService.js (Excerpt - Cleaned)
-
-import db from '../config/database.js';
-
 export async function updateProfileFcmToken(userId, fcmToken) {
   if (!userId || !fcmToken) {
-    throw new Error('UserId and fcmToken are required for profile sync.');
+    throw new Error('userId and fcmToken are required for profile sync.');
+  }
+  if (!supabaseAdmin) {
+    throw new Error('Supabase client not configured — check SUPABASE_URL and SUPABASE_ANON_KEY');
   }
 
-  const { data, error } = await db
+  const { data, error } = await supabaseAdmin
     .from('profiles')
-    .update({ fcm_token: fcmToken, updated_at: new Date() })
-    .eq('id', userId);
+    .update({ fcm_token: fcmToken, updated_at: new Date().toISOString() })
+    .eq('id', userId)
+    .select('id, fcm_token, updated_at')
+    .maybeSingle();
 
   if (error) {
     throw new Error(`Failed to update profile FCM token: ${error.message}`);
@@ -37,22 +38,9 @@ export async function getProfile(userId) {
     );
   }
 
-  if (isCacheEnabled()) {
-    try {
-      const cached = await getCachedSupabaseProfile(userId);
-      if (cached && isValidCachedProfile(userId, cached)) {
-        return cached;
-      }
-    } catch (err) {
-      logger.warn(
-        { err, userId },
-        'Profile cache read failed, falling back to database'
-      );
-    }
-  }
-    // Authentication owns this cache key and stores a normalized user record.
-    // Full profile reads need the complete database shape and must not consume
-    // or overwrite authentication records or tombstones.
+  // Authentication owns this cache key and stores a normalized user record.
+  // Full profile reads need the complete database shape and must not consume
+  // or overwrite authentication records or tombstones.
     const { data, error } = await supabaseAdmin
       .from('profiles')
       .select('*')

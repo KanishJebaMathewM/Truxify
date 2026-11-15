@@ -6,7 +6,39 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 import logger from '../../backend/api/src/middleware/logger.js';
+// k8s/opa/policy.service.js
 
+import logger from '../../backend/api/src/middleware/logger.js'; // Adjust per module structure
+
+/**
+ * Evaluates an authorization policy against the OPA CLI service.
+ * @param {Object} input - Policy evaluation input payload.
+ * @returns {Promise<Object>} Policy decision object { allow: boolean, reason?: string }
+ */
+export async function evaluatePolicy(input) {
+  try {
+    const stdout = await executeOpaCli(input);
+
+    let decision;
+    try {
+      // Attempt to parse OPA JSON output
+      decision = JSON.parse(stdout);
+    } catch (parseErr) {
+      // Log parsing failure along with raw stdout for debugging, fail closed
+      logger.error('Failed to parse OPA evaluation output as JSON', { 
+        error: parseErr.message, 
+        rawOutput: stdout 
+      });
+      return { allow: false, reason: 'POLICY_EVALUATION_ERROR' };
+    }
+
+    return decision;
+  } catch (err) {
+    // Fail closed on OPA execution failures as well
+    logger.error('OPA CLI execution failed', { error: err.message });
+    return { allow: false, reason: 'POLICY_EXECUTION_FAILURE' };
+  }
+}
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 

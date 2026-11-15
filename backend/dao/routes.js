@@ -4,7 +4,52 @@ import daoService from './dao.service.js';
 import logger from '../api/src/middleware/logger.js';
 import { authenticate } from '../api/src/middleware/auth.js';
 import { requireDaoAuth } from './middleware/daoAuth.js';
+// backend/dao/routes.js
+import express from 'express';
+import { authenticate } from '../api/src/middleware/auth.js';
+import { castVote, createProposal, executeProposal } from './dao.service.js';
+import logger from '../api/src/middleware/logger.js';
 
+const router = express.Router();
+
+/**
+ * POST /dao/vote/cast
+ * Casts a DAO vote securely using authenticated user identity.
+ * Fixed per issue #13873.
+ */
+router.post('/dao/vote/cast', authenticate, async (req, res) => {
+  try {
+    const { proposalId, votes, voterAddress } = req.body;
+    const authenticatedUser = req.user;
+
+    // Verify that the voterAddress matches the authenticated user's registered wallet
+    if (authenticatedUser.wallet_address?.toLowerCase() !== voterAddress?.toLowerCase()) {
+      logger.warn('Unauthorized vote impersonation attempt', {
+        authenticatedUserId: authenticatedUser.id,
+        claimedVoter: voterAddress
+      });
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Voter address does not match authenticated identity'
+      });
+    }
+
+    const result = await castVote(proposalId, votes, voterAddress, req.body.signature);
+
+    return res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    logger.error('Failed to cast DAO vote', { error: err.message, stack: err.stack });
+    return res.status(500).json({
+      success: false,
+      error: err.message || 'Internal server error while casting vote'
+    });
+  }
+});
+
+export default router;
 const router = express.Router();
 
 // Build a canonical, human-readable message that must be signed by the

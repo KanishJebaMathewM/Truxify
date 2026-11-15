@@ -1,4 +1,32 @@
 import wimBypassRouter from './routes/wimBypass.js';
+import express from 'express'
+import { corsMiddleware } from './middleware/cors.js'
+import { compressionMiddleware } from './config/compression.js'
+import helmet from 'helmet' // 🔒 ADDED HELMET IMPORT FOR ISSUES #361 & #944
+import http from 'http'
+import dotenv from 'dotenv'
+import path from 'path'
+import { fileURLToPath } from 'url'
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+dotenv.config({ path: path.resolve(__dirname, '../.env') })
+dotenv.config({ path: path.resolve(__dirname, '../../../.env') })
+import hppProtection from './middleware/hppProtection.js';
+// backend/api/src/index.js (Excerpt)
+
+import express from 'express';
+import { requestIdMiddleware } from './middleware/requestId.js'; // ✅ Retained primary import
+import logger from './middleware/logger.js';
+// ... other top-level imports ...
+
+const app = express();
+
+// ... mid-file blocks (duplicate import on line 105 removed) ...
+import { globalLimiter, authLimiter, healthLimiter } from './middleware/rateLimiter.js'
+import tripRoutes from './routes/tripRoutes.js'
+import deviceRoutes from './routes/deviceRoutes.js'
+import documentRoutes from './routes/documentRoutes.js'
 import iftaTaxRouter from './routes/iftaTax.js';
 import express from 'express';
 import { corsMiddleware } from './middleware/cors.js';
@@ -136,6 +164,13 @@ import { setupSwagger } from './config/swagger.js';
 import { correlationIdMiddleware } from './middleware/correlationId.js';
 import { requestCacheMiddleware } from './middleware/requestCacheMiddleware.js';
 import { requireJsonContent } from './middleware/contentType.js';
+import {
+  timeoutMiddleware,
+  vrpTimeoutMiddleware,
+  demandHeatmapTimeoutMiddleware,
+  slowRequestLoggerMiddleware,
+  timeoutErrorHandler,
+} from './middleware/timeout.js';
 import { initSentry, flushSentry, sentryErrorHandler, sentryRequestHandler, captureException } from './middleware/sentry.js';
 import {
   startEscrowRefundReconciliation,
@@ -221,6 +256,20 @@ if (process.env.NODE_ENV === 'production' && (!process.env.POLYGON_RPC_URL || !p
 if (!process.env.DRIVER_LOGIN_OTP) {
   logger.warn('DRIVER_LOGIN_OTP is not set. Driver OTP login will be disabled until it is configured in production.');
 }
+if (!process.env.WEBHOOK_SECRET) {
+  logger.fatal('WEBHOOK_SECRET is not set. Escrow webhook signature verification cannot run and webhook requests will be rejected. Set WEBHOOK_SECRET and restart.')
+  process.exit(1)
+}
+// backend/api/src/index.js (Excerpt around startup checks)
+
+// FIX: Immediately abort startup if BYPASS_AUTH is enabled in production per issue #6724
+if (process.env.BYPASS_AUTH === 'true' && process.env.NODE_ENV === 'production') {
+  console.error('FATAL: BYPASS_AUTH cannot be enabled in production. Exiting immediately.');
+  process.exit(1);
+}
+// ============================================================================
+// 🆕 WEBHOOK VALIDATION
+// ============================================================================
 if (!process.env.WEBHOOK_SECRET) {
   if (process.env.NODE_ENV === 'production') {
     logger.fatal('WEBHOOK_SECRET is not set. POST /api/webhooks/escrow would fail closed and reject all incoming webhooks. Set WEBHOOK_SECRET and restart.');
@@ -389,6 +438,12 @@ app.use(requireJsonContent);
 
 app.use(localeMiddleware());
 
+// Request timeout & slow request monitoring
+app.use(slowRequestLoggerMiddleware);
+app.use('/api/ml/vrp', vrpTimeoutMiddleware);
+app.use('/api/ml/demand-heatmap', demandHeatmapTimeoutMiddleware);
+app.use(timeoutMiddleware);
+
 // Rate Limiting
 app.use('/api', verifyJWT);
 app.use('/api/health', healthLimiter);
@@ -408,6 +463,7 @@ app.use('/api/payments', authenticate, fraudDetectionMiddleware, networkAnalysis
 app.use('/api/lumper-escrow', lumperEscrowRoutes);
 app.use('/api/driver', deadheadRoutes);
 app.use('/api/orders', trackingRoutes);
+app.use('/api/tracking', trackingRoutes);
 app.use('/api/driver', driverRoutes);
 app.use('/api/drone', droneRoutes);
 app.use('/api/earnings', earningsRouter);
@@ -588,6 +644,7 @@ app.use((err, req, res, next) => {
   next(err);
 });
 
+app.use(timeoutErrorHandler);
 app.use(notFound);
 app.use(sentryErrorHandler());
 app.use(errorHandler);

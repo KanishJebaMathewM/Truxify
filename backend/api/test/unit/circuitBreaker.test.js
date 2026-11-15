@@ -373,20 +373,28 @@ describe('CircuitBreaker Unit Tests', () => {
       breaker.reset();
       breaker.state = CircuitState.HALF_OPEN;
 
-      let resolveProbe2;
-      const probe2Promise = new Promise((r) => { resolveProbe2 = r; });
-      const exec2 = breaker.execute(() => probe2Promise);
+      // The timed-out probe's provider operation is still unfinished, so a
+      // replacement HALF_OPEN probe is rejected until that operation settles.
+      const extra = vi.fn();
+      await expect(breaker.execute(extra)).rejects.toThrow('HALF_OPEN (probe in flight)');
+      expect(extra).not.toHaveBeenCalled();
 
-      // Late resolution of probe1 must NOT clear probe2's flag
+      // Late resolution of probe1 releases recovery ownership only after the
+      // native operation itself settles.
       resolveProbe1('stale probe 1');
       await probe1Promise;
       await new Promise((r) => setTimeout(r, 10));
+
+      let resolveProbe2;
+      const probe2Promise = new Promise((r) => { resolveProbe2 = r; });
+      const exec2 = breaker.execute(() => probe2Promise);
 
       // Attempting another probe while probe 2 is in flight must still fail
       await expect(breaker.execute(vi.fn())).rejects.toThrow('HALF_OPEN (probe in flight)');
 
       resolveProbe2('probe 2 ok');
       await exec2;
+      expect(breaker.state).toBe(CircuitState.CLOSED);
       breaker.destroy();
     });
 

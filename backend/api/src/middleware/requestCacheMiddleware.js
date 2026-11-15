@@ -8,7 +8,7 @@
 import { redisClient } from '../config/db.js';
 import logger from './logger.js';
 
-export function requestCache(durationSeconds = 60) {
+export function requestCacheMiddleware(durationSeconds = 60) {
   return async (req, res, next) => {
     // Null guard: If redisClient is not initialized or configured, bypass caching safely
     if (!redisClient) {
@@ -20,7 +20,13 @@ export function requestCache(durationSeconds = 60) {
       return next();
     }
 
-    const cacheKey = `cache:${req.originalUrl || req.url}`;
+    // Cache entries are user-scoped. Without an authenticated principal we
+    // cannot safely reuse a response, so bypass the cache entirely.
+    const userId = req.user?.id || req.user?.uid;
+    if (!userId) {
+      return next();
+    }
+    const cacheKey = `cache:user:${userId}:${req.originalUrl || req.url}`;
 
     try {
       const cachedResponse = await redisClient.get(cacheKey);
@@ -54,3 +60,4 @@ export function requestCache(durationSeconds = 60) {
   };
 }
 
+export const requestCache = requestCacheMiddleware;

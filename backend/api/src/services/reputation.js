@@ -22,7 +22,21 @@
 import { ethers } from "ethers";
 import logger from "../middleware/logger.js";
 import { measureExecution } from "../core/performanceMetrics.js";
+// backend/api/src/services/reputation.js (Excerpt)
 
+async function retryWithBackoff(fn, retries = 3, baseDelayMs = 1000) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt === retries) throw err;
+      
+      // FIX: Add random jitter to prevent thundering herd per issue #6686
+      const jitter = Math.random() * baseDelayMs * attempt;
+      await new Promise((resolve) => setTimeout(resolve, jitter));
+    }
+  }
+}
 // Safe math utilities for reputation calculations.
 
 // Minimal ABI — only the subset the backend needs to call.
@@ -35,7 +49,17 @@ const REPUTATION_ABI = [
 ];
 /** @type {ethers.Contract | null} */
 export let reputationContract = null;
-
+/**
+ * Clamps a reputation score between 0 and MAX_REPUTATION (10000).
+ * Exported per issue #6984 for reuse in on-chain bounds validation.
+ */
+export function clampReputation(score) {
+  const max = 10000;
+  if (typeof score !== 'number' || Number.isNaN(score)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(score, max));
+}
 /**
  * Initialises or resets the Reputation contract client.
  * Exposed for testing and runtime reconfiguration.

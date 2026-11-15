@@ -6,15 +6,35 @@ import { SUPPORTED_LOCALES } from './formatters.js';
 
 const DEFAULT_LOCALE = 'en-IN';
 
+function normalizeLocaleValue(value) {
+    if (Array.isArray(value)) value = value[0];
+    if (typeof value !== 'string') return '';
+    return value.trim();
+}
+
+function matchSupportedLocale(value) {
+    const candidate = normalizeLocaleValue(value);
+    if (!candidate) return null;
+    if (SUPPORTED_LOCALES.includes(candidate)) return candidate;
+
+    const langOnly = candidate.split('-')[0].toLowerCase();
+    if (!langOnly) return null;
+    return SUPPORTED_LOCALES.find((locale) => {
+        const supportedLang = locale.split('-')[0].toLowerCase();
+        return supportedLang === langOnly;
+    }) || null;
+}
+
 /**
  * Parses the Accept-Language header and returns the best match.
  * @param {string} header - e.g., "en-US,en;q=0.9,hi-IN;q=0.8"
  * @returns {string}
  */
 export function parseAcceptLanguage(header) {
-    if (!header) return null;
+    const value = normalizeLocaleValue(header);
+    if (!value) return null;
 
-    const languages = header.split(',')
+    const languages = value.split(',')
         .map(lang => {
             const [code, q] = lang.trim().split(';q=');
             return {
@@ -22,15 +42,15 @@ export function parseAcceptLanguage(header) {
                 quality: q ? parseFloat(q) : 1.0
             };
         })
-        .sort((a, b) => b.quality - a.quality);
+        .filter(({ code }) => code.length > 0)
+        .sort((a, b) => {
+            if (!Number.isFinite(a.quality)) return 1;
+            if (!Number.isFinite(b.quality)) return -1;
+            return b.quality - a.quality;
+        });
 
     for (const { code } of languages) {
-        // Exact match
-        if (SUPPORTED_LOCALES.includes(code)) return code;
-
-        // Language-only match (e.g., 'hi' -> 'hi-IN')
-        const langOnly = code.split('-')[0];
-        const match = SUPPORTED_LOCALES.find(l => l.startsWith(langOnly));
+        const match = matchSupportedLocale(code);
         if (match) return match;
     }
 
@@ -47,10 +67,8 @@ export function parseAcceptLanguage(header) {
 export function detectLocale(req) {
     // 1. Explicit query parameter (e.g., ?lang=hi-IN)
     if (req.query && req.query.lang) {
-        const queryLang = req.query.lang;
-        if (SUPPORTED_LOCALES.includes(queryLang)) return queryLang;
-        const langMatch = SUPPORTED_LOCALES.find(l => l.startsWith(queryLang.split('-')[0]));
-        if (langMatch) return langMatch;
+        const queryMatch = matchSupportedLocale(req.query.lang);
+        if (queryMatch) return queryMatch;
     }
 
     // 2. User profile preference (if authenticated)
@@ -61,8 +79,7 @@ export function detectLocale(req) {
     // 3. Custom header (often used by mobile apps)
     const customHeader = req.headers['x-locale'] || req.headers['x-language'];
     if (customHeader) {
-        if (SUPPORTED_LOCALES.includes(customHeader)) return customHeader;
-        const headerMatch = SUPPORTED_LOCALES.find(l => l.startsWith(customHeader.split('-')[0]));
+        const headerMatch = matchSupportedLocale(customHeader);
         if (headerMatch) return headerMatch;
     }
 

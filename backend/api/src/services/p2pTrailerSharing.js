@@ -4,8 +4,39 @@ import crypto from 'crypto';
 const trailerListings = new Map();
 const trailerBookings = new Map();
 
+// Bounds for the in-memory marketplace. Listings expire after a week and
+// bookings are retained for a month so a long-running process cannot grow
+// both maps without limit.
+export const MAX_TRAILER_LISTINGS = 500;
+export const MAX_TRAILER_BOOKINGS = 1000;
+export const TRAILER_LISTING_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export const TRAILER_BOOKING_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
 export const TRAILER_TYPES = ['DRY_VAN', 'REEFER', 'FLATBED', 'STEP_DECK', 'TANKER'];
 export const DEFAULT_SECURITY_DEPOSIT_USD = 1500;
+
+function capacityError(message) {
+    const error = new Error(message);
+    error.code = 'P2P_STORE_CAPACITY';
+    error.statusCode = 429;
+    return error;
+}
+
+function pruneExpiredEntries(now = Date.now()) {
+    for (const [listingId, listing] of trailerListings) {
+        const createdAt = Date.parse(listing.createdAt);
+        if (!Number.isFinite(createdAt) || now - createdAt > TRAILER_LISTING_TTL_MS) {
+            trailerListings.delete(listingId);
+        }
+    }
+
+    for (const [bookingId, booking] of trailerBookings) {
+        const bookedAt = Date.parse(booking.bookedAt);
+        if (!Number.isFinite(bookedAt) || now - bookedAt > TRAILER_BOOKING_TTL_MS) {
+            trailerBookings.delete(bookingId);
+        }
+    }
+}
 
 /**
  * Calculates match compatibility score between a repositioning trailer listing and a power-only driver route.
@@ -89,6 +120,13 @@ export function publishTrailerRepositioningListing(listingParams = {}) {
         demandTier = 'BALANCED'
     } = listingParams;
 
+    pruneExpiredEntries();
+    if (trailerListings.size >= MAX_TRAILER_LISTINGS) {
+        throw capacityError(
+            `P2P trailer listing capacity reached (${MAX_TRAILER_LISTINGS}). Try again after older listings expire.`
+        );
+    }
+
     const listingId = `p2p-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
 
     const pricing = calculateRepositioningYieldPricing(dailyRateUSD, daysIdle, demandTier);
@@ -156,6 +194,8 @@ export function bookTrailerWithEscrow(listingId, seekerCarrierId, rentalDays = 1
         throw new TypeError('listingId and seekerCarrierId are required');
     }
 
+    pruneExpiredEntries();
+
     const listing = trailerListings.get(listingId);
     if (!listing) {
         throw new Error(`Listing ${listingId} not found`);
@@ -173,6 +213,12 @@ export function bookTrailerWithEscrow(listingId, seekerCarrierId, rentalDays = 1
     const totalRentalFeeUSD = parseFloat((days * (listing.effectiveDailyRateUSD || listing.dailyRateUSD)).toFixed(2));
     const securityDepositUSD = options.securityDepositUSD || DEFAULT_SECURITY_DEPOSIT_USD;
     const totalEscrowHoldUSD = parseFloat((totalRentalFeeUSD + securityDepositUSD).toFixed(2));
+
+    if (trailerBookings.size >= MAX_TRAILER_BOOKINGS) {
+        throw capacityError(
+            `P2P trailer booking capacity reached (${MAX_TRAILER_BOOKINGS}). Try again after older bookings expire.`
+        );
+    }
 
     const bookingId = `book-p2p-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
     const bookedAt = new Date().toISOString();

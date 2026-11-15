@@ -44,13 +44,28 @@ export const validate = (req, res, next) => {
 };
 
 export default validate;
-export function formatValidationIssues(error) {
-  return error.issues.map((issue) => ({
-    field: issue.path.length > 0 ? issue.path.join(".") : "body",
-    message: issue.message,
-  }));
-}
 
+/**
+ * Formats Zod validation issues into a clean, structured array.
+ * Exported for consistent error formatting across handlers and tests.
+ */
+export function formatValidationIssues(error) {
+  const issues = Array.isArray(error?.issues)
+    ? error.issues
+    : Array.isArray(error)
+      ? error
+      : [];
+  return issues.map((issue) => {
+    const field =
+      Array.isArray(issue.path) && issue.path.length > 0
+        ? issue.path.join('.')
+        : 'body';
+    return {
+      field,
+      message: issue.message,
+    };
+  });
+}
 export function validateArray(schema) {
   return (req, res, next) => {
     if (!Array.isArray(req.body)) {

@@ -114,8 +114,9 @@ export function formatRelativeTime(date, locale = 'en-IN') {
  * @param {string} locale 
  * @returns {boolean}
  */
-export function isRTL(locale) {
+export function isRTL(locale = 'en-IN') {
     const rtlLocales = ['ur', 'ar', 'he', 'fa'];
+    if (typeof locale !== 'string' || locale.trim() === '') return false;
     const lang = locale.split('-')[0].toLowerCase();
     return rtlLocales.includes(lang);
 }

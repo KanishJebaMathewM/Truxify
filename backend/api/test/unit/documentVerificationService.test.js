@@ -14,7 +14,7 @@ vi.mock('../../src/lib/ocrProcessor.js', async (importOriginal) => {
 const { extractText } = await import('../../src/lib/ocrProcessor.js');
 const { processDocumentUpload } = await import('../../src/services/documentVerificationService.js');
 
-const goodFile = { mimetype: 'image/jpeg', size: 500_000, buffer: Buffer.from([0xff, 0xd8, 0xff]) };
+const goodFile = { mimetype: 'image/jpeg', size: 500_000, buffer: Buffer.alloc(2048, 0xff) };
 
 describe('documentVerificationService.processDocumentUpload', () => {
   it('rejects invalid files before any OCR work', async () => {

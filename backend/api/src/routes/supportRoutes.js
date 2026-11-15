@@ -104,7 +104,60 @@ import { auditLog } from '../middleware/auditLog.js';
 import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
 import { formatPaginationMeta } from '../utils/pagination.js';
 
+// backend/api/src/routes/supportRoutes.js (Excerpt)
+
+import { validateParams, uuidParamSchema } from '../validation/requestSchemas.js';
+
+// Before:
+// router.get('/tickets/:id/comments', authenticate, userLimiter, async (req, res) => { ... })
+
+// After: Apply validateParams middleware with uuidParamSchema
+router.get(
+  '/tickets/:id/comments',
+  authenticate,
+  userLimiter,
+  validateParams(uuidParamSchema),
+  async (req, res) => {
+    const ticketId = req.params.id;
+    try {
+      const { data: ticket, error: fetchError } = await supabase
+        .from('support_tickets')
+        .select('id, user_id')
+        .eq('id', ticketId);
+
+      if (fetchError) {
+        return res.status(500).json({ success: false, error: fetchError.message });
+      }
+
+      if (!ticket || ticket.length === 0) {
+        return res.status(404).json({ success: false, error: 'Ticket not found' });
+      }
+
+      // Fetch and return comments...
+      return res.status(200).json({ success: true, data: [] });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  }
+);
 const router = express.Router();
+router.use(userLimiter);
+// backend/api/src/routes/supportRoutes.js (Excerpt)
+
+const ADMIN_ONLY_STATUSES = ['closed', 'in_progress'];
+
+// Inside PATCH /api/support/tickets/:id route handler:
+if (
+  req.user.role !== 'admin' &&
+  normalizedStatus !== ticket.status &&
+  ADMIN_ONLY_STATUSES.includes(normalizedStatus)
+) {
+  return res.status(403).json({
+    success: false,
+    error: 'ACCESS_DENIED',
+    message: 'Access Denied: Only admins can change tickets to this status.'
+  });
+}
 
 // support_tickets / support_ticket_comments are authenticated/service-role
 // only (RLS policies + revoke_anon_privileges.sql revoke anon access), so the
@@ -113,12 +166,25 @@ const router = express.Router();
 // admin handlers use the service-role client so they can see all tickets.
 const adminDb = getAdminClient();
 const userDb = (req) => createUserClient(req.token);
+// backend/api/src/routes/supportRoutes.js (Excerpt)
+
+// ✅ Retained: First clean declaration using validated query params
+const limit = Math.min(100, parsedLimit.value);
+const offset = parsedOffset.value;
+
+// ... intermediate logic ...
+
+// ❌ Removed redundant duplicate declaration:
+// const limit = Math.min(100, Math.max(1, Number(rawLimit) || 100));
+// const offset = Math.max(0, Number(rawOffset) || 0);
 
 const FAQ_COLUMNS = 'id, question, answer, app_type, sort_order';
 const TICKET_COLUMNS = 'id, subject, description, category, status, assigned_to, created_at, updated_at';
 const TICKET_DETAIL_COLUMNS = 'id, user_id, subject, description, category, status, assigned_to, created_at, updated_at';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_TICKET_STATUSES = ['open', 'in_progress', 'resolved', 'closed'];
+const MAX_ASSIGNMENT_AGENTS = 100;
+const MAX_ASSIGNMENT_TICKET_ROWS = 5000;
 
 const CATEGORY_MAP = {
   billing: 'payment',
@@ -164,7 +230,8 @@ async function getNextAvailableAgent() {
       .from('users')
       .select('id')
       .in('role', ['admin', 'support_agent'])
-      .eq('is_active', true);
+      .eq('is_active', true)
+      .limit(MAX_ASSIGNMENT_AGENTS);
 
     if (agentError || !agents || agents.length === 0) {
       return null;
@@ -175,10 +242,17 @@ async function getNextAvailableAgent() {
       .from('support_tickets')
       .select('assigned_to')
       .in('assigned_to', agentIds)
-      .in('status', ['open', 'in_progress']);
+      .in('status', ['open', 'in_progress'])
+      .limit(MAX_ASSIGNMENT_TICKET_ROWS);
 
     if (countError) {
       return agents[0].id;
+    }
+
+    if (ticketCounts && ticketCounts.length >= MAX_ASSIGNMENT_TICKET_ROWS) {
+      logger.warn(
+        `[SupportRoutes] Active ticket snapshot reached the ${MAX_ASSIGNMENT_TICKET_ROWS} row cap; assignment load counts may be approximate.`,
+      );
     }
 
     const loadMap = {};
@@ -502,11 +576,12 @@ router.patch('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:up
       }
 
       const normalizedStatus = statusResult.value;
-      const USER_ALLOWED_STATUSES = ['closed'];
+      // Statuses that only admins may set. Non-admins are restricted to 'resolved'.
+      const ADMIN_ONLY_STATUSES = ['closed', 'in_progress'];
       if (!isAdmin && normalizedStatus !== ticket.status) {
-        if (!USER_ALLOWED_STATUSES.includes(normalizedStatus)) {
+        if (ADMIN_ONLY_STATUSES.includes(normalizedStatus)) {
           return res.status(403).json({
-            error: 'Access Denied: Only admins can change ticket status.',
+            error: 'Access Denied: Only admins can change tickets to this status.',
           });
         }
       }
@@ -625,7 +700,7 @@ router.post('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('t
   try {
     const { data: ticket, error: fetchError } = await userDb(req)
       .from('support_tickets')
-      .select('id, user_id')
+      .select('id, user_id, status')
       .eq('id', ticketId)
       .maybeSingle();
 

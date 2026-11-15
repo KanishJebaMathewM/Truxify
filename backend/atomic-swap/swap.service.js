@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import crypto from 'crypto';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
+// backend/atomic-swap/swap.service.js (Excerpt)
 /**
  * Atomic Swap Service
  * 
@@ -10,6 +11,26 @@ import { supabase } from '../api/src/config/db.js';
  */
 import { atomicSwapRelayer } from './swap_relayer.js';
 
+import { ethers } from 'ethers';
+
+export class SwapService {
+  constructor() {
+    this.provider = new ethers.JsonRpcProvider(process.env.BLOCKCHAIN_RPC_URL);
+    
+    // Primary hot wallet (Initiator)
+    this.initiatorWallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
+    
+    // Secondary hot wallet (Counterparty / Liquidity provider) if available
+    const counterpartyKey = process.env.COUNTERPARTY_PRIVATE_KEY || process.env.PRIVATE_KEY;
+    this.counterpartyWallet = new ethers.Wallet(counterpartyKey, this.provider);
+  }
+
+  async executeSwapAsCounterparty(swapId, secret) {
+    const contract = new ethers.Contract(CONTRACT_ADDRESS, ATOMIC_SWAP_ABI, this.counterpartyWallet);
+    const tx = await contract.executeSwap(swapId, secret);
+    return await tx.wait();
+  }
+}
 class AtomicSwapService {
     constructor() {
         const rpcUrl = process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com';

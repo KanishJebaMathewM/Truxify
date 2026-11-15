@@ -11,10 +11,12 @@ const { mockPgQuery } = vi.hoisted(() => ({
   mockPgQuery: vi.fn(),
 }));
 
+vi.mock('../../src/middleware/logger.js', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+
 vi.mock('pg', () => ({
   default: {
     Pool: class MockPool {
-      connect = vi.fn();
+      connect = vi.fn(async () => ({ query: ({ text, values }) => this.query(text, values), release: vi.fn() }));
       query = vi.fn();
       end = vi.fn().mockResolvedValue(undefined);
     },

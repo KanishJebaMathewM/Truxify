@@ -5,7 +5,6 @@ import { AppError, UnauthorizedError, ValidationError } from '../utils/errors.js
 import notificationService from '../services/notificationService.js';
 
 const VALID_PLATFORMS = ['android', 'ios', 'web'];
-
 function validateFcmToken(token) {
   if (!token || typeof token !== 'string') return 'fcmToken must be a non-empty string';
   if (token.length < 10 || token.length > 4096) return 'fcmToken length must be between 10 and 4096';

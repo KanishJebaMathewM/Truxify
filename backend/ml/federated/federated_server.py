@@ -11,11 +11,14 @@ import os
 from cryptography.fernet import Fernet, MultiFernet, InvalidToken
 
 from threading import RLock
+from .subscription_owner import SubscriptionOwner
 
 from .round_recovery import (
     MAX_CLIENTS, RoundRecoveryError, SnapshotUnavailableError, SnapshotWriteError, commit as commit_snapshot,
     ensure as ensure_snapshot, record as round_record, restore as restore_snapshot,
 )
+
+from .update_delivery import consume_pending
 
 from .model_updates import (
     MAX_ENVELOPE_BYTES, admit_model_weights, prepare_round_candidate, round_synchronized,
@@ -137,8 +140,7 @@ class FederatedServer:
         self.round_completed = False
         self.selected_clients = []
         self.current_round = None
-        self.pubsub = None
-        self._consumer_thread = None
+        self._subscription = SubscriptionOwner()
         self.encryption_key: Optional[bytes] = None
         self.historical_keys: List[bytes] = []
         self.cipher = None
@@ -477,70 +479,49 @@ class FederatedServer:
         """Retained compatibility entry point; mirrors are not recovery authority."""
         self._persist_legacy_mirrors()
 
+    @round_synchronized
+    def _consume_pending_update(self, client_id):
+        """Admit a pending envelope before conditionally acknowledging its bytes."""
+        return consume_pending(self, client_id)
+
+    @round_synchronized
     def drain_pending_client_updates(self):
-        """Consume any pending client updates from federated:update:{client_id}
-        for all selected clients. Atomically gets and deletes the key to prevent
-        duplicate processing."""
-        consumed = 0
-        for client_id in list(self.selected_clients):
-            if client_id in self.client_weights:
-                continue
-            key = f"federated:update:{client_id}"
-            encrypted = atomic_getdel(self.redis, key)
-            if encrypted:
-                res = self.receive_client_update(client_id, encrypted)
-                if res and res.get("success") and not res.get("duplicate"):
-                    consumed += 1
-        return consumed
+        """Retry selected pending envelopes without deleting failed admissions."""
+        return sum(self._consume_pending_update(client_id)
+                   for client_id in list(self.selected_clients))
+
+    @property
+    def pubsub(self):
+        return self._subscription.pubsub
+
+    @property
+    def _consumer_thread(self):
+        return self._subscription.thread
 
     def start_update_consumer(self):
-        """Start a background listener thread on federated:updates channel."""
-        if getattr(self, '_consumer_thread', None) is not None:
-            return
+        """Idempotently start one native listener; refuse draining overlap."""
+        def _on_message(message):
+            if not message or message.get('type') != 'message':
+                return
+            try:
+                raw_data = message.get('data')
+                if isinstance(raw_data, bytes):
+                    raw_data = raw_data.decode('utf-8')
+                event = json.loads(raw_data)
+                if event.get('type') == 'client_update':
+                    self._consume_pending_update(event.get('client_id'))
+            except Exception as exc:
+                logger.error(f"Error in federated update consumer: {exc}")
 
         try:
-            self.pubsub = self.redis.pubsub()
+            return self._subscription.start(self.redis, 'federated:updates', _on_message)
+        except Exception as exc:
+            logger.warning(f"Could not start federated subscription: {exc}")
+            return False
 
-            def _on_message(message):
-                if not message or message.get('type') != 'message':
-                    return
-                try:
-                    raw_data = message.get('data')
-                    if isinstance(raw_data, bytes):
-                        raw_data = raw_data.decode('utf-8')
-                    event = json.loads(raw_data)
-                    if event.get('type') == 'client_update':
-                        client_id = event.get('client_id')
-                        if client_id and client_id in self.selected_clients:
-                            key = f'federated:update:{client_id}'
-                            encrypted = atomic_getdel(self.redis, key)
-                            if encrypted:
-                                self.receive_client_update(client_id, encrypted)
-                except Exception as exc:
-                    logger.error(f"Error in federated update consumer: {exc}")
-
-            self.pubsub.subscribe(**{'federated:updates': _on_message})
-            self._consumer_thread = self.pubsub.run_in_thread(daemon=True, sleep_time=0.01)
-            logger.info("📡 Federated update consumer started")
-        except Exception as e:
-            logger.warning(f"Could not start Pub/Sub update consumer: {e}")
-            self.pubsub = None
-            self._consumer_thread = None
-
-    def stop_update_consumer(self):
-        """Stop background listener thread."""
-        if getattr(self, '_consumer_thread', None) is not None:
-            try:
-                self._consumer_thread.stop()
-            except Exception:
-                pass
-            self._consumer_thread = None
-        if getattr(self, 'pubsub', None) is not None:
-            try:
-                self.pubsub.close()
-            except Exception:
-                pass
-            self.pubsub = None
+    def stop_update_consumer(self, timeout=1.0):
+        """Retire admission; return True only when the native worker drained."""
+        return self._subscription.stop(timeout)
 
     @round_synchronized
     def receive_client_update(self, client_id, encrypted_weights):
@@ -553,10 +534,6 @@ class FederatedServer:
         """
         try:
             ensure_snapshot(self)
-            if getattr(self, 'round_completed', False) or self.round in getattr(self, 'completed_rounds', set()):
-                logger.warning(f"Rejected update from {client_id}: round {self.round} already completed")
-                return {'success': False, 'error': f'Round {self.round} is already completed'}
-
             if self.selected_clients and client_id not in self.selected_clients:
                 logger.warning(
                     f"Rejected update from {client_id}: client not selected for round {self.round}"
@@ -630,6 +607,12 @@ class FederatedServer:
                     f"Dropped duplicate update from {client_id} (round {update_round})"
                 )
                 return {'success': True, 'duplicate': True}
+
+            # Valid current-round duplicates above remain acknowledgeable even
+            # after the final contribution completed the round. Future/stale
+            # envelopes have already been rejected before reaching this point.
+            if self.round_completed or self.round in self.completed_rounds:
+                return {'success': False, 'error': f'Round {self.round} is already completed'}
 
             # Convert back to numpy arrays
             weights_np = admit_model_weights(weights, self.model.get_weights())

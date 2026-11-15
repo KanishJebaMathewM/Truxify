@@ -33,6 +33,9 @@ export function hashOtp(otp, saltHex) {
  */
 export function verifyOtpHash(otp, otpRecord) {
   if (!otpRecord) return false
+  if (otp === null || otp === undefined || (typeof otp === 'string' && otp.trim() === '')) {
+    return false
+  }
   if (otpRecord.otp_salt) {
     const { hash: submittedHash } = hashOtp(otp, otpRecord.otp_salt)
     const expected = String(otpRecord.otp_hash || '')

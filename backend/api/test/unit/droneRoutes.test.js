@@ -29,6 +29,7 @@ vi.mock('../../src/middleware/rateLimiter.js', () => ({
 const droneServiceMock = vi.hoisted(() => ({
   launchDroneDelivery: vi.fn(),
   getDroneTelemetry: vi.fn(),
+  abortMission: vi.fn(),
 }));
 
 vi.mock('../../src/services/droneService.js', () => ({
@@ -174,6 +175,19 @@ describe('droneRoutes', () => {
       expect(res.body.maxRadiusKm).toBe(25);
     });
 
+    it('maps mission capacity exhaustion to 429', async () => {
+      const capacityError = new Error('Drone mission capacity reached; try again later');
+      capacityError.statusCode = 429;
+      droneServiceMock.launchDroneDelivery.mockRejectedValue(capacityError);
+
+      const res = await request(makeApp())
+        .post('/api/drone/launch')
+        .send(validLaunchPayload);
+
+      expect(res.status).toBe(429);
+      expect(res.body.error).toMatch(/capacity reached/i);
+    });
+
     it('handles unexpected launch failure with 500', async () => {
       droneServiceMock.launchDroneDelivery.mockRejectedValue(new Error('Hardware comms failure'));
 
@@ -233,7 +247,11 @@ describe('droneRoutes', () => {
         droneId: 'DRN-AeroX-42',
         status: 'DISPATCHED',
       };
-      droneServiceMock.getDroneTelemetry.mockResolvedValue(activeMission);
+      droneServiceMock.abortMission.mockResolvedValue({
+        ...activeMission,
+        status: 'ABORTED_RETURNING_TO_BASE',
+        abortedAt: '2026-01-01T00:00:00.000Z',
+      });
 
       const res = await request(makeApp())
         .post('/api/drone/abort/MSN-a1b2c3d4e5f60718');
@@ -242,10 +260,14 @@ describe('droneRoutes', () => {
       expect(res.body.message).toMatch(/returning to safe zone base/i);
       expect(res.body.mission.status).toBe('ABORTED_RETURNING_TO_BASE');
       expect(res.body.mission.abortedAt).toBeDefined();
+      expect(droneServiceMock.abortMission).toHaveBeenCalledWith(
+        'MSN-a1b2c3d4e5f60718',
+        'usr-driver-99'
+      );
     });
 
     it('returns 404 when attempting to abort nonexistent mission', async () => {
-      droneServiceMock.getDroneTelemetry.mockResolvedValue(null);
+      droneServiceMock.abortMission.mockResolvedValue(null);
 
       const res = await request(makeApp())
         .post('/api/drone/abort/MSN-0000000000000000');

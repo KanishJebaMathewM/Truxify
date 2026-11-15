@@ -25,6 +25,7 @@ class StateDivergenceDetector {
     this.divergences = new Map();
     this.stateCache = new Map();
     this.monitoringTimer = null;
+    this.checkRunning = false;
 
     if (!deps.disableMonitoring && process.env.NODE_ENV !== 'test') {
       this.startMonitoring();
@@ -47,12 +48,22 @@ class StateDivergenceDetector {
       : 30000;
 
     this.monitoringTimer = setInterval(async () => {
+      if (this.checkRunning) {
+        logger.warn('[StateDivergenceDetector] Skipping divergence check; previous check is still running');
+        return;
+      }
+
+      this.checkRunning = true;
       try {
         await this.checkForDivergence();
       } catch (err) {
         logger.error({ err }, '[StateDivergenceDetector] Monitoring error');
+      } finally {
+        this.checkRunning = false;
       }
     }, interval);
+
+    this.monitoringTimer.unref?.();
   }
 
   stopMonitoring() {
@@ -60,6 +71,7 @@ class StateDivergenceDetector {
       clearInterval(this.monitoringTimer);
       this.monitoringTimer = null;
     }
+    this.checkRunning = false;
   }
 
   async checkForDivergence(ordersToCheck) {

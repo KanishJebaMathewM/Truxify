@@ -211,7 +211,11 @@ router.post('/challenge', authenticate, userLimiter, (req, res) => {
         return res.status(201).json({ message: 'Biometric challenge created', ...challenge });
     } catch (err) {
         logger.error({ err }, '[BiometricAuth] Failed to create challenge');
-        return res.status(500).json({ error: 'Failed to create biometric challenge' });
+        return res.status(err.statusCode || 500).json({
+            error: err.statusCode === 429
+                ? err.message
+                : 'Failed to create biometric challenge',
+        });
     }
 });
 

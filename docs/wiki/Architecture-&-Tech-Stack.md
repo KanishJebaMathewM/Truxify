@@ -55,6 +55,9 @@ graph TB
 
 ## 🎛️ Service Responsibilities
 
+> [!TIP]
+> For the complete technical rationale, alternatives evaluated, trade-offs, and contributor FAQs regarding these technology choices (Polygon, FastAPI, OSRM, n8n, Supabase+PostGIS, and Hardhat), read our [Architecture Decision Records (ADRs)](../ARCHITECTURE_DECISIONS.md).
+
 Truxify divides data storage and functionality across specialized micro-backends to maximize scalability and cost-efficiency:
 
 | Service | Technology | Role & Responsibility |

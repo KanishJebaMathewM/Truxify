@@ -124,7 +124,8 @@ describe('getLiveTrafficMultiplier', () => {
       expect(result.delayMinutes).toBe(15);
       expect(result.congestionLevel).toBe('moderate');
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('api.tomtom.com')
+        expect.stringContaining('api.tomtom.com'),
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
       );
     });
 
@@ -159,7 +160,8 @@ describe('getLiveTrafficMultiplier', () => {
       expect(result.delayMinutes).toBe(17);
       expect(result.congestionLevel).toBe('heavy');
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('maps.googleapis.com')
+        expect.stringContaining('maps.googleapis.com'),
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
       );
     });
   });

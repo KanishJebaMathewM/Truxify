@@ -5,6 +5,14 @@ import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter, nearbyLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
+const DEFAULT_MAX_NEARBY_RADIUS_KM = 100;
+
+function maxNearbyRadiusKm() {
+  const configured = Number(process.env.WEBRTC_MAX_NEARBY_RADIUS_KM);
+  return Number.isFinite(configured) && configured > 0 && configured <= 1000
+    ? configured
+    : DEFAULT_MAX_NEARBY_RADIUS_KM;
+}
 
 function parseFiniteNumber(value) {
   if (value === undefined || value === null || value === '') return null;
@@ -61,6 +69,14 @@ router.get('/webrtc/nearby', authenticate, userLimiter, nearbyLimiter, requirePo
       return res.status(400).json({
         success: false,
         error: 'radius must be a positive number'
+      });
+    }
+
+    const radiusLimit = maxNearbyRadiusKm();
+    if (parsedRadius > radiusLimit) {
+      return res.status(400).json({
+        success: false,
+        error: `radius must not exceed ${radiusLimit} km`
       });
     }
 

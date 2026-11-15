@@ -118,12 +118,58 @@ export function checkOcrConfidence(docType, confidence) {
  * @param {number} warningDays - Days before expiry to warn
  * @returns {{expired: boolean, daysUntilExpiry: number, warning: boolean}}
  */
-export function checkExpiry(expiryDate, warningDays = 30) {
-    if (!expiryDate) {
-        return { expired: false, daysUntilExpiry: null, warning: false };
+function parseCalendarDate(value) {
+    if (value instanceof Date) {
+        return Number.isNaN(value.getTime()) ? null : value;
+    }
+    if (typeof value !== 'string') return null;
+
+    const text = value.trim();
+    let year;
+    let month;
+    let day;
+
+    // OCR output is commonly day-first (31/12/2035) while storage and APIs
+    // use ISO. `new Date('31/12/2035')` is invalid and made every real
+    // document look expired.
+    let match = /^(\d{4})-(\d{2})-(\d{2})(?:$|[T\s])/.exec(text);
+    if (match) {
+        year = Number(match[1]);
+        month = Number(match[2]);
+        day = Number(match[3]);
+    } else {
+        match = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(text);
+        if (!match) return null;
+        day = Number(match[1]);
+        month = Number(match[2]);
+        year = Number(match[3]);
     }
 
-    const expiry = new Date(expiryDate);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    if (
+        parsed.getUTCFullYear() !== year ||
+        parsed.getUTCMonth() !== month - 1 ||
+        parsed.getUTCDate() !== day
+    ) {
+        return null;
+    }
+    return parsed;
+}
+
+export function checkExpiry(expiryDate, warningDays = 30) {
+    // A missing or unparseable expiry date must never be treated as valid.
+    // `new Date('not-a-date')` produces an invalid Date whose NaN timestamp
+    // makes every comparison false, which previously returned expired:false
+    // and let an unreadable document pass verification.
+    if (!expiryDate) {
+        return { expired: true, daysUntilExpiry: null, warning: false, reason: 'missing_expiry' };
+    }
+
+    const expiry = parseCalendarDate(expiryDate);
+    if (!expiry) {
+        return { expired: true, daysUntilExpiry: null, warning: false, reason: 'invalid_expiry' };
+    }
+
     const now = new Date();
     const diffMs = expiry.getTime() - now.getTime();
     const daysUntilExpiry = Math.ceil(diffMs / (1000 * 60 * 60 * 24));

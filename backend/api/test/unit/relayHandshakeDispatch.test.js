@@ -11,7 +11,8 @@ import {
   TRANSSHIPMENT_HUBS,
 } from '../../src/services/relayDispatchService.js';
 
-const SECRET = process.env.RELAY_HANDSHAKE_SECRET || 'truxify-relay-handshake-secret-key-2026';
+const SECRET = 'test-relay-handshake-secret-0123456789abcdef';
+process.env.RELAY_HANDSHAKE_SECRET = SECRET;
 
 const buildVerification = (token, overrides = {}) => ({
   relayBookingId: token.relayBookingId,
@@ -26,8 +27,8 @@ const buildVerification = (token, overrides = {}) => ({
   submittedOutboundOtp: token.outboundOtp,
   expectedInboundOtp: token.inboundOtp,
   expectedOutboundOtp: token.outboundOtp,
-  inboundGps: null,
-  outboundGps: null,
+  inboundGps: { lat: 28.7511, lng: 77.1472 },
+  outboundGps: { lat: 28.7511, lng: 77.1472 },
   ...overrides,
 });
 
@@ -86,6 +87,31 @@ describe('relayHandshakeService.verifyRelayHandshake', () => {
     await expect(verifyRelayHandshake(buildVerification(t, { hubId: 'HUB_NGP_01' })))
       .rejects.toThrow(/signature/);
   });
+
+  it('rejects a hand-off when either driver has no GPS telemetry', async () => {
+    const t = generateHandshakeToken('RB-7', 1, 'driver-in-1', 'HUB_DEL_01');
+    await expect(verifyRelayHandshake(buildVerification(t, { outboundGps: null })))
+      .rejects.toThrow(/Both drivers must provide GPS/);
+  });
+
+  it('rejects a substituted outbound OTP because both OTPs are signed', async () => {
+    const t = generateHandshakeToken('RB-7', 1, 'driver-in-1', 'HUB_DEL_01');
+    await expect(verifyRelayHandshake(buildVerification(t, {
+      expectedOutboundOtp: '000000',
+      submittedOutboundOtp: '000000',
+    }))).rejects.toThrow(/signature/);
+  });
+
+  it('rejects generation when the handshake secret is missing', () => {
+    const saved = process.env.RELAY_HANDSHAKE_SECRET;
+    delete process.env.RELAY_HANDSHAKE_SECRET;
+    try {
+      expect(() => generateHandshakeToken('RB-7', 1, 'driver-in-1', 'HUB_DEL_01'))
+        .toThrow(/RELAY_HANDSHAKE_SECRET/);
+    } finally {
+      process.env.RELAY_HANDSHAKE_SECRET = saved;
+    }
+  });
 });
 
 describe('relayHandshakeService.verifyHubGeofence', () => {
@@ -100,8 +126,10 @@ describe('relayHandshakeService.verifyHubGeofence', () => {
     expect(outside.distanceMeters).toBeGreaterThan(1500);
   });
 
-  it('unknown hub ids are permissive (custom coordinates allowed)', () => {
-    expect(verifyHubGeofence(0, 0, 'CUSTOM_HUB').isWithinGeofence).toBe(true);
+  it('unknown hub ids fail closed instead of skipping the geofence', () => {
+    const result = verifyHubGeofence(0, 0, 'CUSTOM_HUB');
+    expect(result.isWithinGeofence).toBe(false);
+    expect(result.reason).toBe('UNKNOWN_HUB');
   });
 });
 

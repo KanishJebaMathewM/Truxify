@@ -82,7 +82,7 @@ module.exports = {
         settings: {
           optimizer: { enabled: true, runs: 200 },
           viaIR: true,
-          evmVersion: "cancun",
+          evmVersion: "shanghai",
         },
       },
       {
@@ -90,7 +90,7 @@ module.exports = {
         settings: {
           optimizer: { enabled: true, runs: 200 },
           viaIR: true,
-          evmVersion: "cancun",
+          evmVersion: "shanghai",
         },
       },
       {
@@ -98,7 +98,7 @@ module.exports = {
         settings: {
           optimizer: { enabled: true, runs: 200 },
           viaIR: true,
-          evmVersion: "cancun",
+          evmVersion: "shanghai",
         },
       },
       {
@@ -106,7 +106,7 @@ module.exports = {
         settings: {
           optimizer: { enabled: true, runs: 200 },
           viaIR: true,
-          evmVersion: "cancun",
+          evmVersion: "shanghai",
         },
       },
       {

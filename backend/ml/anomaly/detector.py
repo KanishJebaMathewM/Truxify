@@ -2,22 +2,56 @@ import numpy as np
 import redis
 import json
 import logging
-from collections import deque
+from collections import OrderedDict, deque
 from copy import deepcopy
 from concurrent.futures import Future
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from .models import LSTMAutoencoder
+from sklearn.preprocessing import StandardScaler
+# backend/ml/anomaly/detector.py
 from threading import RLock
 from pathlib import Path
 from .generation_contract import admit_training, capture, prepare_candidate, finite_array
 
+def detect_transaction_anomaly(self, transaction: dict) -> dict:
+    """
+    Detects anomalies in financial transactions using a rolling temporal feature window
+    keyed by a stable account/customer identifier rather than a one-shot transaction_id.
+    """
+    features = self._extract_transaction_features(transaction)
+    
+    # FIX: Use stable account_id or customer_id as entity_key so the rolling window 
+    # accumulates actual historical transactions for LSTM autoencoder sequence analysis.
+    entity_id = str(
+        transaction.get('account_id') or 
+        transaction.get('customer_id') or 
+        transaction.get('card_id') or 
+        'unknown_account'
+    )
+
+    result = self.detect_anomaly(
+        'transactions', 
+        features,
+        entity_key=entity_id
+    )
+
+    return {
+        'transaction_id': transaction.get('transaction_id'),
+        'account_id': entity_id,
+        'anomaly_score': result.get('score'),
+        'is_anomaly': result.get('is_anomaly'),
+        'reconstruction_error': result.get('error')
+    }
 logger = logging.getLogger(__name__)
 
 class AnomalyDetector:
     """Real-time Anomaly Detection Service"""
     
-    def __init__(self, redis_url: str = "redis://localhost:6379"):
+    def __init__(self, redis_url: str = "redis://localhost:6379", *, max_feature_buffers: int = 4096):
+        if isinstance(max_feature_buffers, bool) or not isinstance(max_feature_buffers, int) or max_feature_buffers < 1:
+            raise ValueError("max_feature_buffers must be a positive integer")
+        self._max_feature_buffers = max_feature_buffers
         self.redis = redis.Redis.from_url(redis_url)
         self._generation_lock = RLock()
         self._training_lock = RLock()
@@ -55,18 +89,25 @@ class AnomalyDetector:
         # of tiling a single timestep into a constant sequence, which was out
         # of distribution for models trained on diverse multi-step sequences
         # (issue #11669).
-        self._feature_buffers = {}
+        self._feature_buffers = OrderedDict()
 
         logger.info("✅ Anomaly Detector initialized")
 
     def _get_feature_buffer(self, data_type: str, entity_key: str):
         """Get (or create) the rolling feature buffer for an entity."""
         key = (data_type, entity_key or 'default')
-        if key not in self._feature_buffers:
-            seq_len = self.models[data_type].sequence_length
-            self._feature_buffers[key] = deque(maxlen=seq_len)
-        return self._feature_buffers[key]
-    
+        if key in self._feature_buffers:
+            self._feature_buffers.move_to_end(key)
+            return self._feature_buffers[key]
+        # Resolve/allocate before eviction; unsupported geometry cannot retire
+        # another entity. Serving calls this only after complete admission.
+        seq_len = self.models[data_type].sequence_length
+        buffer = deque(maxlen=seq_len)
+        if len(self._feature_buffers) >= self._max_feature_buffers:
+            self._feature_buffers.popitem(last=False)
+        self._feature_buffers[key] = buffer
+        return buffer
+
     def train_models(self, data: Dict[str, np.ndarray], epochs: int = 1):
         """Fit privately, then publish every requested runtime generation together."""
         with self._training_lock:
@@ -87,10 +128,10 @@ class AnomalyDetector:
                     self.scalers[name] = scaler
                     self._generations[name] = self._generations.get(name, 0) + 1
                     result['generation'] = self._generations[name]
-                self._feature_buffers = {
-                    key: value for key, value in self._feature_buffers.items()
+                self._feature_buffers = OrderedDict(
+                    (key, value) for key, value in self._feature_buffers.items()
                     if key[0] not in candidates
-                }
+                )
                 return {name: result for name, (_, _, result) in candidates.items()}
 
     def detect_anomaly(self, data_type: str, data: np.ndarray, entity_key: str = None) -> Dict:
@@ -115,6 +156,7 @@ class AnomalyDetector:
                 key = (data_type, entity_key or 'default')
                 previous = self._feature_buffers.get(key, ())
                 seq = (list(previous) + [scaled[0]])[-model.sequence_length:]
+                window_observations = len(seq)
                 if len(seq) < model.sequence_length:
                     seq = [seq[0]] * (model.sequence_length - len(seq)) + seq
                 window = np.array(seq, dtype=np.float32)
@@ -137,6 +179,8 @@ class AnomalyDetector:
                     'data_type': data_type, 'severity': severity,
                     'timestamp': datetime.now().isoformat(), 'data': owned.tolist(),
                     'generation': self._generations.get(data_type, 0),
+                    'window_observations': window_observations,
+                    'window_length': int(model.sequence_length),
                     'sequence': self._observation_sequence + 1,
                     'entity_key': entity_key or 'default',
                 }
@@ -374,5 +418,7 @@ class AnomalyDetector:
             'total_anomalies': total_anomalies,
             'by_type': by_type,
             'by_severity': by_severity,
+            'last_anomaly': self.anomaly_history[-1] if self.anomaly_history else None
+        }
             'last_anomaly': history[-1] if history else None
         }

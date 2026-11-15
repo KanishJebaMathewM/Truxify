@@ -7,10 +7,24 @@ vi.hoisted(() => {
   process.env.SHARD_PASSWORD_WEST = 'mock';
 });
 
+vi.mock('../../src/middleware/logger.js', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+
 vi.mock('../../src/config/db.js', () => ({
   supabase: { from: vi.fn() },
   redisClient: vi.fn(),
+  pgPool: null,
 }));
+
+// These fixtures model native checkout/release, while preserving existing query/result assertions.
+async function execute(manager, ...args) {
+  for (const shard of manager.shards.values()) {
+    if (shard.pool && !shard.pool.connect) {
+      const pool = shard.pool;
+      pool.connect = vi.fn(async () => ({ query: ({ text, values }) => pool.query(text, values), release: vi.fn() }));
+    }
+  }
+  return manager.executeCrossShardQuery(...args);
+}
 
 describe('ShardManager - Parallel Cross-Shard Query Engine', () => {
   let ShardManager;
@@ -30,7 +44,7 @@ describe('ShardManager - Parallel Cross-Shard Query Engine', () => {
       shard.pool = { query: mockQuery };
     }
 
-    const response = await ShardManager.executeCrossShardQuery({ query: 'SELECT * FROM test' });
+    const response = await execute(ShardManager, { query: 'SELECT * FROM test' });
 
     const activeShardsCount = Array.from(ShardManager.shards.values()).filter(s => s.pool).length;
     expect(mockQuery).toHaveBeenCalledTimes(activeShardsCount);
@@ -51,7 +65,7 @@ describe('ShardManager - Parallel Cross-Shard Query Engine', () => {
     ShardManager.shards.get('east').pool = null;
     ShardManager.shards.get('west').pool = null;
 
-    const mergedAsc = await ShardManager.executeCrossShardQuery(
+    const mergedAsc = await execute(ShardManager,
       { query: 'SELECT * FROM users' },
       { mergeResults: true, sortField: 'id', sortOrder: 'asc' }
     );
@@ -62,7 +76,7 @@ describe('ShardManager - Parallel Cross-Shard Query Engine', () => {
       { id: 3, name: 'Alice' },
     ]);
 
-    const mergedDesc = await ShardManager.executeCrossShardQuery(
+    const mergedDesc = await execute(ShardManager,
       { query: 'SELECT * FROM users' },
       { mergeResults: true, sortField: 'id', sortOrder: 'desc' }
     );
@@ -73,7 +87,7 @@ describe('ShardManager - Parallel Cross-Shard Query Engine', () => {
       { id: 1, name: 'Charlie' },
     ]);
 
-    const paginated = await ShardManager.executeCrossShardQuery(
+    const paginated = await execute(ShardManager,
       { query: 'SELECT * FROM users' },
       { mergeResults: true, sortField: 'id', sortOrder: 'asc', limit: 2, offset: 1 }
     );
@@ -104,7 +118,7 @@ describe('ShardManager - Parallel Cross-Shard Query Engine', () => {
       };
     }
 
-    const response = await ShardManager.executeCrossShardQuery({ query: 'SELECT * FROM status' });
+    const response = await execute(ShardManager, { query: 'SELECT * FROM status' });
 
     expect(response.results).toHaveLength(4);
     expect(response.healthy).toEqual(['north', 'south', 'east', 'west']);
@@ -128,7 +142,7 @@ describe('ShardManager - Parallel Cross-Shard Query Engine', () => {
     };
     ShardManager.shards.get('west').pool = null;
 
-    const merged = await ShardManager.executeCrossShardQuery(
+    const merged = await execute(ShardManager,
       { query: 'SELECT * FROM orders' },
       { mergeResults: true, sortField: 'id', sortOrder: 'asc' }
     );
@@ -158,7 +172,7 @@ describe('ShardManager - Parallel Cross-Shard Query Engine', () => {
     ShardManager.shards.get('east').pool = null;
     ShardManager.shards.get('west').pool = null;
 
-    const response = await ShardManager.executeCrossShardQuery(
+    const response = await execute(ShardManager,
       { query: 'SELECT * FROM items' },
       { mergeResults: true, structured: true }
     );
@@ -180,7 +194,7 @@ describe('ShardManager - Parallel Cross-Shard Query Engine', () => {
     ShardManager.shards.get('east').pool = null;
     ShardManager.shards.get('west').pool = null;
 
-    const response = await ShardManager.executeCrossShardQuery(
+    const response = await execute(ShardManager,
       { query: 'SELECT * FROM items' },
       { timeoutMs: 30 }
     );
@@ -197,16 +211,16 @@ describe('ShardManager - Parallel Cross-Shard Query Engine', () => {
       shard.pool = { query: mockQuery };
     }
 
-    const response = await ShardManager.executeCrossShardQuery('SELECT 1');
+    const response = await execute(ShardManager, 'SELECT 1');
     expect(response.healthy).toHaveLength(4);
     expect(response.partial).toBe(false);
   });
 
   it('throws an error when query is missing or not a string', async () => {
-    await expect(ShardManager.executeCrossShardQuery({})).rejects.toThrow(
+    await expect(execute(ShardManager, {})).rejects.toThrow(
       'Query string is required for executeCrossShardQuery'
     );
-    await expect(ShardManager.executeCrossShardQuery(null)).rejects.toThrow(
+    await expect(execute(ShardManager, null)).rejects.toThrow(
       'Query string is required for executeCrossShardQuery'
     );
   });

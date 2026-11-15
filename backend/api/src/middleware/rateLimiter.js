@@ -5,11 +5,26 @@ import { redisClient } from "../config/db.js";
 import crypto from "crypto";
 import logger from "./logger.js";
 import { checkRateLimit } from "../utils/redisSlidingWindow.js";
-
 function isRedisReady() {
   return !!(redisClient && redisClient.status === "ready");
 }
 
+/**
+ * Standard API rate limiter for general authenticated endpoints.
+ */
+export const standardRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: 'Too many requests, please try again later.'
+  }
+});
+
+// Note: Dead adminRateLimiter export removed per issue #14310.
+// Future administrative rate limiting will be implemented with dedicated Redis sliding windows.
 export function isSuspiciousForwardedHeader(header) {
   if (!header || typeof header !== "string") return false;
 

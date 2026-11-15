@@ -54,12 +54,12 @@ CREATE POLICY "blockchain_escalations_service_role_all" ON blockchain_escalation
 
 -- Read Policies (Allow authenticated users and dashboard endpoints to query metrics/events/escalations)
 CREATE POLICY "blockchain_monitoring_events_read" ON blockchain_monitoring_events
-  FOR SELECT TO authenticated, anon USING (true);
+  FOR SELECT TO authenticated USING (true);
 
 CREATE POLICY "blockchain_metrics_read" ON blockchain_metrics
-  FOR SELECT TO authenticated, anon USING (true);
+  FOR SELECT TO authenticated USING (true);
 
 CREATE POLICY "blockchain_escalations_read" ON blockchain_escalations
-  FOR SELECT TO authenticated, anon USING (true);
+  FOR SELECT TO authenticated USING (true);
 
 COMMIT;

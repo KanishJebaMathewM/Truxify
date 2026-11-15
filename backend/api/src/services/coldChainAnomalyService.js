@@ -6,6 +6,14 @@ import { measureExecution } from '../core/performanceMetrics.js';
 // Standard activation energy constant for spoilage degradation kinetics (deltaH / R in Kelvin)
 const DELTA_H_OVER_R = 10000;
 const SLIDING_WINDOW_MAX_ENTRIES = 120; // 2 hours of 1-minute samples
+// One Redis execution orders each ingest and its snapshot against concurrent callers.
+// RPUSH runs first so WRONGTYPE aborts before expiry or other writes can occur.
+const APPEND_WINDOW_SCRIPT = `
+  redis.call('RPUSH', KEYS[1], unpack(ARGV, 3))
+  redis.call('LTRIM', KEYS[1], -tonumber(ARGV[1]), -1)
+  redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
+  return redis.call('LRANGE', KEYS[1], 0, -1)
+`;
 const MAX_CONSECUTIVE_BREACH_SAMPLES = 5; // 5 consecutive out-of-range samples triggers immediate breach
 const ESCROW_HOLD_TTL_SECONDS = 86400 * 3; // 3 days hold
 
@@ -77,15 +85,11 @@ class ColdChainAnomalyService {
       // 1. Maintain sliding window in Redis (or local memory)
       if (redisClient) {
         try {
-          const pipeline = redisClient.pipeline();
-          for (const t of validReadings) {
-            pipeline.rpush(windowKey, JSON.stringify({ t, timestamp: Date.now() }));
-          }
-          pipeline.ltrim(windowKey, -SLIDING_WINDOW_MAX_ENTRIES, -1);
-          pipeline.expire(windowKey, 86400); // 24h retention
-          pipeline.lrange(windowKey, 0, -1);
-          const results = await pipeline.exec();
-          const rawEntries = results[results.length - 1]?.[1] || [];
+          const entries = validReadings.slice(-SLIDING_WINDOW_MAX_ENTRIES)
+            .map((t) => JSON.stringify({ t, timestamp: Date.now() }));
+          const rawEntries = await redisClient.eval(
+            APPEND_WINDOW_SCRIPT, 1, windowKey, SLIDING_WINDOW_MAX_ENTRIES, 86400, ...entries
+          );
           windowTemperatures = rawEntries
             .map((e) => {
               try {

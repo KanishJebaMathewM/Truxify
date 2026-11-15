@@ -1,14 +1,19 @@
 import logging
-import math
 import random
 from datetime import datetime, timezone
 from typing import Any
 
-import pandas as pd
 from app.models.base import get_active_generation
 from app.models.demand_forecast import MODEL_NAME as DEMAND_MODEL_NAME
 from app.models.demand_forecast import reset_model_cache
 from services.ab_experiment_ledger import ExperimentLedger
+from services.ab_metric_comparison import (
+    admit_threshold,
+    eligible_pairs,
+    improvement,
+    shadow_better,
+    summarize,
+)
 from sqlalchemy import (
     Column,
     DateTime,
@@ -45,6 +50,7 @@ class ABTestModel:
     """A/B Testing with shadow deployment and auto-rollback"""
 
     def __init__(self, db_url: str, threshold: float = 0.95):
+        threshold = admit_threshold(threshold)
         self.engine = create_engine(db_url)
         Base.metadata.create_all(self.engine)
         if "status" not in {
@@ -111,22 +117,10 @@ class ABTestModel:
                 test_id, self.ledger.snapshot(state) if state else None, metrics)
 
     def _evaluate_snapshot(self, test_id, test_state, metrics):
-        df = pd.DataFrame(
-            [
-                {
-                    "model_version": m.model_version,
-                    "metric_name": m.metric_name,
-                    "metric_value": m.metric_value,
-                }
-                for m in metrics
-            ]
-        )
-
-        if df.empty:
+        if not metrics:
             return {"error": "No metrics found"}
 
-        results = {}
-        logged_versions = df["model_version"].unique()
+        logged_versions = {m.model_version for m in metrics}
         if not test_state or not test_state.get("production_version"):
             return {
                 "test_id": test_id,
@@ -144,54 +138,10 @@ class ABTestModel:
         if prod_version not in logged_versions and "production" in logged_versions:
             prod_version = "production"
 
-        for metric in df["metric_name"].unique():
-            metric_df = df[df["metric_name"] == metric]
-            avg_metrics = metric_df.groupby("model_version")["metric_value"].mean()
-
-            prod_val = avg_metrics.get(prod_version, None)
-            shadow_val = avg_metrics.get(shadow_version, None)
-
-            lower_is_better_keywords = {
-                "rmse",
-                "mae",
-                "mse",
-                "loss",
-                "error_rate",
-                "latency",
-                "error",
-            }
-            higher_is_better = not any(
-                k in metric.lower() for k in lower_is_better_keywords
-            )
-
-            results[metric] = {
-                "production": prod_val,
-                "shadow": shadow_val,
-                "improvement": self.calculate_improvement(
-                    prod_val if prod_val is not None else 0.0,
-                    shadow_val if shadow_val is not None else 0.0,
-                    higher_is_better=higher_is_better,
-                ),
-            }
-
-        comparable_metrics = [
-            values
-            for values in results.values()
-            if values.get("production") is not None
-            and values.get("shadow") is not None
-            and pd.notna(values.get("production"))
-            and pd.notna(values.get("shadow"))
-            and math.isfinite(values.get("production"))
-            and math.isfinite(values.get("shadow"))
-        ]
-
+        results, invalid_names = summarize(metrics, prod_version, shadow_version)
+        comparable_metrics = list(eligible_pairs(results))
         if not comparable_metrics:
-            has_shadow_data = any(
-                values.get("shadow") is not None
-                and pd.notna(values.get("shadow"))
-                and math.isfinite(values.get("shadow"))
-                for values in results.values()
-            )
+            has_shadow_data = any(values['shadow'] is not None for values in results.values())
             if has_shadow_data:
                 # Shadow metrics exist but none are comparable to production —
                 # report a non-comparable evaluation rather than an error so
@@ -199,6 +149,7 @@ class ABTestModel:
                 return {
                     "test_id": test_id,
                     "results": results,
+                    **({"invalid_metric_rows": invalid_names} if invalid_names else {}),
                     "shadow_better": False,
                     "should_rollback": False,
                     "has_comparison": False,
@@ -209,6 +160,7 @@ class ABTestModel:
             return {
                 "test_id": test_id,
                 "results": results,
+                **({"invalid_metric_rows": invalid_names} if invalid_names else {}),
                 "shadow_better": False,
                 "should_rollback": False,
                 "error": "Insufficient metrics for production vs shadow comparison",
@@ -224,6 +176,7 @@ class ABTestModel:
         return {
             "test_id": test_id,
             "results": results,
+            **({"invalid_metric_rows": invalid_names} if invalid_names else {}),
             "shadow_better": is_better,
             "should_rollback": has_comparison and not is_better,
             "has_comparison": has_comparison,
@@ -234,56 +187,13 @@ class ABTestModel:
 
     def calculate_improvement(
         self, prod_value: float, shadow_value: float, higher_is_better: bool = True
-    ) -> float:
-        """Calculate percentage improvement taking metric direction into account."""
-        if prod_value == 0:
-            if shadow_value == 0:
-                return 0.0
-            diff = shadow_value - prod_value
-            pct = diff * 100.0
-            return pct if higher_is_better else -pct
-
-        diff = shadow_value - prod_value
-        pct = (diff / abs(prod_value)) * 100.0
-        return pct if higher_is_better else -pct
+    ) -> float | None:
+        """Finite display, or None when a valid exact change exceeds binary64."""
+        return improvement(prod_value, shadow_value, higher_is_better)
 
     def is_shadow_better(self, results: dict) -> bool:
-        """Determine if shadow model outperforms production based on metric direction and threshold."""
-        better_count = 0
-        total_metrics = 0
-        lower_is_better_keywords = {
-            "rmse",
-            "mae",
-            "mse",
-            "loss",
-            "error_rate",
-            "latency",
-            "error",
-        }
-
-        for metric, values in results.items():
-            prod = values.get("production")
-            shadow = values.get("shadow")
-            if (
-                prod is None
-                or shadow is None
-                or not pd.notna(prod)
-                or not pd.notna(shadow)
-            ):
-                continue
-
-            total_metrics += 1
-            metric_lower = metric.lower()
-            is_lower_better = any(k in metric_lower for k in lower_is_better_keywords)
-
-            if is_lower_better:
-                if shadow < prod * self.threshold:
-                    better_count += 1
-            else:
-                if shadow > prod * self.threshold:
-                    better_count += 1
-
-        return better_count > (total_metrics / 2) if total_metrics > 0 else False
+        """Vote only complete finite pairs using the existing directional gates."""
+        return shadow_better(results, self.threshold)
 
     def get_active_test(self) -> dict | None:
         """Only durable, active, paired experiments are eligible for routing."""

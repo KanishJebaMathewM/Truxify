@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from itertools import pairwise
 from typing import Dict, List
 
-from utils.osrm_client import get_route_matrix_with_duration
+from utils.osrm_client import MAX_TABLE_LOCATIONS, get_route_matrix_with_duration
 
 logger = logging.getLogger(__name__)
 
@@ -313,6 +313,21 @@ def _best_route_insertion_with_matrix(
     )
 
 
+def _iter_candidate_road_batches(current, remaining_route_points, candidate_loads):
+    """Stream bounded tables; candidate pairs share only the full baseline."""
+    batch_size = (MAX_TABLE_LOCATIONS - 1 - len(remaining_route_points)) // 2
+    if batch_size < 1:
+        raise ValueError("Remaining route cannot fit one candidate in the OSRM table")
+    for start in range(0, len(candidate_loads), batch_size):
+        batch = candidate_loads[start:start + batch_size]
+        pickups = [(load.get("pickup_lat", 0.0), load.get("pickup_lng", 0.0)) for load in batch]
+        dropoffs = [(load.get("dropoff_lat", 0.0), load.get("dropoff_lng", 0.0)) for load in batch]
+        locations = [current, *remaining_route_points, *pickups, *dropoffs]
+        matrices = get_route_matrix_with_duration(locations)
+        yield batch, pickups, dropoffs, matrices
+        del matrices
+
+
 def find_mid_trip_loads(
     current_location: Dict,
     remaining_route: List[Dict],
@@ -353,122 +368,117 @@ def find_mid_trip_loads(
         if not math.isfinite(payment) or payment <= 0.0:
             continue
 
-        candidate_loads.append(load)
+        candidate_loads.append(dict(load))
 
     if not candidate_loads:
         return {"recommendations": []}
 
-    pickup_locations = [
-        (load.get("pickup_lat", 0.0), load.get("pickup_lng", 0.0))
-        for load in candidate_loads
-    ]
-    dropoff_locations = [
-        (load.get("dropoff_lat", 0.0), load.get("dropoff_lng", 0.0))
-        for load in candidate_loads
-    ]
-
-    locations = [
-        (cur_lat, cur_lng),
-        *remaining_route_points,
-        *pickup_locations,
-        *dropoff_locations,
-    ]
-    distance_matrix, duration_matrix = get_route_matrix_with_duration(locations)
-
     remaining_route_indices = list(range(1, len(remaining_route_points) + 1))
     base_route_indices = [0] + remaining_route_indices
     pickup_offset = 1 + len(remaining_route_points)
-    dropoff_offset = pickup_offset + len(candidate_loads)
-
-    now = datetime.now(timezone.utc)
+    now = None
     recommendations = []
+    for batch, pickup_locations, dropoff_locations, matrices in _iter_candidate_road_batches(
+        (cur_lat, cur_lng), remaining_route_points, candidate_loads,
+    ):
+        distance_matrix, duration_matrix = matrices
+        dropoff_offset = pickup_offset + len(batch)
+        if now is None:
+            # Preserve one evaluation clock, captured after the first road observation.
+            now = datetime.now(timezone.utc)
+        insertion_options = None
+        for load_index, load in enumerate(batch):
+            try:
+                pickup_lat, pickup_lng = pickup_locations[load_index]
+                dropoff_lat, dropoff_lng = dropoff_locations[load_index]
+                pickup_idx = pickup_offset + load_index
+                dropoff_idx = dropoff_offset + load_index
 
-    for load_index, load in enumerate(candidate_loads):
-        try:
-            pickup_lat, pickup_lng = pickup_locations[load_index]
-            dropoff_lat, dropoff_lng = dropoff_locations[load_index]
-            pickup_idx = pickup_offset + load_index
-            dropoff_idx = dropoff_offset + load_index
+                insertion_options = _iter_route_insertion_options_with_matrix(
+                    base_route_indices,
+                    pickup_idx,
+                    dropoff_idx,
+                    distance_matrix,
+                    duration_matrix,
+                )
 
-            insertion_options = _iter_route_insertion_options_with_matrix(
-                base_route_indices,
-                pickup_idx,
-                dropoff_idx,
-                distance_matrix,
-                duration_matrix,
-            )
+                deadline_dt = datetime.fromisoformat(load.get("pickup_deadline", ""))
+                if deadline_dt.tzinfo is None:
+                    deadline_dt = deadline_dt.replace(tzinfo=timezone.utc)
+                else:
+                    deadline_dt = deadline_dt.astimezone(timezone.utc)
 
-            deadline_dt = datetime.fromisoformat(load.get("pickup_deadline", ""))
-            if deadline_dt.tzinfo is None:
-                deadline_dt = deadline_dt.replace(tzinfo=timezone.utc)
-            else:
-                deadline_dt = deadline_dt.astimezone(timezone.utc)
+                # Lazily track (a) the best insertion whose own arrival meets the
+                # deadline and (b) the append-at-end option, whose arrival gates
+                # overall feasibility: a pickup that only fits by jumping ahead of
+                # queued stops is not allowed. No list materialization (streaming).
+                best_option = None
+                estimated_pickup_time = None
+                append_option = None
+                for option in insertion_options:
+                    append_option = option
+                    if not all(math.isfinite(value) for value in option):
+                        continue  # Preserve complete-route reachability from main.
+                    candidate_pickup_time = now + timedelta(minutes=option[3])
+                    if candidate_pickup_time <= deadline_dt and (
+                        best_option is None or option < best_option
+                    ):
+                        best_option = option
+                        estimated_pickup_time = candidate_pickup_time
 
-            # Lazily track (a) the best insertion whose own arrival meets the
-            # deadline and (b) the append-at-end option, whose arrival gates
-            # overall feasibility: a pickup that only fits by jumping ahead of
-            # queued stops is not allowed. No list materialization (streaming).
-            best_option = None
-            estimated_pickup_time = None
-            append_option = None
-            for option in insertion_options:
-                append_option = option
-                if not all(math.isfinite(value) for value in option):
-                    continue  # Every complete candidate route must be reachable.
-                candidate_pickup_time = now + timedelta(minutes=option[3])
-                if candidate_pickup_time <= deadline_dt and (
-                    best_option is None or option < best_option
-                ):
-                    best_option = option
-                    estimated_pickup_time = candidate_pickup_time
+                if append_option is None or best_option is None:
+                    continue
+                if not math.isfinite(append_option[3]):
+                    continue
+                if now + timedelta(minutes=append_option[3]) > deadline_dt:
+                    continue
 
-            if append_option is None or best_option is None:
+                detour_km, detour_minutes, pickup_route_distance, pickup_route_minutes = best_option
+
+                dist_cur_pickup = distance_matrix[0][pickup_idx]
+                payment = float(load.get("payment_inr", 0.0))
+                if detour_km > 0:
+                    earnings_per_km = payment / detour_km
+                else:
+                    earnings_per_km = payment
+                earnings_score = min(earnings_per_km / 50.0, 1.0) * 40.0
+
+                max_proximity_km = 100.0
+                proximity_score = max(
+                    0.0, 1.0 - dist_cur_pickup / max_proximity_km
+                ) * 30.0
+
+                time_buffer_hours = (
+                    deadline_dt - estimated_pickup_time
+                ).total_seconds() / 3600.0
+                time_score = min(time_buffer_hours / 6.0, 1.0) * 30.0
+                priority_score = earnings_score + proximity_score + time_score
+
+                recommendations.append(
+                    {
+                        "load_id": load.get("load_id", ""),
+                        "detour_km": round(detour_km, 2),
+                        "detour_minutes": round(detour_minutes, 2),
+                        "additional_earnings": round(payment, 2),
+                        "priority_score": round(priority_score, 2),
+                        "pickup_location": {"lat": pickup_lat, "lng": pickup_lng},
+                        "dropoff_location": {"lat": dropoff_lat, "lng": dropoff_lng},
+                    }
+                )
+
+            except (ValueError, TypeError, KeyError):
                 continue
-            if not math.isfinite(append_option[3]):
+            except Exception as e:
+                logger.warning(
+                    "Error scoring load '%s': %s", load.get("load_id", "unknown"), e
+                )
                 continue
-            if now + timedelta(minutes=append_option[3]) > deadline_dt:
-                continue
 
-            detour_km, detour_minutes, pickup_route_distance, pickup_route_minutes = best_option
-
-            dist_cur_pickup = distance_matrix[0][pickup_idx]
-            payment = float(load.get("payment_inr", 0.0))
-            if detour_km > 0:
-                earnings_per_km = payment / detour_km
-            else:
-                earnings_per_km = payment
-            earnings_score = min(earnings_per_km / 50.0, 1.0) * 40.0
-
-            max_proximity_km = 100.0
-            proximity_score = max(
-                0.0, 1.0 - dist_cur_pickup / max_proximity_km
-            ) * 30.0
-
-            time_buffer_hours = (
-                deadline_dt - estimated_pickup_time
-            ).total_seconds() / 3600.0
-            time_score = min(time_buffer_hours / 6.0, 1.0) * 30.0
-            priority_score = earnings_score + proximity_score + time_score
-
-            recommendations.append(
-                {
-                    "load_id": load.get("load_id", ""),
-                    "detour_km": round(detour_km, 2),
-                    "detour_minutes": round(detour_minutes, 2),
-                    "additional_earnings": round(payment, 2),
-                    "priority_score": round(priority_score, 2),
-                    "pickup_location": {"lat": pickup_lat, "lng": pickup_lng},
-                    "dropoff_location": {"lat": dropoff_lat, "lng": dropoff_lng},
-                }
-            )
-
-        except (ValueError, TypeError, KeyError):
-            continue
-        except Exception as e:
-            logger.warning(
-                "Error scoring load '%s': %s", load.get("load_id", "unknown"), e
-            )
-            continue
+        # Stable sorting retains earlier candidate identities at tied scores.
+        # No road matrices or unbounded global recommendation list are retained.
+        recommendations.sort(key=lambda item: item["priority_score"], reverse=True)
+        del recommendations[5:]
+        del distance_matrix, duration_matrix, matrices, insertion_options
 
     recommendations.sort(key=lambda x: x["priority_score"], reverse=True)
     return {"recommendations": recommendations[:5]}

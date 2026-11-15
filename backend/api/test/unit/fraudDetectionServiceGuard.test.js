@@ -1,5 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createSupabaseMock, MockQueryBuilder } from '../helpers/supabaseQueryMock.js';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 
 const { dbMock } = vi.hoisted(() => ({
   dbMock: { supabaseAdmin: { from: vi.fn() } },
@@ -20,14 +19,7 @@ import FraudDetectionService from '../../src/services/fraud/FraudDetectionServic
 describe('FraudDetectionService stats', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    dbMock.supabaseAdmin = { from: vi.fn() } ;
-    const mockClient = createSupabaseMock({
-      tables: {
-       fraud_stats: Array.from({length: 50}, (_, idx) => ({ id: 'id-' + idx, risk_score: idx * 2, severity: idx > 30 ? 'high' : 'low' })),
-       users: [{ id: 'user-1', risk_score: 10 }]
-      }
-    });
-    dbMock.supabaseAdmin = mockClient;
+    dbMock.supabaseAdmin = { rpc: vi.fn().mockResolvedValue({ data: { total: 0, highRisk: 0, mediumRisk: 0, lowRisk: 0, avgScore: 0 }, error: null }) };
   });
 
   describe('getFraudStats', () => {
@@ -38,15 +30,7 @@ describe('FraudDetectionService stats', () => {
     });
 
     it('buckets scores into risk bands', async () => {
-      dbMock.supabaseAdmin.from = vi.fn(() => ({
-        select: vi.fn(() => ({
-          order: vi.fn(() => ({
-            range: vi.fn().mockResolvedValue({ data: [
-              { risk_score: 0.9 }, { risk_score: 0.5 }, { risk_score: 0.2 },
-            ] }),
-          })),
-        })),
-      }));
+      dbMock.supabaseAdmin.rpc.mockResolvedValue({ data: { total: 3, highRisk: 1, mediumRisk: 1, lowRisk: 1, avgScore: (0.9 + 0.5 + 0.2) / 3 }, error: null });
       const stats = await FraudDetectionService.getFraudStats();
       expect(stats.total).toBe(3);
       expect(stats.highRisk).toBe(1);
@@ -55,32 +39,26 @@ describe('FraudDetectionService stats', () => {
       expect(stats.avgScore).toBeCloseTo(0.533, 1);
     });
 
-    it('caps the query at 1000 rows', async () => {
-      const range = vi.fn().mockResolvedValue({ data: [] });
-      dbMock.supabaseAdmin.from = vi.fn(() => ({
-        select: vi.fn(() => ({ order: vi.fn(() => ({ range })) })),
-      }));
+    it('loads complete totals through one aggregate RPC', async () => {
       await FraudDetectionService.getFraudStats();
-      expect(range).toHaveBeenCalledWith(0, 999);
+      expect(dbMock.supabaseAdmin.rpc).toHaveBeenCalledTimes(1);
+      expect(dbMock.supabaseAdmin.rpc).toHaveBeenCalledWith('get_fraud_stats_aggregate');
     });
 
     it('handles a null scores payload', async () => {
-      dbMock.supabaseAdmin.from = vi.fn(() => ({
-        select: vi.fn(() => ({
-          order: vi.fn(() => ({
-            range: vi.fn().mockResolvedValue({ data: null }),
-          })),
-        })),
-      }));
+      dbMock.supabaseAdmin.rpc.mockResolvedValue({ data: null, error: null });
       const stats = await FraudDetectionService.getFraudStats();
       expect(stats.total).toBe(0);
     });
 
-    it('regression #10103: getFraudStats must not throw when .range() is called', async () => {
-      // The default export is a singleton instance, not a constructible class.
-      const service = FraudDetectionService;
-      // This previously threw: TypeError: ...range is not a function
-      await expect(service.getFraudStats()).resolves.not.toThrow();
+    it('completes without a row-pagination query builder', async () => {
+      await expect(FraudDetectionService.getFraudStats()).resolves.toEqual({ total: 0, highRisk: 0, mediumRisk: 0, lowRisk: 0, avgScore: 0 });
     });
+
   });
+});
+
+afterAll(() => {
+  FraudDetectionService.destroy();
+  clearInterval(FraudDetectionService._flushInterval);
 });

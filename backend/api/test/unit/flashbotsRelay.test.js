@@ -139,6 +139,8 @@ describe('FlashbotsRelay service', () => {
       dbMock.supabaseAdmin.from.mockReturnValue({ insert: insertMock });
 
       global.fetch.mockResolvedValue({
+        ok: true,
+        status: 200,
         json: vi.fn().mockResolvedValue({ result: '0xbundlehash999' }),
       });
 
@@ -165,6 +167,8 @@ describe('FlashbotsRelay service', () => {
 
     it('throws and does not persist or emit event when relay returns error', async () => {
       global.fetch.mockResolvedValue({
+        ok: true,
+        status: 200,
         json: vi.fn().mockResolvedValue({ error: { message: 'Bundle simulated with error' } }),
       });
 
@@ -174,6 +178,44 @@ describe('FlashbotsRelay service', () => {
       };
 
       await expect(relay.sendPrivateBundle(bundle)).rejects.toThrow(/Flashbots relay rejected bundle/);
+      expect(relay.bundleResults).toHaveLength(0);
+      expect(dbMock.supabaseAdmin.from).not.toHaveBeenCalled();
+      expect(eventBusMock.emitSafe).not.toHaveBeenCalled();
+    });
+
+    it('aborts a stalled relay request and fails closed after the configured timeout', async () => {
+      relay = new FlashbotsRelay('https://polygon-rpc.com', '0x' + '1'.repeat(64), {
+        flashbotsRelayUrl: 'https://relay.example.com',
+        timeoutMs: 25,
+      });
+      const timeoutError = new Error('The operation was aborted due to timeout');
+      timeoutError.name = 'TimeoutError';
+      global.fetch.mockRejectedValue(timeoutError);
+
+      await expect(
+        relay.sendPrivateBundle({ signedBundle: ['0xtx1'], targetBlock: 100 })
+      ).rejects.toThrow(/timed out after 25ms/);
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://relay.example.com',
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
+      expect(relay.bundleResults).toHaveLength(0);
+      expect(dbMock.supabaseAdmin.from).not.toHaveBeenCalled();
+      expect(eventBusMock.emitSafe).not.toHaveBeenCalled();
+    });
+
+    it('throws the HTTP status for a non-2xx relay response', async () => {
+      global.fetch.mockResolvedValue({
+        ok: false,
+        status: 503,
+        text: vi.fn().mockResolvedValue('relay unavailable'),
+      });
+
+      await expect(
+        relay.sendPrivateBundle({ signedBundle: ['0xtx1'], targetBlock: 100 })
+      ).rejects.toThrow(/HTTP 503: relay unavailable/);
+
       expect(relay.bundleResults).toHaveLength(0);
       expect(dbMock.supabaseAdmin.from).not.toHaveBeenCalled();
       expect(eventBusMock.emitSafe).not.toHaveBeenCalled();

@@ -1,12 +1,35 @@
 import logger from '../middleware/logger.js';
 import { randomUUID } from 'node:crypto';
 
+export const MAX_RETAINED_LOADING_PLANS = 500;
+export const LOADING_PLAN_TTL_MS = 60 * 60 * 1000;
+
 /**
  * Service for AR-guided container loading optimization and axle weight balancing.
  */
 class ARLoadingOptimizerService {
   constructor() {
     this.loadingPlans = new Map();
+  }
+
+  pruneExpiredPlans(now = Date.now()) {
+    let removed = 0;
+    for (const [planId, plan] of this.loadingPlans) {
+      const createdAt = Date.parse(plan.createdAt);
+      if (!Number.isFinite(createdAt) || now - createdAt > LOADING_PLAN_TTL_MS) {
+        this.loadingPlans.delete(planId);
+        removed += 1;
+      }
+    }
+    return removed;
+  }
+
+  clearLoadingPlans() {
+    this.loadingPlans.clear();
+  }
+
+  getLoadingPlanCount() {
+    return this.loadingPlans.size;
   }
 
   /**
@@ -122,6 +145,13 @@ class ARLoadingOptimizerService {
       createdAt: new Date().toISOString()
     };
 
+    this.pruneExpiredPlans();
+    if (this.loadingPlans.size >= MAX_RETAINED_LOADING_PLANS) {
+      const error = new Error('AR loading plan capacity reached; try again later');
+      error.statusCode = 429;
+      throw error;
+    }
+
     this.loadingPlans.set(planId, plan);
     logger.info(`[ARLoadingOptimizerService] Generated AR loading plan ${planId} for ${pallets.length} pallets`);
 
@@ -132,6 +162,7 @@ class ARLoadingOptimizerService {
    * Retrieves an AR loading plan by ID
    */
   async getLoadingPlan(planId, ownerId) {
+    this.pruneExpiredPlans();
     const plan = this.loadingPlans.get(planId);
     if (!plan || (ownerId && plan.ownerId && plan.ownerId !== ownerId)) {
       return null;

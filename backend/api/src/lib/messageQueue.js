@@ -10,6 +10,18 @@ const QUEUE_PREFIX = 'chat:offline_queue:';
 const MAX_QUEUE_SIZE = 500; // Max messages to queue per user
 const QUEUE_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
 
+// Read-and-delete must be one Redis operation. LRANGE followed by DEL lets two
+// reconnecting sockets read the same backlog before either delete runs, so both
+// clients receive every message. It can also delete messages appended between
+// the read and the delete. The Lua script runs atomically on the server.
+const DRAIN_QUEUE_SCRIPT = `
+local messages = redis.call('LRANGE', KEYS[1], 0, -1)
+if #messages > 0 then
+  redis.call('DEL', KEYS[1])
+end
+return messages
+`;
+
 /**
  * Enqueues a message for an offline user.
  * @param {string} userId - The recipient's user ID.
@@ -50,22 +62,19 @@ export async function drainOfflineQueue(userId) {
     const key = `${QUEUE_PREFIX}${userId}`;
 
     try {
-        // Atomic get-and-delete using LRANGE + DEL in a pipeline
-        // Or just LPOP in a loop. LRANGE then DEL is safer for bulk.
-        const messages = await redisClient.lrange(key, 0, -1);
+        const messages = await redisClient.eval(DRAIN_QUEUE_SCRIPT, 1, key);
 
-        if (messages && messages.length > 0) {
-            await redisClient.del(key);
-            return messages.map(m => {
-                try {
-                    return JSON.parse(m);
-                } catch {
-                    return null;
-                }
-            }).filter(Boolean);
+        if (!Array.isArray(messages) || messages.length === 0) {
+            return [];
         }
 
-        return [];
+        return messages.map(m => {
+            try {
+                return JSON.parse(m);
+            } catch {
+                return null;
+            }
+        }).filter(Boolean);
     } catch (err) {
         logger.error({ err, userId }, 'Failed to drain offline chat queue');
         return [];

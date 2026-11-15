@@ -615,6 +615,24 @@ router.post(
         return res.status(400).json({ error: 'Missing required fields: order_id and target_milestone' });
       }
 
+      let milestoneOrder = null;
+      try {
+        if (orderValidationService && typeof orderValidationService.findOrderByIdOrDisplayId === 'function') {
+          milestoneOrder = await orderValidationService.findOrderByIdOrDisplayId(order_id);
+        }
+      } catch (err) {
+        logger.error({ err, requestId: req.requestId }, '[Escrow] Milestone order lookup failed');
+        return res.status(500).json({ error: 'Failed to fetch order.' });
+      }
+
+      if (!milestoneOrder) {
+        return res.status(404).json({ error: 'Order not found.' });
+      }
+
+      if (![milestoneOrder.customer_id, milestoneOrder.driver_id].filter(Boolean).includes(req.user.id) && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Access Denied: You are not a participant of this order.' });
+      }
+
       const result = await processMilestoneTransition({
         orderId: order_id,
         bookingId: booking_id,
@@ -651,6 +669,24 @@ router.post(
 
       if (!order_id) {
         return res.status(400).json({ error: 'Missing required field: order_id' });
+      }
+
+      let clawbackOrder = null;
+      try {
+        if (orderValidationService && typeof orderValidationService.findOrderByIdOrDisplayId === 'function') {
+          clawbackOrder = await orderValidationService.findOrderByIdOrDisplayId(order_id);
+        }
+      } catch (err) {
+        logger.error({ err, requestId: req.requestId }, '[Escrow] Clawback order lookup failed');
+        return res.status(500).json({ error: 'Failed to fetch order.' });
+      }
+
+      if (!clawbackOrder) {
+        return res.status(404).json({ error: 'Order not found.' });
+      }
+
+      if (![clawbackOrder.customer_id, clawbackOrder.driver_id].filter(Boolean).includes(req.user.id) && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Access Denied: You are not a participant of this order.' });
       }
 
       const result = await executeEscrowTimeoutClawback({

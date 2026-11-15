@@ -1,3 +1,69 @@
+
+// backend/api/test/unit/weighStationService.test.js
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { checkBypassEligibility } from '../../src/services/weighStationService.js';
+
+describe('Weigh Station Service - checkBypassEligibility (#5492)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should grant BYPASS for compliant drivers with valid credentials', async () => {
+    const mockDriverData = {
+      driverId: 'driver_123',
+      safetyScore: 95,
+      hasPreClearance: true,
+      weightKg: 18000,
+      maxAllowedWeightKg: 20000,
+    };
+
+    const result = await checkBypassEligibility(mockDriverData, 'STATION_IND_01');
+
+    expect(result).toBeDefined();
+    expect(result.action).toBe('BYPASS');
+    expect(result.stationId).toBe('STATION_IND_01');
+    expect(typeof result.timestamp).toBe('string');
+    expect(new Date(result.timestamp).getTime()).not.toBeNaN();
+  });
+
+  it('should enforce PULL_IN for non-compliant or overweight vehicles', async () => {
+    const mockDriverData = {
+      driverId: 'driver_456',
+      safetyScore: 60,
+      hasPreClearance: false,
+      weightKg: 22000,
+      maxAllowedWeightKg: 20000,
+    };
+
+    const result = await checkBypassEligibility(mockDriverData, 'STATION_IND_02');
+
+    expect(result).toBeDefined();
+    expect(result.action).toBe('PULL_IN');
+    expect(result.stationId).toBe('STATION_IND_02');
+    expect(typeof result.timestamp).toBe('string');
+  });
+
+  it('should correctly format stationId and include valid ISO timestamp on all responses', async () => {
+    const mockDriverData = {
+      driverId: 'driver_789',
+      safetyScore: 80,
+      hasPreClearance: true,
+      weightKg: 15000,
+      maxAllowedWeightKg: 20000,
+    };
+
+    const result = await checkBypassEligibility(mockDriverData, 'TN_CHENNAI_WS_01');
+
+    expect(result.stationId).toMatch(/^TN_CHENNAI_WS_\d+$/);
+    expect(result.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  });
+});
+import { describe, it, expect, vi } from 'vitest';
+import {
+  checkBypassEligibility,
+  syncAndTransmitInternalWeights,
+} from '../../src/services/weighStationService.js';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Fix mock path to correctly intercept src/middleware/logger.js

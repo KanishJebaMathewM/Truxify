@@ -68,16 +68,13 @@ class AppLocalizationsKn extends AppLocalizations {
   }
 
   @override
-  String get phoneMustBeDigits =>
-      'ಫೋನ್ ಸಂಖ್ಯೆಯು ಕೇವಲ ಅಂಕಿಗಳನ್ನು ಮಾತ್ರ ಹೊಂದಿರಬೇಕು';
+  String get phoneMustBeDigits => 'ಫೋನ್ ಸಂಖ್ಯೆಯು ಕೇವಲ ಅಂಕಿಗಳನ್ನು ಮಾತ್ರ ಹೊಂದಿರಬೇಕು';
 
   @override
-  String get autoVerificationFailed =>
-      'ಸ್ವಯಂ-ಪರಿಶೀಲನೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು OTP ಅನ್ನು ಹಸ್ತಚಾಲಿತವಾಗಿ ನಮೂದಿಸಿ.';
+  String get autoVerificationFailed => 'ಸ್ವಯಂ-ಪರಿಶೀಲನೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು OTP ಅನ್ನು ಹಸ್ತಚಾಲಿತವಾಗಿ ನಮೂದಿಸಿ.';
 
   @override
-  String get protectedDriverAccess =>
-      'ಈ ಪ್ರದೇಶವು ನೋಂದಾಯಿತ ಚಾಲಕರಿಗೆ ಮಾತ್ರ ಸೀಮಿತವಾಗಿದೆ.';
+  String get protectedDriverAccess => 'ಈ ಪ್ರದೇಶವು ನೋಂದಾಯಿತ ಚಾಲಕರಿಗೆ ಮಾತ್ರ ಸೀಮಿತವಾಗಿದೆ.';
 
   @override
   String get verifyOtp => 'OTP ಪರಿಶೀಲಿಸಿ';
@@ -97,12 +94,10 @@ class AppLocalizationsKn extends AppLocalizations {
   String get codeExpired => 'OTP ಅವಧಿ ಮುಗಿದಿದೆ. ದಯವಿಟ್ಟು ಹೊಸದನ್ನು ವಿನಂತಿಸಿ.';
 
   @override
-  String get verificationFailedMsg =>
-      'ಪರಿಶೀಲನೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
+  String get verificationFailedMsg => 'ಪರಿಶೀಲನೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
 
   @override
-  String get couldNotVerifyOtp =>
-      'OTP ಪರಿಶೀಲಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
+  String get couldNotVerifyOtp => 'OTP ಪರಿಶೀಲಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
 
   @override
   String get verifying => 'ಪರಿಶೀಲಿಸಲಾಗುತ್ತಿದೆ...';
@@ -120,8 +115,7 @@ class AppLocalizationsKn extends AppLocalizations {
   String get profile => 'ಪ್ರೊಫೈಲ್';
 
   @override
-  String get offlineUsingCachedData =>
-      'ನೀವು ಆಫ್‌ಲೈನ್‌ನಲ್ಲಿದ್ದೀರಿ. ಕ್ಯಾಶ್ ಮಾಡಿದ ಡೇಟಾವನ್ನು ಬಳಸುತ್ತಿದೆ.';
+  String get offlineUsingCachedData => 'ನೀವು ಆಫ್‌ಲೈನ್‌ನಲ್ಲಿದ್ದೀರಿ. ಕ್ಯಾಶ್ ಮಾಡಿದ ಡೇಟಾವನ್ನು ಬಳಸುತ್ತಿದೆ.';
 
   @override
   String get newLoadAvailable => 'ಹೊಸ ಲೋಡ್ ಲಭ್ಯವಿದೆ!';
@@ -162,16 +156,13 @@ class AppLocalizationsKn extends AppLocalizations {
   String get offline => 'ಆಫ್‌ಲೈನ್';
 
   @override
-  String get offlineGoOnline =>
-      'ನೀವು ಆಫ್‌ಲೈನ್‌ನಲ್ಲಿದ್ದೀರಿ. ಲೋಡ್‌ಗಳನ್ನು ಸ್ವೀಕರಿಸಲು ಆನ್‌ಲೈನ್‌ಗೆ ಹೋಗಿ.';
+  String get offlineGoOnline => 'ನೀವು ಆಫ್‌ಲೈನ್‌ನಲ್ಲಿದ್ದೀರಿ. ಲೋಡ್‌ಗಳನ್ನು ಸ್ವೀಕರಿಸಲು ಆನ್‌ಲೈನ್‌ಗೆ ಹೋಗಿ.';
 
   @override
-  String get radarActiveFetching =>
-      'ರಾಡಾರ್ ಸಕ್ರಿಯ — ಹತ್ತಿರದ ಲೋಡ್‌ಗಳನ್ನು ಪಡೆಯಲಾಗುತ್ತಿದೆ...';
+  String get radarActiveFetching => 'ರಾಡಾರ್ ಸಕ್ರಿಯ — ಹತ್ತಿರದ ಲೋಡ್‌ಗಳನ್ನು ಪಡೆಯಲಾಗುತ್ತಿದೆ...';
 
   @override
-  String get radarActiveLooking =>
-      'ರಾಡಾರ್ ಸಕ್ರಿಯ — ನಿಮ್ಮ ಹತ್ತಿರ ಲೋಡ್‌ಗಳನ್ನು ಹುಡುಕಲಾಗುತ್ತಿದೆ.';
+  String get radarActiveLooking => 'ರಾಡಾರ್ ಸಕ್ರಿಯ — ನಿಮ್ಮ ಹತ್ತಿರ ಲೋಡ್‌ಗಳನ್ನು ಹುಡುಕಲಾಗುತ್ತಿದೆ.';
 
   @override
   String get todayPay => 'ಇಂದಿನ ವೇತನ';
@@ -239,8 +230,7 @@ class AppLocalizationsKn extends AppLocalizations {
   String get pleaseGoOnline => 'ದಯವಿಟ್ಟು ಮೊದಲು ಆನ್‌ಲೈನ್‌ಗೆ ಹೋಗಿ';
 
   @override
-  String get noDestinationAvailable2 =>
-      'ಯಾವುದೇ ಗಮ್ಯಸ್ಥಾನ ಲಭ್ಯವಿಲ್ಲ. ದಯವಿಟ್ಟು ಗಮ್ಯಸ್ಥಾನವನ್ನು ಹೊಂದಿಸಿ.';
+  String get noDestinationAvailable2 => 'ಯಾವುದೇ ಗಮ್ಯಸ್ಥಾನ ಲಭ್ಯವಿಲ್ಲ. ದಯವಿಟ್ಟು ಗಮ್ಯಸ್ಥಾನವನ್ನು ಹೊಂದಿಸಿ.';
 
   @override
   String get locationPermissionRequired => 'ಸ್ಥಳ ಅನುಮತಿ ಅಗತ್ಯವಿದೆ';
@@ -249,8 +239,7 @@ class AppLocalizationsKn extends AppLocalizations {
   String get locationAccessDenied => 'ಸ್ಥಳ ಪ್ರವೇಶ ನಿರಾಕರಿಸಲಾಗಿದೆ';
 
   @override
-  String get locationPermDenied =>
-      'ಸ್ಥಳ ಅನುಮತಿಯನ್ನು ಶಾಶ್ವತವಾಗಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ದಯವಿಟ್ಟು ಸೆಟ್ಟಿಂಗ್‌ಗಳಲ್ಲಿ ಸಕ್ರಿಯಗೊಳಿಸಿ.';
+  String get locationPermDenied => 'ಸ್ಥಳ ಅನುಮತಿಯನ್ನು ಶಾಶ್ವತವಾಗಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ದಯವಿಟ್ಟು ಸೆಟ್ಟಿಂಗ್‌ಗಳಲ್ಲಿ ಸಕ್ರಿಯಗೊಳಿಸಿ.';
 
   @override
   String get openSettings => 'ಸೆಟ್ಟಿಂಗ್‌ಗಳನ್ನು ತೆರೆಯಿರಿ';
@@ -304,15 +293,13 @@ class AppLocalizationsKn extends AppLocalizations {
   String get browseFAQs => 'FAQs ವೀಕ್ಷಿಸಿ';
 
   @override
-  String get instantAnswers =>
-      'ಸಾಮಾನ್ಯ ಪ್ರಶ್ನೆಗಳಿಗೆ ತಕ್ಷಣದ ಉತ್ತರಗಳನ್ನು ಪಡೆಯಿರಿ';
+  String get instantAnswers => 'ಸಾಮಾನ್ಯ ಪ್ರಶ್ನೆಗಳಿಗೆ ತಕ್ಷಣದ ಉತ್ತರಗಳನ್ನು ಪಡೆಯಿರಿ';
 
   @override
   String get aboutTruxifyDriverApp => 'Truxify ಚಾಲಕ ಅಪ್ಲಿಕೇಶನ್ ಬಗ್ಗೆ';
 
   @override
-  String get truxifyDescription =>
-      'Truxify ಒಂದು ಟ್ರಕ್ ಲಾಜಿಸ್ಟಿಕ್ಸ್ ಪ್ಲಾಟ್‌ಫಾರ್ಮ್ ಆಗಿದ್ದು, ಪೂರ್ವ ಆಫ್ರಿಕಾದಾದ್ಯಂತ ಚಾಲಕರನ್ನು ಲೋಡ್‌ಗಳೊಂದಿಗೆ ಸಂಪರ್ಕಿಸುತ್ತದೆ.';
+  String get truxifyDescription => 'Truxify ಒಂದು ಟ್ರಕ್ ಲಾಜಿಸ್ಟಿಕ್ಸ್ ಪ್ಲಾಟ್‌ಫಾರ್ಮ್ ಆಗಿದ್ದು, ಪೂರ್ವ ಆಫ್ರಿಕಾದಾದ್ಯಂತ ಚಾಲಕರನ್ನು ಲೋಡ್‌ಗಳೊಂದಿಗೆ ಸಂಪರ್ಕಿಸುತ್ತದೆ.';
 
   @override
   String get documents => 'ಡಾಕ್ಯುಮೆಂಟ್‌ಗಳು';
@@ -405,8 +392,7 @@ class AppLocalizationsKn extends AppLocalizations {
   String get deliveryStops => 'ಡೆಲಿವರಿ ಸ್ಟಾಪ್‌ಗಳು';
 
   @override
-  String get markCurrentStopCompleted =>
-      'ಪ್ರಸ್ತುತ ಸ್ಟಾಪ್ ಪೂರ್ಣಗೊಂಡಿದೆ ಎಂದು ಗುರುತಿಸಿ';
+  String get markCurrentStopCompleted => 'ಪ್ರಸ್ತುತ ಸ್ಟಾಪ್ ಪೂರ್ಣಗೊಂಡಿದೆ ಎಂದು ಗುರುತಿಸಿ';
 
   @override
   String get activeStatus => 'ಸಕ್ರಿಯ';
@@ -427,12 +413,10 @@ class AppLocalizationsKn extends AppLocalizations {
   String get marketplaceLoads => 'ಮಾರುಕಟ್ಟೆ ಲೋಡ್‌ಗಳು';
 
   @override
-  String get availableLoadsYouCanBidFor =>
-      'ನೀವು ಬಿಡ್ ಮಾಡಬಹುದಾದ ಲಭ್ಯವಿರುವ ಲೋಡ್‌ಗಳು';
+  String get availableLoadsYouCanBidFor => 'ನೀವು ಬಿಡ್ ಮಾಡಬಹುದಾದ ಲಭ್ಯವಿರುವ ಲೋಡ್‌ಗಳು';
 
   @override
-  String get couldNotLoadMarketplace =>
-      'ಮಾರುಕಟ್ಟೆಯನ್ನು ಲೋಡ್ ಮಾಡಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ';
+  String get couldNotLoadMarketplace => 'ಮಾರುಕಟ್ಟೆಯನ್ನು ಲೋಡ್ ಮಾಡಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ';
 
   @override
   String get pullToRefresh => 'ರಿಫ್ರೆಶ್ ಮಾಡಲು ಎಳೆಯಿರಿ';
@@ -465,12 +449,10 @@ class AppLocalizationsKn extends AppLocalizations {
   String get noRecommendations => 'ಯಾವುದೇ ಹಿಂತಿರುಗುವ ಲೋಡ್ ಶಿಫಾರಸುಗಳು ಲಭ್ಯವಿಲ್ಲ';
 
   @override
-  String get couldNotLoadRecommendations =>
-      'ಶಿಫಾರಸುಗಳನ್ನು ಲೋಡ್ ಮಾಡಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ';
+  String get couldNotLoadRecommendations => 'ಶಿಫಾರಸುಗಳನ್ನು ಲೋಡ್ ಮಾಡಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ';
 
   @override
-  String get noActiveTripForRecommendations =>
-      'ಹಿಂತಿರುಗುವ ಲೋಡ್ ಸೂಚನೆಗಳನ್ನು ನೋಡಲು ಪ್ರಯಾಣವನ್ನು ಪೂರ್ಣಗೊಳಿಸಿ';
+  String get noActiveTripForRecommendations => 'ಹಿಂತಿರುಗುವ ಲೋಡ್ ಸೂಚನೆಗಳನ್ನು ನೋಡಲು ಪ್ರಯಾಣವನ್ನು ಪೂರ್ಣಗೊಳಿಸಿ';
 
   @override
   String get detourDistance => 'ಡೀಟೂರ್';
@@ -546,7 +528,7 @@ class AppLocalizationsKn extends AppLocalizations {
 
   @override
   String resendOtpIn(int seconds) {
-    return 'Resend in ${seconds}s';
+    return 'Resend in $secondss';
   }
 
   @override

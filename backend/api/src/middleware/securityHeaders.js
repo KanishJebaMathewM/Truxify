@@ -79,8 +79,11 @@ export default function securityHeaders(req, res, next) {
 // === Spec 11: prevent HSTS header duplication ===
 export function setHstsHeader(res) {
   if (!res.getHeader || res.getHeader('Strict-Transport-Security')) return false;
+  // HSTS preload is a one-way commitment to the browser preload list. It must
+  // be opted into explicitly; an unset variable previously enabled it by
+  // default, which makes it impossible to roll back the header for a domain.
   const preload = process.env.SECURE_HSTS_PRELOAD;
-  const includePreload = !preload || preload === 'true' || preload === '1';
+  const includePreload = preload === 'true' || preload === '1';
   const header = includePreload
     ? 'max-age=63072000; includeSubDomains; preload'
     : 'max-age=63072000; includeSubDomains';

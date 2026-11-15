@@ -8,7 +8,16 @@ const SENTRY_ERROR_FILTERS = [
 ];
 
 export function shouldIgnoreError(err) {
+  if (!err || typeof err !== 'object') return false;
   return SENTRY_ERROR_FILTERS.some((f) => err.code === f.code);
+}
+
+function shouldIgnoreEvent(event) {
+  const values = Array.isArray(event?.exception?.values) ? event.exception.values : [];
+  return values.some((value) => SENTRY_ERROR_FILTERS.some((filter) => {
+    if (value?.type === filter.code) return true;
+    return typeof value?.value === 'string' && value.value.includes(filter.code);
+  }));
 }
 
 export function initSentry() {
@@ -19,11 +28,7 @@ export function initSentry() {
     dsn,
     environment: process.env.NODE_ENV || "development",
     beforeSend(event) {
-      if (event.exception?.values?.[0]?.value) {
-        const err = new Error(event.exception.values[0].value);
-        err.code = event.exception.values[0].type || undefined;
-        if (shouldIgnoreError(err)) return null;
-      }
+      if (shouldIgnoreEvent(event)) return null;
       return event;
     },
   });

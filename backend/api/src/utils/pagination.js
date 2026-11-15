@@ -3,7 +3,6 @@ const DEFAULTS = {
   limit: 20,
   maxLimit: 100,
 };
-
 function normalizeNumber(value) {
   if (Number.isFinite(value)) {
     return value;

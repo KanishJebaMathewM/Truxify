@@ -48,7 +48,7 @@ export function calculateDistanceKm(lat1, lon1, lat2, lon2) {
       Math.cos(lat2 * (Math.PI / 180)) *
       Math.sin(dLon / 2) *
       Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const c = 2 * Math.atan2(Math.sqrt(Math.min(1, a)), Math.sqrt(Math.max(0, 1 - a)));
   return R * c;
 }
 
@@ -70,6 +70,53 @@ export function findNearestHub(lat, lng, maxSearchRadiusKm = 200) {
   return nearest;
 }
 
+export const MAX_RELAY_LEGS = 128;
+const DISTANCE_EPSILON_KM = 1e-7;
+const toRadians = (degrees) => degrees * Math.PI / 180;
+const dot = (a, b) => a.reduce((sum, value, index) => sum + value * b[index], 0);
+const vector = ({ lat, lng }) => [
+  Math.cos(toRadians(lat)) * Math.cos(toRadians(lng)),
+  Math.cos(toRadians(lat)) * Math.sin(toRadians(lng)),
+  Math.sin(toRadians(lat)),
+];
+
+function validateCoordinate(point, label) {
+  if (!point || typeof point.lat !== 'number' || typeof point.lng !== 'number'
+      || !Number.isFinite(point.lat) || !Number.isFinite(point.lng)
+      || Math.abs(point.lat) > 90 || Math.abs(point.lng) > 180) {
+    throw new DomainError(400, { error: `${label} requires finite numeric latitude/longitude in geographic bounds` });
+  }
+}
+
+// Rotate along the shortest arc in its plane. Unlike linear longitude blending,
+// this crosses the dateline correctly and retains the great-circle latitude.
+function greatCircleArc(origin, destination) {
+  const start = vector(origin);
+  const end = vector(destination);
+  const cosine = Math.max(-1, Math.min(1, dot(start, end)));
+  const tangent = end.map((value, index) => value - cosine * start[index]);
+  const length = Math.hypot(...tangent);
+  if (length < 1e-10 && cosine < 0) {
+    throw new DomainError(422, { error: 'Antipodal endpoints do not define a unique relay corridor' });
+  }
+  const direction = tangent.map(value => value / length);
+  const angle = Math.atan2(length, cosine);
+  return {
+    point(fraction) {
+      const step = angle * fraction;
+      const result = start.map((value, index) => value * Math.cos(step) + direction[index] * Math.sin(step));
+      return {
+        lat: Math.atan2(result[2], Math.hypot(result[0], result[1])) * 180 / Math.PI,
+        lng: Math.atan2(result[1], result[0]) * 180 / Math.PI,
+      };
+    },
+    progress(point) {
+      const position = vector(point);
+      return Math.atan2(dot(position, direction), dot(position, start)) / angle;
+    },
+  };
+}
+
 /**
  * Partitions a long-haul route into relay corridor segments.
  * 
@@ -80,7 +127,12 @@ export function findNearestHub(lat, lng, maxSearchRadiusKm = 200) {
  * @returns {Object} Relay plan with sequential legs and hub nodes
  */
 export function partitionRouteIntoCorridorLegs(origin, destination, totalAmount = 0, options = {}) {
-  const maxLegDistanceKm = options.maxLegDistanceKm || 350;
+  validateCoordinate(origin, 'origin');
+  validateCoordinate(destination, 'destination');
+  const maxLegDistanceKm = options.maxLegDistanceKm === undefined ? 350 : options.maxLegDistanceKm;
+  if (typeof maxLegDistanceKm !== 'number' || !Number.isFinite(maxLegDistanceKm) || maxLegDistanceKm <= 0) {
+    throw new DomainError(400, { error: 'maxLegDistanceKm must be a finite positive number' });
+  }
   const totalDirectDistanceKm = calculateDistanceKm(
     origin.lat,
     origin.lng,
@@ -88,7 +140,7 @@ export function partitionRouteIntoCorridorLegs(origin, destination, totalAmount 
     destination.lng
   );
 
-  if (totalDirectDistanceKm < 200) {
+  if (totalDirectDistanceKm < 200 && totalDirectDistanceKm <= maxLegDistanceKm) {
     // Short haul does not require relay partitioning
     return {
       isRelayApplicable: false,
@@ -109,18 +161,43 @@ export function partitionRouteIntoCorridorLegs(origin, destination, totalAmount 
   }
 
   const estimatedLegCount = Math.max(2, Math.ceil(totalDirectDistanceKm / maxLegDistanceKm));
+  if (estimatedLegCount > MAX_RELAY_LEGS) {
+    throw new DomainError(422, { error: `Relay plan exceeds the ${MAX_RELAY_LEGS}-leg budget` });
+  }
+  const arc = greatCircleArc(origin, destination);
   const legs = [];
+  const usedHubs = new Set();
+  let currentProgress = 0;
   let currentStart = { ...origin };
 
   for (let i = 1; i < estimatedLegCount; i++) {
     const fraction = i / estimatedLegCount;
-    const targetLat = origin.lat + (destination.lat - origin.lat) * fraction;
-    const targetLng = origin.lng + (destination.lng - origin.lng) * fraction;
-
-    const matchedHub = findNearestHub(targetLat, targetLng);
+    const target = arc.point(fraction);
+    const nextFraction = (i + 1) / estimatedLegCount;
+    const nextTarget = i + 1 === estimatedLegCount ? destination : arc.point(nextFraction);
+    // Certify both adjacent links now. If the next step cannot snap to a hub,
+    // its nominal waypoint is therefore still reachable within the limit.
+    const candidates = TRANSSHIPMENT_HUBS.map(hub => ({
+      ...hub,
+      distanceToPointKm: calculateDistanceKm(target.lat, target.lng, hub.lat, hub.lng),
+      progress: arc.progress(hub),
+    })).filter(hub => {
+      const incoming = calculateDistanceKm(currentStart.lat, currentStart.lng, hub.lat, hub.lng);
+      const outgoing = calculateDistanceKm(hub.lat, hub.lng, nextTarget.lat, nextTarget.lng);
+      return !usedHubs.has(hub.id) && hub.distanceToPointKm <= 200
+        && hub.progress > currentProgress + 1e-10 && hub.progress < nextFraction - 1e-10
+        && incoming > DISTANCE_EPSILON_KM && outgoing > DISTANCE_EPSILON_KM
+        && incoming <= maxLegDistanceKm + DISTANCE_EPSILON_KM
+        && outgoing <= maxLegDistanceKm + DISTANCE_EPSILON_KM;
+    }).sort((a, b) => a.distanceToPointKm - b.distanceToPointKm || a.id.localeCompare(b.id));
+    const candidate = candidates[0];
+    const matchedHub = candidate ? {
+      ...TRANSSHIPMENT_HUBS.find(hub => hub.id === candidate.id),
+      distanceToPointKm: Number(candidate.distanceToPointKm.toFixed(2)),
+    } : null;
     const waypointDest = matchedHub
       ? { lat: matchedHub.lat, lng: matchedHub.lng, address: matchedHub.name, hubId: matchedHub.id, radiusMeters: matchedHub.radiusMeters }
-      : { lat: targetLat, lng: targetLng, address: `Corridor Waypoint ${i}` };
+      : { ...target, address: `Corridor Waypoint ${i}` };
 
     const legDistance = calculateDistanceKm(currentStart.lat, currentStart.lng, waypointDest.lat, waypointDest.lng);
 
@@ -134,6 +211,8 @@ export function partitionRouteIntoCorridorLegs(origin, destination, totalAmount 
     });
 
     currentStart = { ...waypointDest };
+    currentProgress = candidate ? candidate.progress : fraction;
+    if (matchedHub) usedHubs.add(matchedHub.id);
   }
 
   // Final Leg to ultimate destination
@@ -146,6 +225,14 @@ export function partitionRouteIntoCorridorLegs(origin, destination, totalAmount 
     hub: null,
     isFinalLeg: true,
   });
+
+  // Validate unrounded distances: rounding the public estimate can add <=0.005km.
+  for (const leg of legs) {
+    const distance = calculateDistanceKm(leg.origin.lat, leg.origin.lng, leg.destination.lat, leg.destination.lng);
+    if (distance <= DISTANCE_EPSILON_KM || leg.distanceKm === 0 || distance > maxLegDistanceKm + DISTANCE_EPSILON_KM) {
+      throw new DomainError(422, { error: 'Cannot construct positive relay legs at two-decimal precision within the requested distance limit' });
+    }
+  }
 
   // Calculate proportional financial distribution per leg
   const totalLegsDistance = legs.reduce((sum, leg) => sum + leg.distanceKm, 0);
@@ -169,8 +256,50 @@ export function partitionRouteIntoCorridorLegs(origin, destination, totalAmount 
 
 /**
  * In-memory relay session registry (mirrored to persistent store in production).
+ *
+ * The registry is bounded because every entry retains leg arrays, payout
+ * amounts, and driver assignments. Completed sessions are kept briefly for
+ * status lookups, while active sessions expire after a generous idle window so
+ * abandoned bookings cannot accumulate forever.
  */
 const activeRelaySessions = new Map();
+
+export const MAX_ACTIVE_RELAY_SESSIONS = 500;
+export const COMPLETED_RELAY_SESSION_RETENTION_MS = 24 * 60 * 60 * 1000;
+export const STALE_RELAY_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function timestampMs(value) {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Removes completed sessions past their retention window and active sessions
+ * that have not changed within the stale-session TTL. Returns the number of
+ * removed entries so callers can observe pruning in logs and tests.
+ */
+export function pruneRelaySessions(now = Date.now()) {
+  let removed = 0;
+
+  for (const [relayBookingId, session] of activeRelaySessions) {
+    if (session.status === 'COMPLETED') {
+      const completedAt = timestampMs(session.completedAt) ?? timestampMs(session.updatedAt);
+      if (completedAt === null || now - completedAt > COMPLETED_RELAY_SESSION_RETENTION_MS) {
+        activeRelaySessions.delete(relayBookingId);
+        removed += 1;
+      }
+      continue;
+    }
+
+    const updatedAt = timestampMs(session.updatedAt);
+    if (updatedAt === null || now - updatedAt > STALE_RELAY_SESSION_TTL_MS) {
+      activeRelaySessions.delete(relayBookingId);
+      removed += 1;
+    }
+  }
+
+  return removed;
+}
 
 /**
  * Creates and initializes a relay orchestration session.
@@ -180,6 +309,13 @@ export async function createRelaySession(customerUserId, relayData) {
 
   if (!origin || !destination || !totalAmount) {
     throw new DomainError(400, { error: 'Missing required parameters: origin, destination, totalAmount' });
+  }
+
+  pruneRelaySessions();
+  if (activeRelaySessions.size >= MAX_ACTIVE_RELAY_SESSIONS) {
+    throw new DomainError(429, {
+      error: `Relay session capacity reached (${MAX_ACTIVE_RELAY_SESSIONS}). Try again after completed sessions expire.`,
+    });
   }
 
   const relayPlan = partitionRouteIntoCorridorLegs(origin, destination, totalAmount);
@@ -215,6 +351,7 @@ export async function createRelaySession(customerUserId, relayData) {
  * Retrieves a relay session by booking ID.
  */
 export async function getRelaySession(relayBookingId) {
+  pruneRelaySessions();
   const session = activeRelaySessions.get(relayBookingId);
   if (!session) {
     throw new DomainError(404, { error: `Relay session not found for ID: ${relayBookingId}` });
@@ -266,9 +403,13 @@ export async function advanceRelayLeg(relayBookingId, completedLegIndex, handoff
 
 export default {
   TRANSSHIPMENT_HUBS,
+  MAX_ACTIVE_RELAY_SESSIONS,
+  COMPLETED_RELAY_SESSION_RETENTION_MS,
+  STALE_RELAY_SESSION_TTL_MS,
   calculateDistanceKm,
   findNearestHub,
   partitionRouteIntoCorridorLegs,
+  pruneRelaySessions,
   createRelaySession,
   getRelaySession,
   advanceRelayLeg,

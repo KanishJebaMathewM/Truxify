@@ -3,6 +3,7 @@
  * and thread management for driver-customer communication.
  */
 
+import crypto from 'crypto';
 import { supabaseAdmin, redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { encryptMessage, decryptMessage } from '../lib/chatEncryption.js';
@@ -97,6 +98,8 @@ export async function saveChatMessage({ orderId, senderId, senderRole, type, con
 export async function getChatHistory(orderId, limit = 50, before = null) {
     if (!supabaseAdmin) throw new Error('Supabase not configured');
 
+    limit = Number.isInteger(limit) ? Math.min(Math.max(limit, 1), 100) : 50;
+
     let query = supabaseAdmin
         .from('chat_messages')
         .select('id, order_id, sender_id, sender_role, message_type, encrypted_content, is_read, created_at')
@@ -104,7 +107,7 @@ export async function getChatHistory(orderId, limit = 50, before = null) {
         .order('created_at', { ascending: false })
         .limit(limit);
 
-    if (before) {
+    if (before && !Number.isNaN(Date.parse(before))) {
         query = query.lt('created_at', before);
     }
 

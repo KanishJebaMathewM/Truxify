@@ -1,7 +1,22 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
+// backend/api/test/integration/supportRoutes.test.js (Excerpt)
 
+import { describe, it, expect } from 'vitest';
+import request from 'supertest';
+import app from '../../src/app.js';
+
+describe('Support Routes Module Startup & UUID Validation', () => {
+  it('should load support routes successfully and validate ticket UUID parameters', async () => {
+    const res = await request(app)
+      .get('/api/support/tickets/invalid-uuid-format')
+      .set('Authorization', 'Bearer <valid_token>');
+
+    // Expect validation failure (400) rather than server startup crash (500 ReferenceError)
+    expect(res.statusCode).toEqual(400);
+  });
+});
 const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
 const m = createSupabaseMock();
 

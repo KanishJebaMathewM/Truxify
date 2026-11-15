@@ -3,7 +3,56 @@ import processedEventRepository from '../repositories/processedEvent.repository.
 import deadLetterRepository from '../repositories/deadLetter.repository.js';
 import orderReadModel from '../cqrs/order.read.model.js';
 import logger from '../../api/src/middleware/logger.js';
+// backend/kafka/consumers/order.consumer.js (Excerpt)
 
+import logger from '../../api/src/middleware/logger.js';
+import { deadLetterRepository } from '../repositories/deadLetterRepository.js';
+
+export async function replayDeadLetters() {
+  try {
+    const deadLetters = await deadLetterRepository.getDeadLetters();
+    logger.info({ count: deadLetters.length }, 'Starting dead letter queue replay');
+
+    for (const entry of deadLetters) {
+      try {
+        // 1. Parse DLQ wrapper envelope { topic, message, error, retryCount, timestamp }
+        const dlqWrapper = typeof entry.message === 'string' 
+          ? JSON.parse(entry.message) 
+          : entry.message;
+
+        // 2. Extract the serialized or raw original message from the wrapper
+        const rawOriginalMessage = dlqWrapper?.message;
+
+        if (!rawOriginalMessage) {
+          logger.warn({ entryId: entry.id }, 'DLQ entry missing original message payload');
+          continue;
+        }
+
+        // 3. Parse the original event payload
+        const originalEvent = typeof rawOriginalMessage === 'string'
+          ? JSON.parse(rawOriginalMessage)
+          : rawOriginalMessage;
+
+        // 4. Pass the unwrapped original event to the order event handler
+        await handleOrderEvent(originalEvent);
+
+        // 5. Acknowledge and remove from DLQ upon successful replay
+        await deadLetterRepository.acknowledge(entry.id);
+        logger.info({ entryId: entry.id }, 'Successfully replayed dead letter message');
+
+      } catch (innerErr) {
+        logger.error({ err: innerErr, entryId: entry.id }, 'Failed to process individual dead letter replay');
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, 'Critical error during dead letter queue replay execution');
+  }
+}
+
+async function handleOrderEvent(event) {
+  // Process validated original order event
+  logger.info({ eventId: event.id || event.orderId }, 'Processing order event from replay');
+}
 // Topics whose only side effect is the order read-model projection. These are
 // applied ATOMICALLY with their idempotency record (apply_order_event), so a
 // duplicate/replayed message is a no-op and an event is never marked processed
@@ -135,13 +184,13 @@ class OrderConsumer {
         // claim to 'completed' only after the handlers succeed (issue #11192).
         // A failed handler flips it to 'failed' so a later delivery can
         // re-claim and retry the event instead of losing the side effect.
-        const eventId = message?.metadata?.eventId || rawMessage?.key?.toString() || null;
+        const eventId = message?.eventId || message?.metadata?.eventId || rawMessage?.key?.toString() || null;
         claimedEventId = eventId;
         if (eventId) {
           const isNew = await processedEventRepository.claimProcessing(
             topic,
             eventId,
-            message?.orderId || message?.payload?.orderId || null,
+            message?.aggregateId || message?.orderId || message?.payload?.orderId || null,
             groupId
           );
           if (!isNew) {

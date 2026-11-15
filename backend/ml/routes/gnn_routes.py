@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.params import Depends as DependsClass
-from pydantic import BaseModel, confloat, field_validator
+from pydantic import BaseModel, Field, confloat, field_validator
 from typing import List, Dict, Any, Optional
 import networkx as nx
 import json
@@ -98,14 +98,14 @@ class Node(BaseModel):
 class Edge(BaseModel):
     source: str
     target: str
-    distance: float
-    time: float
-    cost: Optional[float] = 0
-    fuel: Optional[float] = 0
-    congestion: Optional[float] = 0
+    distance: confloat(allow_inf_nan=False, ge=0)
+    time: confloat(allow_inf_nan=False, ge=0)
+    cost: Optional[confloat(allow_inf_nan=False, ge=0)] = 0
+    fuel: Optional[confloat(allow_inf_nan=False, ge=0)] = 0
+    congestion: Optional[confloat(allow_inf_nan=False, ge=0)] = 0
     hazmat_allowed: Optional[bool] = True
-    max_weight: Optional[float] = None
-    max_height: Optional[float] = None
+    max_weight: Optional[confloat(allow_inf_nan=False, ge=0)] = None
+    max_height: Optional[confloat(allow_inf_nan=False, ge=0)] = None
 
 class RouteRequest(BaseModel):
     start_node: str
@@ -124,8 +124,8 @@ class RouteUpdateRequest(BaseModel):
     constraints: Optional[Dict[str, Any]] = None
 
 class TrainRequest(BaseModel):
-    epochs: int = 100
-    learning_rate: float = 0.001
+    epochs: int = Field(default=100, ge=1, le=1000)
+    learning_rate: float = Field(default=0.001, ge=0, le=1, allow_inf_nan=False)
 
 
 def _multi_objective_optimization(start, end, graph_data, objectives=None, constraints=None, route_optimizer=None):

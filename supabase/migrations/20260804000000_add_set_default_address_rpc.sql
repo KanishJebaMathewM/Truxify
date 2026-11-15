@@ -4,7 +4,38 @@
 -- deleted addressId, RLS block, network error), every address was left
 -- non-default with no replacement. This wraps both writes in a single
 -- SECURITY DEFINER function so they succeed or fail together.
+-- supabase/migrations/20260804000000_add_set_default_address_rpc.sql (Updated)
 
+CREATE OR REPLACE FUNCTION set_default_address(p_address_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_profile_id UUID;
+BEGIN
+    -- Derive canonical profiles.id using the RLS helper function
+    v_profile_id := get_profile_id();
+
+    IF v_profile_id IS NULL THEN
+        RAISE EXCEPTION 'User profile not found for current session';
+    -- Unset previous default addresses for this profile
+    UPDATE saved_addresses
+    SET is_default = FALSE
+    WHERE user_id = v_profile_id;
+
+    -- Set the specified address as default
+    UPDATE saved_addresses
+    SET is_default = TRUE
+    WHERE id = p_address_id AND user_id = v_profile_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Address not found or unauthorized';
+    END IF;
+
+    RETURN TRUE;
+END;
+$$;
 CREATE OR REPLACE FUNCTION set_default_address(
   p_address_id UUID,
   p_user_id    UUID

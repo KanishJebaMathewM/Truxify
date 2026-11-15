@@ -103,6 +103,24 @@ const telemetryHistoryLimiter = rateLimit({
   message: { error: 'Rate limit exceeded', retryAfter: 900 },
 });
 
+
+// backend/api/src/routes/iotRoutes.js (Excerpt)
+
+// BEFORE:
+// await supabase.from('notifications').insert({
+//   user_id: driverId,
+//   notif_type: 'cold_chain_alert',
+//   title: 'Cold Chain Temperature Violation',
+//   body: 'Temperature threshold exceeded in cargo compartment.'
+// });
+
+// FIXED: Use valid 'system' notif_type per issue #6963
+await supabase.from('notifications').insert({
+  user_id: driverId,
+  notif_type: 'system',
+  title: 'Cold Chain Temperature Violation',
+  body: 'Temperature threshold exceeded in cargo compartment.',
+});
 // ============================================================================
 // 1. POST TELEMETRY DATA (IoT)
 // POST /api/iot/telemetry/:id

@@ -5,6 +5,8 @@ const CACHE_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
 const NOMINATIM_TIMEOUT_MS = 5000;
 const DEFAULT_RETRY_AFTER_MS = 60000;
 const MAX_RETRY_AFTER_MS = 60000;
+// backend/api/src/lib/reverseGeocode.js
+
 
 /**
  * Returns the Nominatim HTTP timeout in milliseconds.

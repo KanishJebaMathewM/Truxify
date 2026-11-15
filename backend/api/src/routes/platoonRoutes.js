@@ -6,7 +6,7 @@ import {
   emergencyDecouple,
   disengage,
 } from '../controllers/platoonController.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticate as authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 

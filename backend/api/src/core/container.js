@@ -13,7 +13,6 @@ import { OrderNotificationService } from '../services/order/orderNotificationSer
 import { BidAcceptanceService } from '../services/order/bidAcceptanceService.js';
 import { DeliveryVerificationService } from '../services/order/deliveryVerificationService.js';
 import { OrderLifecycleService } from '../services/order/orderLifecycleService.js';
-
 import {
   buildDepositTx,
   submitEscrowRefund,
@@ -105,6 +104,7 @@ export {
   sagaPersister,
 
   buildDepositTx,
+  submitEscrowRefund,
   recordDepositTx,
   confirmEscrowRefund,
 };

@@ -1,5 +1,9 @@
 import logger from '../middleware/logger.js';
+// backend/api/src/services/trafficService.js
 import { redisClient } from '../config/db.js';
+
+
+const DEFAULT_TRAFFIC_MULTIPLIER = 1.0;
 
 const RUSH_HOUR_START_AM = 7;
 const RUSH_HOUR_END_AM = 10;

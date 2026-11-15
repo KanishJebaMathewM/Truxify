@@ -44,7 +44,7 @@ export const POD_CONFIG = {
  * @returns {{valid: boolean, error?: string}}
  */
 export function validatePodFile(file, type = 'signature') {
-    if (!file || !file.buffer) {
+    if (!file || !Buffer.isBuffer(file.buffer)) {
         return { valid: false, error: 'No file provided' };
     }
 
@@ -61,14 +61,18 @@ export function validatePodFile(file, type = 'signature') {
         ? POD_CONFIG.SIGNATURE_MAX_BYTES
         : POD_CONFIG.PHOTO_MAX_BYTES;
 
-    if (file.size > maxSize) {
+    // `file.size` is supplied by the multipart parser, but callers can also
+    // construct file objects directly. Measure the bytes that will actually be
+    // uploaded so a missing or forged size cannot bypass the limit.
+    const actualSize = file.buffer.length;
+    if (actualSize > maxSize) {
         return {
             valid: false,
             error: `File too large. Max ${Math.floor(maxSize / 1024 / 1024)}MB for ${type}`
         };
     }
 
-    if (file.size === 0) {
+    if (actualSize === 0) {
         return { valid: false, error: 'File is empty' };
     }
 

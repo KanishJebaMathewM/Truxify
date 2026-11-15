@@ -23,6 +23,7 @@ const RECORD_PERSIST_DELAYS_MS = [250, 500, 1000, 2000, 4000, 8000];
 const RECONCILE_STUCK_AFTER_MS = 60 * 60 * 1000;
 
 let intervalId = null;
+let settlementCycleRunning = false;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -207,7 +208,7 @@ async function flagForReconciliation(withdrawalId) {
  *   5. transitions to DLQ if max retries are exceeded;
  *   6. emits driver status notifications on terminal/retry events.
  */
-export async function settlePendingWithdrawals() {
+async function runSettlementCycle() {
   if (!supabaseAdmin) {
     logger.warn(
       "[WithdrawalSettlementWorker] supabaseAdmin unavailable - skipping settlement cycle.",
@@ -465,6 +466,22 @@ export async function settlePendingWithdrawals() {
         );
       }
     }
+  }
+}
+
+export async function settlePendingWithdrawals() {
+  if (settlementCycleRunning) {
+    logger.warn(
+      "[WithdrawalSettlementWorker] Settlement cycle already in progress - skipping overlapping tick.",
+    );
+    return;
+  }
+
+  settlementCycleRunning = true;
+  try {
+    await runSettlementCycle();
+  } finally {
+    settlementCycleRunning = false;
   }
 }
 

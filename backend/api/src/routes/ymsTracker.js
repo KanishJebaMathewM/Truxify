@@ -36,7 +36,7 @@ router.post('/drop-pin', (req, res) => {
             data: dropRecord
         });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return res.status(error.statusCode || 500).json({ error: error.message });
     }
 });
 
@@ -60,7 +60,7 @@ router.post('/locate', (req, res) => {
             data: locationDetails
         });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return res.status(error.statusCode || 500).json({ error: error.message });
     }
 });
 
@@ -74,7 +74,7 @@ router.post('/slots/register', (req, res) => {
         const registered = registerYardSlot(facilityId, slotData);
         return res.status(201).json({ success: true, data: registered });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return res.status(error.statusCode || 500).json({ error: error.message });
     }
 });
 
@@ -91,7 +91,7 @@ router.get('/slots/:facilityId', (req, res) => {
         const slots = listYardSlots(facilityId, filters);
         return res.json({ success: true, count: slots.length, data: slots });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return res.status(error.statusCode || 500).json({ error: error.message });
     }
 });
 
@@ -108,7 +108,7 @@ router.post('/slots/allocate', (req, res) => {
         }
         return res.json({ success: true, data: result });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return res.status(error.statusCode || 500).json({ error: error.message });
     }
 });
 
@@ -122,7 +122,7 @@ router.post('/slots/release', (req, res) => {
         const result = releaseYardSlot(facilityId, slotId);
         return res.json({ success: true, data: result });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return res.status(error.statusCode || 500).json({ error: error.message });
     }
 });
 
@@ -136,7 +136,7 @@ router.post('/dwell/evaluate', (req, res) => {
         const evaluation = evaluateDwellDemurrage(trailerId, evaluationTimestamp, customPolicy);
         return res.json({ success: true, data: evaluation });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return res.status(error.statusCode || 500).json({ error: error.message });
     }
 });
 
@@ -150,7 +150,7 @@ router.post('/dwell/invoice', (req, res) => {
         const invoice = generateDemurrageInvoice(trailerId, carrierInfo, checkoutTimestamp);
         return res.json({ success: true, data: invoice });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return res.status(error.statusCode || 500).json({ error: error.message });
     }
 });
 

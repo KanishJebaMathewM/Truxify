@@ -24,7 +24,7 @@ describe('expiryTracker', () => {
   it('findExpiringDocuments tags each hit with its threshold', async () => {
     const mock = createSupabaseMock({
       driver_documents: [
-        { id: 'doc-30', driver_id: 'd1', document_type: 'DL', document_number: 'X', expiry_date: inDays(30), status: 'verified', alert_sent_30_days: false, alert_sent_7_days: false, alert_sent_1_days: false },
+        { id: 'doc-30', driver_id: 'd1', document_type: 'DL', document_number: 'X', valid_until: inDays(30), status: 'approved', alert_sent_30_days: false, alert_sent_7_days: false, alert_sent_1_days: false },
       ],
     });
     global.__etSupabase = mock.supabase;
@@ -37,7 +37,7 @@ describe('expiryTracker', () => {
   it('documents already alerted at a threshold are not re-alerted (flag column filter)', async () => {
     const mock = createSupabaseMock({
       driver_documents: [
-        { id: 'doc-done', driver_id: 'd1', document_type: 'DL', document_number: 'X', expiry_date: inDays(30), status: 'verified', alert_sent_30_days: true, alert_sent_7_days: false, alert_sent_1_days: false },
+        { id: 'doc-done', driver_id: 'd1', document_type: 'DL', document_number: 'X', valid_until: inDays(30), status: 'approved', alert_sent_30_days: true, alert_sent_7_days: false, alert_sent_1_days: false },
       ],
     });
     global.__etSupabase = mock.supabase;
@@ -52,7 +52,7 @@ describe('expiryTracker', () => {
   it('markAlertSent flips the threshold flag and stamps last_alert_sent_at', async () => {
     const mock = createSupabaseMock({
       driver_documents: [
-        { id: 'doc-7', driver_id: 'd1', document_type: 'RC', document_number: 'Y', expiry_date: inDays(7), status: 'verified', alert_sent_7_days: false },
+        { id: 'doc-7', driver_id: 'd1', document_type: 'RC', document_number: 'Y', valid_until: inDays(7), status: 'approved', alert_sent_7_days: false },
       ],
     });
     global.__etSupabase = mock.supabase;
@@ -62,12 +62,12 @@ describe('expiryTracker', () => {
     expect(row.last_alert_sent_at).toBeTruthy();
   });
 
-  it('getExpiredDocuments returns only past-expired verified docs', async () => {
+  it('getExpiredDocuments returns only past-expired approved docs', async () => {
     const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
     const mock = createSupabaseMock({
       driver_documents: [
-        { id: 'expired', driver_id: 'd1', document_type: 'DL', document_number: 'X', expiry_date: yesterday, status: 'verified' },
-        { id: 'valid', driver_id: 'd1', document_type: 'RC', document_number: 'Y', expiry_date: inDays(90), status: 'verified' },
+        { id: 'expired', driver_id: 'd1', document_type: 'DL', document_number: 'X', valid_until: yesterday, status: 'approved' },
+        { id: 'valid', driver_id: 'd1', document_type: 'RC', document_number: 'Y', valid_until: inDays(90), status: 'approved' },
       ],
     });
     global.__etSupabase = mock.supabase;
@@ -79,7 +79,7 @@ describe('expiryTracker', () => {
     const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
     const mock = createSupabaseMock({
       driver_documents: [
-        { id: 'expired', driver_id: 'd1', document_type: 'DL', document_number: 'X', expiry_date: yesterday, status: 'verified' },
+        { id: 'expired', driver_id: 'd1', document_type: 'DL', document_number: 'X', valid_until: yesterday, status: 'approved' },
       ],
     });
     global.__etSupabase = mock.supabase;
@@ -92,7 +92,7 @@ describe('expiryTracker', () => {
   it('runExpiryCheckJob calls the alert fn per document and marks each sent', async () => {
     const mock = createSupabaseMock({
       driver_documents: [
-        { id: 'doc-30', driver_id: 'd1', document_type: 'DL', document_number: 'X', expiry_date: inDays(30), status: 'verified', alert_sent_30_days: false, alert_sent_7_days: false, alert_sent_1_days: false, driver: { full_name: 'Ram', phone: '9' } },
+        { id: 'doc-30', driver_id: 'd1', document_type: 'DL', document_number: 'X', valid_until: inDays(30), status: 'approved', alert_sent_30_days: false, alert_sent_7_days: false, alert_sent_1_days: false, driver: { full_name: 'Ram', phone: '9' } },
       ],
     });
     global.__etSupabase = mock.supabase;
@@ -108,7 +108,7 @@ describe('expiryTracker', () => {
   it('runExpiryCheckJob survives a failing alert fn and does NOT mark the doc as alerted (retry next cycle)', async () => {
     const mock = createSupabaseMock({
       driver_documents: [
-        { id: 'doc-x', driver_id: 'd1', document_type: 'DL', document_number: 'X', expiry_date: inDays(30), status: 'verified', alert_sent_30_days: false, alert_sent_7_days: false, alert_sent_1_days: false },
+        { id: 'doc-x', driver_id: 'd1', document_type: 'DL', document_number: 'X', valid_until: inDays(30), status: 'approved', alert_sent_30_days: false, alert_sent_7_days: false, alert_sent_1_days: false },
       ],
     });
     global.__etSupabase = mock.supabase;

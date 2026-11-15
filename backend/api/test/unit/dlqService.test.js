@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // In-memory PostgREST mock: supports
-//   rpc()                                  -> claim_webhook_failure_batch
+//   rpc()                                  -> claim/admit/settle attempt protocol
 //   from().insert()                        -> enqueue
-//   from().update()....select('id')        -> fenced complete/requeue/fail
+//   settlement RPC params                -> complete/requeue/fail
 //   from().select(..{count}).eq()          -> backlog count
 // ---------------------------------------------------------------------------
 const mockState = {
@@ -70,7 +70,14 @@ function buildQuery(table) {
 const mockClient = {
   rpc: vi.fn((name, params) => {
     rpcCalls.push({ name, params });
-    return Promise.resolve(mockState.rpcResult);
+    if (name === 'claim_webhook_failure_batch') return Promise.resolve(mockState.rpcResult);
+    if (name === 'admit_webhook_failure_attempt') return Promise.resolve({ data: true, error: null });
+    updateCalls.push({ params, payload: {
+      status: params.p_status, retry_count: params.p_retry_count,
+      next_retry_at: params.p_next_retry_at, error_message: params.p_error_message,
+    } });
+    const result = mockState.updateResultByStatus[params.p_status];
+    return Promise.resolve({ data: Boolean(result.data?.length), error: result.error });
   }),
   from: vi.fn((table) => buildQuery(table)),
 };
@@ -133,7 +140,7 @@ describe('dlqService — lease-based crash-safe claims', () => {
 
     await dlqService.processQueue({ escrow: handler }, { leaseMs: 300_000 });
 
-    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls.filter(c => c.name === 'claim_webhook_failure_batch')).toHaveLength(1);
     expect(rpcCalls[0].name).toBe('claim_webhook_failure_batch');
     expect(rpcCalls[0].params).toEqual({
       p_worker_id: getWorkerId(),
@@ -146,15 +153,15 @@ describe('dlqService — lease-based crash-safe claims', () => {
 
   it('claims only due pending + expired-lease processing rows (eligibility lives in SQL)', async () => {
     // The service delegates eligibility to the DB RPC — assert it does not
-    // perform its own SELECT-then-UPDATE. There must be exactly one DB call
-    // (the atomic claim) before processing.
+    // perform its own SELECT-then-UPDATE. Atomic claim and exact-attempt
+    // admission run before processing.
     const event = makeEvent();
     mockState.rpcResult = { data: [event], error: null };
 
     await dlqService.processQueue({ escrow: handler }, { batchSize: 10 });
 
     expect(mockClient.from).toHaveBeenCalled();
-    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls.filter(c => c.name === 'claim_webhook_failure_batch')).toHaveLength(1);
   });
 
   // CASE 2 — TWO WORKERS CLAIM SAME EVENT
@@ -184,19 +191,10 @@ describe('dlqService — lease-based crash-safe claims', () => {
     expect(handler).toHaveBeenCalledTimes(1);
     const complete = updateCalls.find(c => c.payload.status === 'resolved');
     expect(complete).toBeDefined();
-    expect(complete.payload).toEqual(expect.objectContaining({
-      status: 'resolved',
-      resolved_at: expect.any(String),
-      claimed_by: null,
-      claimed_at: null,
-      lease_expires_at: null,
-    }));
-    // Completion is fenced on ownership: only the claiming worker may resolve.
-    expect(complete.filters).toEqual(expect.arrayContaining([
-      { col: 'id', val: 'dlq-1' },
-      { col: 'status', val: 'processing' },
-      { col: 'claimed_by', val: getWorkerId() },
-    ]));
+    expect(complete.params).toEqual({
+      p_event_id: 'dlq-1', p_worker_id: getWorkerId(), p_attempt_count: 1,
+      p_status: 'resolved', p_retry_count: null, p_next_retry_at: null, p_error_message: null,
+    });
     expect(summary).toEqual(expect.objectContaining({ claimed: 1, resolved: 1, retried: 0, failed: 0, lost: 0 }));
   });
 
@@ -228,12 +226,9 @@ describe('dlqService — lease-based crash-safe claims', () => {
     // First retry uses RETRY_BACKOFF[1] = 5 minutes.
     expect(new Date(requeue.payload.next_retry_at).getTime() - Date.now()).toBeGreaterThan(4 * 60_000);
     expect(requeue.payload.next_retry_at).not.toBeNull();
-    expect(requeue.payload.claimed_by).toBeNull();
-    expect(requeue.payload.lease_expires_at).toBeNull();
-    expect(requeue.filters).toEqual(expect.arrayContaining([
-      { col: 'status', val: 'processing' },
-      { col: 'claimed_by', val: getWorkerId() },
-    ]));
+    expect(requeue.params).toEqual(expect.objectContaining({
+      p_event_id: 'dlq-1', p_worker_id: getWorkerId(), p_attempt_count: 1,
+    }));
   });
 
   it('preserves exponential backoff across attempts', async () => {
@@ -274,8 +269,6 @@ describe('dlqService — lease-based crash-safe claims', () => {
     expect(fail).toBeDefined();
     expect(fail.payload.retry_count).toBe(4);
     expect(fail.payload.error_message).toBe('terminal');
-    expect(fail.payload.claimed_by).toBeNull();
-    expect(fail.payload.lease_expires_at).toBeNull();
   });
 
   it('does not requeue after a permanent failure (no retry storm)', async () => {
@@ -354,7 +347,7 @@ describe('dlqService — lease-based crash-safe claims', () => {
     expect(handler.mock.calls.map(c => c[1].orderId).sort()).toEqual(['order-a', 'order-b']);
     const resolved = updateCalls.filter(c => c.payload.status === 'resolved');
     expect(resolved).toHaveLength(2);
-    expect(resolved.map(c => c.filters.find(f => f.col === 'claimed_by').val).sort())
+    expect(resolved.map(c => c.params.p_worker_id).sort())
       .toEqual(['replica-a', 'replica-b']);
   });
 

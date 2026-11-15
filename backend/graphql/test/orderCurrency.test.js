@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-// vitest runs this suite (the subproject has no node:test script); node
-// assert/strict works unchanged under vitest.
-import { it as test } from 'vitest';
+import { test } from 'vitest';
 import { buildSchema, graphql } from 'graphql';
 import { mapOrder } from '../shared/orderMapping.js';
 

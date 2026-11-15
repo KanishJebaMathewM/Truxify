@@ -215,6 +215,25 @@ describe('OutboxService', () => {
       await outboxService.deadLetterExhaustedEvents(5);
       expect(mocks.supabase.from).not.toHaveBeenCalledWith('outbox_dlq');
     });
+
+    it('caps the batch and scopes the DLQ insert/delete to the selected ids', async () => {
+      const rows = Array.from({ length: 200 }, (_, index) => ({
+        id: `evt-${index}`,
+        aggregate_id: `ord-${index}`,
+        event_type: 'order.cancelled',
+        retry_count: 5,
+      }));
+      mocks.chain.data = rows;
+
+      await outboxService.deadLetterExhaustedEvents(5);
+
+      expect(mocks.chain.limit).toHaveBeenCalledWith(200);
+      expect(mocks.chain.lastInsert).toHaveLength(200);
+      expect(mocks.chain.lastIn).toEqual(['id', rows.map((row) => row.id)]);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Dead-letter batch limit (200) reached'),
+      );
+    });
   });
 
   describe('requeueFailedEvents', () => {

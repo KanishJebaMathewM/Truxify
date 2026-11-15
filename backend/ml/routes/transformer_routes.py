@@ -32,8 +32,23 @@ traffic_lock = asyncio.Lock()
 price_lock = asyncio.Lock()
 
 class ForecastRequest(BaseModel):
-    data: List[List[float]]
-    horizon: int = 24
+    data: List[List[float]] = Field(min_length=1, max_length=512)
+    horizon: int = Field(default=24, ge=1, le=168)
+
+    @model_validator(mode="after")
+    def validate_matrix(self):
+        width = None
+        for row in self.data:
+            if not row or len(row) > 128:
+                raise ValueError('each row must be a non-empty list of at most 128 numbers')
+            if width is None:
+                width = len(row)
+            elif len(row) != width:
+                raise ValueError('all rows must have equal length')
+            for value in row:
+                if not isinstance(value, (int, float)) or (isinstance(value, float) and (value != value or value in (float("inf"), float("-inf")))):
+                    raise ValueError('matrix values must be finite numbers')
+        return self
 
 class TrainRequest(BaseModel):
     epochs: int = Field(50, ge=1, le=500)

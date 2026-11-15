@@ -134,7 +134,7 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
       }
 
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+        desiredAccuracy: LocationAccuracy.high,
       );
       final d = Geolocator.distanceBetween(
         pos.latitude,
@@ -217,7 +217,7 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
 
     try {
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+        desiredAccuracy: LocationAccuracy.high,
       );
 
       // Client path stays under /api/orders; server route alignment is separate.

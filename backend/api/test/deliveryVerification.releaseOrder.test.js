@@ -128,7 +128,10 @@ describe('verifyDelivery escrow-before-RPC ordering (issue #4996)', () => {
       'order-1',
       expect.objectContaining({ escrow_status: 'released', release_tx_hash: '0xRELEASE' }),
     );
-    expect(result).toEqual({ escrowUpdateFailed: false });
+    // The return gained payment_released/amount_inr/order_display_id (the
+// deliberate contract from #17632) — match the field under test, not the
+// exact shape.
+expect(result).toMatchObject({ escrowUpdateFailed: false });
   });
 
   it('does not call complete_trip_tx when the on-chain release fails (retryable 503)', async () => {
@@ -323,7 +326,10 @@ describe('verifyDelivery payout defense-in-depth (amount integrity)', () => {
     const result = await svc.verifyDelivery({ orderId: 'order-1', driverId: 'driver-1', otp: '123456' }, {});
 
     expect(releaseFn).toHaveBeenCalledWith('OD-1', BigInt(legacyWei), expect.any(String));
-    expect(result).toEqual({ escrowUpdateFailed: false });
+    // The return gained payment_released/amount_inr/order_display_id (the
+// deliberate contract from #17632) — match the field under test, not the
+// exact shape.
+expect(result).toMatchObject({ escrowUpdateFailed: false });
   });
 });
 
@@ -425,7 +431,10 @@ describe('verifyDelivery stuck-escrow retry release confirmation (issue #7732)',
       {},
     );
 
-    expect(result).toEqual({ escrowUpdateFailed: false });
+    // The return gained payment_released/amount_inr/order_display_id (the
+// deliberate contract from #17632) — match the field under test, not the
+// exact shape.
+expect(result).toMatchObject({ escrowUpdateFailed: false });
     expect(notificationService.verifyDeliveryOtp).toHaveBeenCalledWith('otp-1');
   });
 

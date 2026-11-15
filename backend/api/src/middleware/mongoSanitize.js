@@ -1,7 +1,14 @@
 import logger from './logger.js';
 
+const PROHIBITED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function isProhibitedKey(key) {
+  return key.startsWith('$') || key.includes('$') || key.includes('.') || PROHIBITED_KEYS.has(key);
+}
+
 /**
- * Checks recursively if an object/array contains any key starting with '$' or containing '.'
+ * Checks recursively if an object/array contains a MongoDB operator, a dotted
+ * key, or a prototype-pollution key.
  */
 export function hasNoSqlInjection(val) {
   if (!val || typeof val !== 'object') return false;
@@ -11,7 +18,7 @@ export function hasNoSqlInjection(val) {
   }
 
   for (const key of Object.keys(val)) {
-    if (key.startsWith('$') || key.includes('$') || key.includes('.')) {
+    if (isProhibitedKey(key)) {
       return true;
     }
     if (hasNoSqlInjection(val[key])) {
@@ -23,7 +30,7 @@ export function hasNoSqlInjection(val) {
 }
 
 /**
- * Recursively strips keys starting with '$' or containing '.' from an object
+ * Recursively strips MongoDB operators and prototype-pollution keys.
  */
 export function sanitizeNoSqlObject(val) {
   if (!val || typeof val !== 'object') return val;
@@ -34,7 +41,7 @@ export function sanitizeNoSqlObject(val) {
 
   const cleanObj = {};
   for (const key of Object.keys(val)) {
-    if (key.startsWith('$') || key.includes('$') || key.includes('.')) {
+    if (isProhibitedKey(key)) {
       continue; // Strip prohibited key
     }
     cleanObj[key] = sanitizeNoSqlObject(val[key]);

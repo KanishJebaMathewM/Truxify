@@ -22,6 +22,13 @@ const upload = multer({
   },
 });
 
+function requireUploadedPhotos(req, res, next) {
+  if (Array.isArray(req.files) && req.files.length > 0) return next();
+  return res.status(400).json({
+    error: 'At least one photo file is required. Only JPEG and PNG images are accepted.',
+  });
+}
+
 // POST /api/maintenance/:ticketId/photos
 router.post(
   '/:ticketId/photos',
@@ -29,6 +36,7 @@ router.post(
   userLimiter,
   requirePolicy('maintenance:upload-photos'),
   upload.array('photos', 3),
+  requireUploadedPhotos,
   uploadMaintenancePhotos,
 );
 

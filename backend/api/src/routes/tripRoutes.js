@@ -135,7 +135,6 @@ function parseOptionalCoordinate(value, field, min, max) {
 
   return { value: parsed };
 }
-
 // ============================================================================
 // 🛡️ OFFLINE SYNC VALIDATION SCHEMAS (ISSUE #362)
 // ============================================================================

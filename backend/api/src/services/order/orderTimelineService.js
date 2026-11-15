@@ -74,19 +74,23 @@ export class OrderTimelineService {
     const time = completedAt || new Date().toISOString();
     const { error } = await this.orderRepository.updateTimelineMilestone(orderDisplayId, 'Order Placed', { completed: true, milestone_time: time });
     if (error) {
-      // Silently fail — cancel continues even if timeline update fails
+      // Cancellation has already changed the order status. Throwing here rolled
+      // the caller into an error path it could not recover from and contradicted
+      // the documented best-effort contract.
       logger.error('Failed to update Order Placed milestone on cancel:', error.message);
-      throw new DomainError(500, { error: 'Failed to update Order Placed milestone.', details: error.message });
+      return false;
     }
+    return true;
   }
 
   async deleteOrderTimeline(orderDisplayId) {
     const { error } = await this.orderRepository.deleteTimeline(orderDisplayId);
     if (error) {
-      // Silently fail — cleanup is best-effort
+      // Cleanup is best-effort; the order itself was already cancelled.
       logger.error('Failed to delete order timeline:', error.message);
-      throw new DomainError(500, { error: 'Failed to delete order timeline.', details: error.message });
+      return false;
     }
+    return true;
   }
 
   // --- Repository delegation ---

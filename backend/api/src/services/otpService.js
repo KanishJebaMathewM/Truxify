@@ -10,7 +10,6 @@
  * 4. Trigger SMS delivery via notification service
  * 5. Enforce rate limiting to prevent abuse
  */
-
 import crypto from 'crypto';
 import { supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
@@ -83,11 +82,13 @@ export function hashOtp(otp, salt) {
 export function verifyOtpHash(providedOtp, storedHash, storedSalt) {
   if (!providedOtp || !storedHash || !storedSalt) return false;
   const computedHash = hashOtp(providedOtp, storedSalt);
-  // Use timing-safe comparison to prevent timing attacks
-  return crypto.timingSafeEqual(
-    Buffer.from(computedHash, 'hex'),
-    Buffer.from(storedHash, 'hex')
-  );
+  // Use timing-safe comparison to prevent timing attacks. A stored hash of
+  // an unexpected length (legacy format, truncated row) must fail closed:
+  // timingSafeEqual throws a RangeError when the two buffers differ in length.
+  const computedBuffer = Buffer.from(computedHash, 'hex');
+  const storedBuffer = Buffer.from(storedHash, 'hex');
+  if (computedBuffer.length !== storedBuffer.length) return false;
+  return crypto.timingSafeEqual(computedBuffer, storedBuffer);
 }
 
 /**

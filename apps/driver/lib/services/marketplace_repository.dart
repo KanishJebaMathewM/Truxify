@@ -11,7 +11,6 @@ import '../models/marketplace_models.dart';
 import 'api_client.dart';
 import 'driver_insights_service.dart';
 import 'secure_storage.dart';
-
 class MarketplaceRepository {
   MarketplaceRepository({
     SupabaseClient? client,
@@ -96,6 +95,31 @@ class MarketplaceRepository {
     try {
       final decoded = await _apiClient.get(path);
       return decoded as Map<String, dynamic>;
+    } catch (e) {
+      if (e is ApiException) throw StateError(e.message);
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> optimiseLoads({
+    required double truckPayloadKg,
+    required double truckVolumeM3,
+    required List<Map<String, dynamic>> availableLoads,
+    required List<double> driverLocation,
+  }) async {
+    final path = '/api/ml/load-optimiser';
+    final payload = <String, dynamic>{
+      'truck_payload_kg': truckPayloadKg,
+      'truck_volume_m3': truckVolumeM3,
+      'available_loads': availableLoads,
+      'driver_location': driverLocation,
+    };
+    try {
+      final decoded = await _apiClient.post(path, body: payload);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      return <String, dynamic>{'success': false, 'combinations': <dynamic>[]};
     } catch (e) {
       if (e is ApiException) throw StateError(e.message);
       rethrow;

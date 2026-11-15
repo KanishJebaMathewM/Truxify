@@ -3,7 +3,32 @@ import logger from '../../middleware/logger.js';
 import * as Sentry from '@sentry/node';
 import { supabase, supabaseAdmin } from '../../config/db.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
+// backend/api/src/services/security/keyManagementService.js (Excerpt)
 
+export async function storeEncryptedKey(walletId, encryptedData) {
+  try {
+    // FIX: Add missing await per issue #8264 so errors are correctly captured
+    const { data, error } = await supabase
+      .from('encrypted_wallet_keys')
+      .insert([
+        {
+          wallet_id: walletId,
+          encrypted_data: encryptedData,
+          created_at: new Date().toISOString()
+        }
+      ]);
+
+    if (error) {
+      logger.error({ error }, '[KeyManagement] Failed to store encrypted wallet key');
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, data };
+  } catch (err) {
+    logger.error({ err }, '[KeyManagement] Exception thrown during key storage');
+    return { success: false, error: err.message };
+  }
+}
 const ALGORITHM = 'aes-256-gcm';
 const AUTH_TAG_LENGTH = 16;
 const SALT_LENGTH = 32;

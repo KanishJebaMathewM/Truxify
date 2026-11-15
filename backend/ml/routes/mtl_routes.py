@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 from datetime import datetime
 from typing import List
@@ -91,10 +92,34 @@ async def train_mtl(request: TrainRequest):
 
         raise HTTPException(status_code=500, detail="Internal server error")
 
+MAX_MTL_ROWS = 64
+MAX_MTL_COLS = 128
+
+
+def _validate_mtl_matrix(data):
+    if not isinstance(data, list) or not data or len(data) > MAX_MTL_ROWS:
+        raise HTTPException(status_code=422, detail='data must be a non-empty matrix of at most 64 rows')
+    width = None
+    for row in data:
+        if not isinstance(row, list) or not row or len(row) > MAX_MTL_COLS:
+            raise HTTPException(status_code=422, detail='each row must be a non-empty list of at most 128 numbers')
+        if width is None:
+            width = len(row)
+        elif len(row) != width:
+            raise HTTPException(status_code=422, detail='all rows must have equal length')
+        for value in row:
+            if not isinstance(value, (int, float)):
+                raise HTTPException(status_code=422, detail='matrix values must be numbers')
+            if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+                raise HTTPException(status_code=422, detail='matrix values must be finite')
+    return data
+
+
 @router.post("/predict")
 async def predict_mtl(data: List[List[float]]):
     """Make multi-task predictions"""
     try:
+        _validate_mtl_matrix(data)
         X = torch.tensor(data, dtype=torch.float32)
         predictions = trainer.predict(X)
         
@@ -117,6 +142,7 @@ async def predict_mtl(data: List[List[float]]):
 async def predict_single_task(data: List[List[float]], task_name: str):
     """Make prediction for single task"""
     try:
+        _validate_mtl_matrix(data)
         X = torch.tensor(data, dtype=torch.float32)
         prediction = trainer.predict(X, task_name=task_name)
         

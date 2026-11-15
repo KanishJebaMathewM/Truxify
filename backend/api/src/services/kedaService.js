@@ -130,8 +130,14 @@ class KEDAService {
      */
     async waitForScaledObjectStatus(namespace, scaledObjectName, predicate, options = {}) {
         const check = typeof predicate === 'function' ? predicate : () => true;
-        const interval = Number(options.intervalMs) || this.kedaPollInterval;
-        const timeout = Number(options.timeoutMs) || this.kedaPollTimeout;
+        const requestedInterval = Number(options.intervalMs);
+        const requestedTimeout = Number(options.timeoutMs);
+        const interval = Number.isFinite(requestedInterval) && requestedInterval > 0
+            ? requestedInterval
+            : this.kedaPollInterval;
+        const timeout = Number.isFinite(requestedTimeout) && requestedTimeout > 0
+            ? requestedTimeout
+            : this.kedaPollTimeout;
         const startedAt = Date.now();
         let latestResult;
 
@@ -180,10 +186,34 @@ class KEDAService {
                 };
             }
 
+            const result = response.data?.data?.result;
+            if (!Array.isArray(result) || result.length === 0) {
+                return {
+                    success: true,
+                    metric: metricName,
+                    value: 0,
+                    timestamp: new Date().toISOString()
+                };
+            }
+
+            const value = Number(result[0]?.value?.[1]);
+            if (!Number.isFinite(value)) {
+                // Prometheus uses the literal string "NaN" for undefined
+                // arithmetic. Returning success with NaN makes the JSON body
+                // contain null and drives the autoscaler recommendation from a
+                // value it cannot compare.
+                return {
+                    success: false,
+                    metric: metricName,
+                    error: 'Prometheus returned a non-finite sample',
+                    timestamp: new Date().toISOString()
+                };
+            }
+
             return {
                 success: true,
                 metric: metricName,
-                value: Number(response.data.data.result[0]?.value[1] || 0),
+                value,
                 timestamp: new Date().toISOString()
             };
         } catch (error) {

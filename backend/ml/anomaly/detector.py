@@ -420,5 +420,3 @@ class AnomalyDetector:
             'by_severity': by_severity,
             'last_anomaly': self.anomaly_history[-1] if self.anomaly_history else None
         }
-            'last_anomaly': history[-1] if history else None
-        }

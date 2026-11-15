@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSupabaseMock } from '../helpers/supabaseMock.js';
 
 const supabaseMock = createSupabaseMock();

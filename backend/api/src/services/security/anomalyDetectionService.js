@@ -4,7 +4,7 @@ import { supabase, supabaseAdmin } from '../../config/db.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 // backend/api/src/services/security/anomalyDetectionService.js
 
-import { ValidationError } from '../../errors/index.js'; // Adjust path per module structure
+import { ValidationError } from '../../utils/errors.js'; // Adjust path per module structure
 
 /**
  * Tracks user behavior for security anomaly detection.

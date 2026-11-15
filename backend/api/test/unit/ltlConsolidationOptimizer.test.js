@@ -1,22 +1,11 @@
 import assert from 'node:assert';
+import { describe, it } from 'vitest';
 import {
     matchLtlPartialLoads,
     optimizeLtlConsolidationKnapsack,
     validateCommodityCompatibility,
     HAZMAT_INCOMPATIBILITY_RULES
 } from '../../src/services/ltlConsolidation.js';
-
-async function test(name, fn) {
-    try {
-        await fn();
-        console.log(`  ✓ ${name}`);
-    } catch (err) {
-        console.error(`  ✗ ${name}:`, err.message);
-        throw err;
-    }
-}
-
-console.log('--- Running LTL Knapsack Consolidation & HAZMAT Optimizer Tests ---');
 
 const testTruck = {
     id: 'TRUCK-KNAPSACK-01',
@@ -25,7 +14,8 @@ const testTruck = {
     maxDelayMinutesTolerance: 60,
 };
 
-await test('validates HAZMAT commodity incompatibility rules', () => {
+describe('LTL consolidation optimizer', () => {
+it('validates HAZMAT commodity incompatibility rules', () => {
     assert.strictEqual(validateCommodityCompatibility(['FOOD_GRADE', 'GENERAL_FREIGHT']), true);
     assert.strictEqual(validateCommodityCompatibility(['FOOD_GRADE', 'CORROSIVE_8']), false);
     assert.strictEqual(validateCommodityCompatibility(['FOOD_GRADE', 'POISON_6']), false);
@@ -34,7 +24,7 @@ await test('validates HAZMAT commodity incompatibility rules', () => {
     assert.strictEqual(validateCommodityCompatibility(['PHARMACEUTICAL', 'POISON_6']), false);
 });
 
-await test('optimizes 2-load combination that beats single high-payout greedy choice', () => {
+it('optimizes 2-load combination that beats single high-payout greedy choice', () => {
     // Greedy approach would pick Single Big Load ($800) using 22 ft, 18000 lbs.
     // Knapsack bundle should pick Pair A ($550) + Pair B ($500) = $1050 total!
     const candidates = [
@@ -72,7 +62,7 @@ await test('optimizes 2-load combination that beats single high-payout greedy ch
     assert.ok(result.totalGrossPayoutUSD >= 1050);
 });
 
-await test('prevents co-loading of incompatible HAZMAT commodities in optimal bundle', () => {
+it('prevents co-loading of incompatible HAZMAT commodities in optimal bundle', () => {
     const candidates = [
         {
             id: 'FOOD-PALLET',
@@ -111,7 +101,7 @@ await test('prevents co-loading of incompatible HAZMAT commodities in optimal bu
     assert.strictEqual(validateCommodityCompatibility(bundledCommodities), true);
 });
 
-await test('enforces aggregate detour time budget constraint', () => {
+it('enforces aggregate detour time budget constraint', () => {
     // 3 loads, each fits space and weight, but together they exceed 60 min delay tolerance
     const candidates = [
         {
@@ -143,7 +133,7 @@ await test('enforces aggregate detour time budget constraint', () => {
     assert.strictEqual(result.optimalBundle.length, 2); // 2 * 25 = 50 min <= 60 min
 });
 
-await test('awards high fill-rate efficiency bonus when trailer space exceeds 80%', () => {
+it('awards high fill-rate efficiency bonus when trailer space exceeds 80%', () => {
     // Total capacity: 24 linear feet. 20 ft = 83.3% fill rate (> 80%)
     const candidates = [
         {
@@ -163,7 +153,7 @@ await test('awards high fill-rate efficiency bonus when trailer space exceeds 80
     assert.strictEqual(result.totalNetPayoutUSD, 1050.0);
 });
 
-await test('generates LIFO unloading sequence for multi-stop delivery', () => {
+it('generates LIFO unloading sequence for multi-stop delivery', () => {
     const candidates = [
         {
             id: 'STOP-A',
@@ -191,7 +181,7 @@ await test('generates LIFO unloading sequence for multi-stop delivery', () => {
     assert.strictEqual(result.stopSequence[0].type, 'DROPOFF');
 });
 
-await test('handles zero remaining capacity gracefully without division by zero', () => {
+it('handles zero remaining capacity gracefully without division by zero', () => {
     const emptyTruck = { id: 'FULL-TRUCK', remainingLinearFeet: 0, remainingWeightLbs: 0 };
     const result = optimizeLtlConsolidationKnapsack(emptyTruck, [{ id: 'L1', requiredLinearFeet: 5, requiredWeightLbs: 1000, payoutUSD: 100 }]);
 
@@ -200,7 +190,7 @@ await test('handles zero remaining capacity gracefully without division by zero'
     assert.strictEqual(result.capacityUtilization.linearFootPercentage, 0);
 });
 
-await test('preserves backward compatibility of matchLtlPartialLoads ranking', () => {
+it('preserves backward compatibility of matchLtlPartialLoads ranking', () => {
     const partialLoads = [
         { id: 'L1', requiredLinearFeet: 10, requiredWeightLbs: 5000, estimatedDetourMinutes: 10, payoutUSD: 400 },
         { id: 'L2', requiredLinearFeet: 12, requiredWeightLbs: 6000, estimatedDetourMinutes: 20, payoutUSD: 800 },
@@ -213,4 +203,5 @@ await test('preserves backward compatibility of matchLtlPartialLoads ranking', (
     assert.strictEqual(result.matches[1].loadId, 'L1');
 });
 
-console.log('\n🎉 All LTL Knapsack Consolidation & HAZMAT Optimizer tests passed successfully!\n');
+});
+

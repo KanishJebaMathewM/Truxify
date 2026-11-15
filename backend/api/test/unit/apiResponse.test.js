@@ -144,3 +144,6 @@ describe('apiResponse helpers', () => {
       expect(resultNegativeStr.pagination.limit).toBe(10);
       expect(resultNegativeStr.pagination.pageSize).toBe(10);
       expect(resultNegativeStr.pagination.totalPages).toBe(5);
+    });
+  });
+});

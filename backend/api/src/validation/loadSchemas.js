@@ -1,6 +1,4 @@
 import { z } from 'zod';
-// backend/api/src/validation/loadSchemas.js (Excerpt)
-
 
 export const loadSchema = z.object({
   // Before: z.string({ error: 'Load ID is required' })

@@ -64,7 +64,7 @@
     "socket.io": "^4.8.4",
     "swagger-jsdoc": "^6.3.0",
     "swagger-ui-express": "^5.0.1",
-    "twilio": "^5.13.1",
+    "twilio": "^6.3.0",
     "ws": "^8.21.3",
     "zod": "^4.6.7"
   },

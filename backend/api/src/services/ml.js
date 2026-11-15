@@ -28,30 +28,6 @@ function guardMlApiKey() {
   }
 }
 // backend/api/src/services/ml.js
-
-/**
- * Safely parses weight values into non-negative numbers for ML and pricing models.
- * @param {any} value - Raw weight input (string or number).
- * @param {number} [fallback=0] - Default fallback value if parsing fails.
- * @returns {number} Valid non-negative weight in kilograms.
- */
-export function parseWeightKgSafe(value, fallback = 0) {
-  if (value === undefined || value === null) {
-    return fallback;
-  }
-
-  if (typeof value === 'number') {
-    return Number.isFinite(value) && value >= 0 ? value : fallback;
-  }
-
-  // Clean non-numeric characters except digits and single decimal points
-  const cleaned = String(value).replace(/[^0-9.]/g, '');
-  const normalized = cleaned.replace(/(\..*?)\..*/g, '$1');
-
-  const parsed = parseFloat(normalized);
-  
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
-}
 /**
  * Parse the free-text `weight` column of load_offers (e.g. '3 tonnes') into
  * kilograms. Returns null when the value cannot be interpreted, consistent
@@ -712,6 +688,23 @@ export async function rollbackAbTest(testId) {
   return handleResponse(response, url, 'POST');
 }
 
+/**
+ * Searches for available loads with ML-optimized pricing.
+ * @param {object} params
+ * @returns {Promise<object>}
+ */
+export async function searchLoads({ origin, destination, vehicleType, maxPrice } = {}) {
+  guardMlApiKey();
+  const url = `${getBaseUrl()}/search_loads`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ origin, destination, vehicleType, maxPrice }),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
+  });
+  return handleResponse(response, url, 'POST');
+}
+
 export const __testing = {
   demandCache,
   priceCache,
@@ -735,6 +728,7 @@ export default {
   predictDriverProfit,
   matchDeadhead,
   matchEnRouteLoads,
+  searchLoads,
   getAbTestingStatus,
   rollbackAbTest,
   parseWeightKgSafe,

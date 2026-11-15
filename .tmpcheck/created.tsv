@@ -1,0 +1,47 @@
+report-html-escape	19436	https://github.com/KanishJebaMathewM/Truxify/issues/19436	efa71ffbe	fix: escape report values before HTML export
+chat-queue-drain	19437	https://github.com/KanishJebaMathewM/Truxify/issues/19437	a61f98f3a	fix: drain offline chat queues atomically
+audit-log-signature	19438	https://github.com/KanishJebaMathewM/Truxify/issues/19438	3ac303ff7	fix: sign the complete audit log payload
+upload-content-length	19439	https://github.com/KanishJebaMathewM/Truxify/issues/19439	cb16a5cac	fix: reject non-integer upload content lengths
+otp-blank-verification	19440	https://github.com/KanishJebaMathewM/Truxify/issues/19440	057bf516b	fix: fail closed when verifying a blank OTP
+document-expiry-validation	19441	https://github.com/KanishJebaMathewM/Truxify/issues/19441	c8bc2ce63,cbc4afc6e	fix: reject missing or invalid document expiry dates
+trip-completion-status	19442	https://github.com/KanishJebaMathewM/Truxify/issues/19442	00eded192	fix: stop counting unknown trip statuses as completed
+negative-driver-payout	19443	https://github.com/KanishJebaMathewM/Truxify/issues/19443	af96a7845	fix: never emit a negative driver payout
+rtl-default-locale	19444	https://github.com/KanishJebaMathewM/Truxify/issues/19444	ac4451d28	fix: default RTL detection for missing locales
+locale-detection-malformed	19445	https://github.com/KanishJebaMathewM/Truxify/issues/19445	3cf22fcfa	fix: handle malformed locale query and header values
+pluralizer-input-hardening	19446	https://github.com/KanishJebaMathewM/Truxify/issues/19446	6b469b528	fix: harden pluralization against non-string inputs
+socket-rate-limits	19447	https://github.com/KanishJebaMathewM/Truxify/issues/19447	9ea01b347	fix: validate socket rate limiter abuse thresholds
+pod-upload-size	19448	https://github.com/KanishJebaMathewM/Truxify/issues/19448	a090c9b9d	fix: measure proof-of-delivery uploads from their buffers
+audit-log-failures	19449	https://github.com/KanishJebaMathewM/Truxify/issues/19449	d9367a74b	fix: contain audit logging failures
+cache-key-safety	19450	https://github.com/KanishJebaMathewM/Truxify/issues/19450	a306a54a3	fix: reject unusable cache keys and authenticated responses
+cookie-attribute-injection	19451	https://github.com/KanishJebaMathewM/Truxify/issues/19451	7eb8d6d2f	fix: preserve cookie attributes and reject header injection
+header-size-overhead	19452	https://github.com/KanishJebaMathewM/Truxify/issues/19452	06935fdce	fix: measure header overhead in the size guard
+nested-hpp-normalization	19453	https://github.com/KanishJebaMathewM/Truxify/issues/19453	e030c7462	fix: normalize nested duplicate query parameters
+nosql-prototype-keys	19454	https://github.com/KanishJebaMathewM/Truxify/issues/19454	dfd0fcacf	fix: block prototype pollution keys in NoSQL sanitizer
+response-prototype-pollution	19455	https://github.com/KanishJebaMathewM/Truxify/issues/19455	586d2a068	fix: prevent prototype pollution during response sanitization
+hsts-preload-opt-in	19456	https://github.com/KanishJebaMathewM/Truxify/issues/19456	47127781c	fix: require explicit opt-in for HSTS preload
+sentry-event-filtering	19457	https://github.com/KanishJebaMathewM/Truxify/issues/19457	6c59ab77c	fix: filter Sentry events by exception type and message
+nested-query-sanitization	19458	https://github.com/KanishJebaMathewM/Truxify/issues/19458	f2ea0fef6	fix: sanitize nested query objects against prototype pollution
+tracing-span-end	19459	https://github.com/KanishJebaMathewM/Truxify/issues/19459	f351872be	fix: end request spans exactly once
+demand-model-output	19460	https://github.com/KanishJebaMathewM/Truxify/issues/19460	9251243e7	fix: guard demand estimates against malformed model output
+fraud-event-override	19461	https://github.com/KanishJebaMathewM/Truxify/issues/19461	cbd8ec9a8	fix: prevent client data from overriding fraud event types
+keda-error-disclosure	19462	https://github.com/KanishJebaMathewM/Truxify/issues/19462	d86bba415	fix: stop leaking autoscaler errors
+maintenance-photo-types	19463	https://github.com/KanishJebaMathewM/Truxify/issues/19463	3e8e3465a	fix: reject unsupported maintenance photo types explicitly
+relay-plan-validation	19464	https://github.com/KanishJebaMathewM/Truxify/issues/19464	aa0d2e026	fix: reject invalid relay plan coordinates and amounts
+tracking-link-replacement	19465	https://github.com/KanishJebaMathewM/Truxify/issues/19465	49dc4f844	fix: keep tracking links active until a replacement is created
+webhook-replay-store	19466	https://github.com/KanishJebaMathewM/Truxify/issues/19466	ae33efee4	fix: require a shared replay store for production webhooks
+webrtc-radius-cap	19467	https://github.com/KanishJebaMathewM/Truxify/issues/19467	b3fd03991	fix: cap the nearby peer search radius
+alert-unknown-channel	19468	https://github.com/KanishJebaMathewM/Truxify/issues/19468	6cd692ced	fix: fail alert routing when a channel is unknown
+reputation-escrow-routing	19469	https://github.com/KanishJebaMathewM/Truxify/issues/19469	81288789c	fix: never route reputation calls to the escrow contract
+escalation-timer-failures	19470	https://github.com/KanishJebaMathewM/Truxify/issues/19470	1615e7470	fix: contain failures in escalation timers
+multicall-timer-cleanup	19471	https://github.com/KanishJebaMathewM/Truxify/issues/19471	42c17b91b	fix: clear multicall timeout timers
+document-verification-persistence	19472	https://github.com/KanishJebaMathewM/Truxify/issues/19472	fcdfc33ca	fix: persist document verification with the real schema
+expiry-alert-schema	19473	https://github.com/KanishJebaMathewM/Truxify/issues/19473	370ac7938	fix: align document expiry alerts with the schema
+shipment-id-validation	19474	https://github.com/KanishJebaMathewM/Truxify/issues/19474	9872c1289	fix: validate shipment IDs before querying
+keda-nonfinite-metrics	19475	https://github.com/KanishJebaMathewM/Truxify/issues/19475	8bfc86dad	fix: reject non-finite autoscaler metric samples
+load-offer-region-bounds	19476	https://github.com/KanishJebaMathewM/Truxify/issues/19476	2f543910c	fix: reject out-of-range coordinates in cache regions
+otp-throttle-config	19477	https://github.com/KanishJebaMathewM/Truxify/issues/19477	c3e32b36e	fix: validate OTP throttling configuration
+timeline-best-effort	19478	https://github.com/KanishJebaMathewM/Truxify/issues/19478	c7fe109ce	fix: make cancellation timeline cleanup best effort
+profit-null-input	19479	https://github.com/KanishJebaMathewM/Truxify/issues/19479	122db5796	fix: keep profit estimates safe for null input
+weather-coordinate-bounds	19480	https://github.com/KanishJebaMathewM/Truxify/issues/19480	176cfeced	fix: reject out-of-range weather coordinates
+escrow-batch-events	19481	https://github.com/KanishJebaMathewM/Truxify/issues/19481	ac0d19289	fix: match batch release events to the correct order
+ocr-buffer-size	19482	https://github.com/KanishJebaMathewM/Truxify/issues/19482	8f7f95e1f	fix: validate OCR uploads from their actual buffers

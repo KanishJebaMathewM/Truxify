@@ -1,6 +1,8 @@
 """Unit tests for Model #16 Cargo & Payload Multi-Load Optimiser."""
 
 import unittest
+
+from pydantic import ValidationError
 from ml.routers.load_optimiser import (
     LoadItem,
     LoadOptimiserInput,
@@ -115,6 +117,28 @@ class TestLoadOptimiser(unittest.TestCase):
         )
         self.assertEqual(len(combinations), 0)
 
+
+
+    def test_rejects_available_load_lists_above_the_cap(self):
+        loads = [
+            LoadItem(
+                load_id=f"L{i}",
+                weight_kg=100,
+                volume_m3=1,
+                origin=[19.0760, 72.8777],
+                destination=[19.1000, 72.9000],
+                freight_amount=1000,
+            )
+            for i in range(201)
+        ]
+
+        with self.assertRaises(ValidationError):
+            LoadOptimiserInput(
+                truck_payload_kg=10000,
+                truck_volume_m3=40,
+                available_loads=loads,
+                driver_location=[19.0760, 72.8777],
+            )
 
 if __name__ == "__main__":
     unittest.main()

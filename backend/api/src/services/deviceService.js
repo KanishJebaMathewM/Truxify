@@ -1,7 +1,7 @@
 // backend/api/src/services/deviceService.js (Excerpt)
 
-import { supabase } from '../config/supabase.js';
-import { logger } from '../utils/logger.js';
+import { supabase } from '../config/db.js';
+import logger from '../middleware/logger.js';
 
 export async function getUniquePlatforms() {
   try {

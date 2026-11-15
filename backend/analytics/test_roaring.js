@@ -2,11 +2,17 @@
 import { RoaringBitmapIndexer } from './roaring_bitmap.js';
 import assert from 'node:assert/strict';
 
-console.log('Testing Roaring Bitmap Fleet Indexer...');
+console.log('Testing Roaring Bitmap Fleet Indexer...\n');
 
 const indexer = new RoaringBitmapIndexer();
 
-// Add driver attributes
+// Helper function for testing
+function testCase(description, actual, expected) {
+    assert.deepStrictEqual(actual, expected, description);
+    console.log(`✅ ${description}`);
+}
+
+// 1. Add driver attributes
 indexer.setDriverBit('ACTIVE', 10);
 indexer.setDriverBit('ACTIVE', 12);
 indexer.setDriverBit('ACTIVE', 15);
@@ -16,36 +22,84 @@ indexer.setDriverBit('HAZMAT', 15);
 
 indexer.setDriverBit('REFRIGERATED', 15);
 
-// Test Active and Hazmat drivers
-const activeHazmat = indexer.intersectAttributes([
-  'ACTIVE',
-  'HAZMAT'
-]);
+indexer.setDriverBit('LONG_DISTANCE', 10);
+indexer.setDriverBit('LONG_DISTANCE', 15);
 
-assert.deepStrictEqual(activeHazmat, [12, 15]);
+// 2. Test Active drivers
+testCase(
+    'Active drivers',
+    indexer.intersectAttributes(['ACTIVE']),
+    [10, 12, 15]
+);
 
-// Test Active, Hazmat and Refrigerated drivers
-const activeHazmatRef = indexer.intersectAttributes([
-  'ACTIVE',
-  'HAZMAT',
-  'REFRIGERATED'
-]);
+// 3. Test Active and Hazmat drivers
+testCase(
+    'Active and Hazmat drivers',
+    indexer.intersectAttributes(['ACTIVE', 'HAZMAT']),
+    [12, 15]
+);
 
-assert.deepStrictEqual(activeHazmatRef, [15]);
+// 4. Test three attribute intersection
+testCase(
+    'Active, Hazmat and Refrigerated drivers',
+    indexer.intersectAttributes([
+        'ACTIVE',
+        'HAZMAT',
+        'REFRIGERATED'
+    ]),
+    [15]
+);
 
-// Test Active drivers only
-const activeDrivers = indexer.intersectAttributes(['ACTIVE']);
+// 5. Test multiple matching attributes
+testCase(
+    'Active and Long Distance drivers',
+    indexer.intersectAttributes([
+        'ACTIVE',
+        'LONG_DISTANCE'
+    ]),
+    [10, 15]
+);
 
-assert.deepStrictEqual(activeDrivers, [10, 12, 15]);
+// 6. Test non-existent attribute
+testCase(
+    'Non-existent attribute',
+    indexer.intersectAttributes(['NON_EXISTENT']),
+    []
+);
 
-// Test no matching drivers
-const noMatch = indexer.intersectAttributes([
-  'HAZMAT',
-  'REFRIGERATED',
-  'ACTIVE',
-  'NON_EXISTENT'
-]);
+// 7. Test no matching drivers
+testCase(
+    'No matching drivers',
+    indexer.intersectAttributes([
+        'ACTIVE',
+        'HAZMAT',
+        'REFRIGERATED',
+        'NON_EXISTENT'
+    ]),
+    []
+);
 
-assert.deepStrictEqual(noMatch, []);
+// 8. Test duplicate driver insertion
+indexer.setDriverBit('ACTIVE', 10);
+indexer.setDriverBit('HAZMAT', 12);
 
-console.log('✅ All Roaring Bitmap Fleet Indexer tests passed!');
+testCase(
+    'Duplicate insertion does not duplicate driver IDs',
+    indexer.intersectAttributes(['ACTIVE']),
+    [10, 12, 15]
+);
+
+// 9. Test repeated queries
+testCase(
+    'Repeated intersection query',
+    indexer.intersectAttributes(['ACTIVE', 'HAZMAT']),
+    [12, 15]
+);
+
+testCase(
+    'Original index data remains unchanged',
+    indexer.intersectAttributes(['ACTIVE']),
+    [10, 12, 15]
+);
+
+console.log('\n🎉 All Roaring Bitmap Fleet Indexer tests passed!');

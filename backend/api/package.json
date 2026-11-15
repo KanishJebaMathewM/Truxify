@@ -30,7 +30,7 @@
     "@opentelemetry/instrumentation-redis": "^0.69.0",
     "@opentelemetry/instrumentation-winston": "^0.65.0",
     "@opentelemetry/sdk-trace-node": "^2.11.0",
-    "@sentry/node": "^10.75.0",
+    "@sentry/node": "^11.12.0",
     "@supabase/supabase-js": "^2.109.0",
     "@upstash/redis": "^1.41.0",
     "axios": "^1.21.0",

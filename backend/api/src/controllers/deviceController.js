@@ -296,10 +296,14 @@ export async function getDevicePlatforms(req, res, next) {
  */
 export async function pruneDevices(req, res, next) {
   try {
-    // Default to 30 days if not specified in query params
-    const days = parseInt(req.query.days, 10) || 30;
-    
-    if (days < 1 || days > 365) {
+    // Default to 30 days only when the parameter is absent. A present but
+    // invalid value must be rejected; `parseInt(...) || 30` treated 0 and
+    // non-numeric input as the default and could delete rows with a much
+    // shorter retention window than the caller requested.
+    const rawDays = req.query?.days;
+    const days = rawDays === undefined ? 30 : Number(rawDays);
+
+    if (!Number.isInteger(days) || days < 1 || days > 365) {
       return res.status(400).json({
         success: false,
         error: 'Days parameter must be between 1 and 365'

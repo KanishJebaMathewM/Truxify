@@ -104,60 +104,8 @@ import { auditLog } from '../middleware/auditLog.js';
 import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
 import { formatPaginationMeta } from '../utils/pagination.js';
 
-// backend/api/src/routes/supportRoutes.js (Excerpt)
-
-import { validateParams, uuidParamSchema } from '../validation/requestSchemas.js';
-
-// Before:
-// router.get('/tickets/:id/comments', authenticate, userLimiter, async (req, res) => { ... })
-
-// After: Apply validateParams middleware with uuidParamSchema
-router.get(
-  '/tickets/:id/comments',
-  authenticate,
-  userLimiter,
-  validateParams(uuidParamSchema),
-  async (req, res) => {
-    const ticketId = req.params.id;
-    try {
-      const { data: ticket, error: fetchError } = await supabase
-        .from('support_tickets')
-        .select('id, user_id')
-        .eq('id', ticketId);
-
-      if (fetchError) {
-        return res.status(500).json({ success: false, error: fetchError.message });
-      }
-
-      if (!ticket || ticket.length === 0) {
-        return res.status(404).json({ success: false, error: 'Ticket not found' });
-      }
-
-      // Fetch and return comments...
-      return res.status(200).json({ success: true, data: [] });
-    } catch (err) {
-      return res.status(500).json({ success: false, error: err.message });
-    }
-  }
-);
 const router = express.Router();
 router.use(userLimiter);
-// backend/api/src/routes/supportRoutes.js (Excerpt)
-
-const ADMIN_ONLY_STATUSES = ['closed', 'in_progress'];
-
-// Inside PATCH /api/support/tickets/:id route handler:
-if (
-  req.user.role !== 'admin' &&
-  normalizedStatus !== ticket.status &&
-  ADMIN_ONLY_STATUSES.includes(normalizedStatus)
-) {
-  return res.status(403).json({
-    success: false,
-    error: 'ACCESS_DENIED',
-    message: 'Access Denied: Only admins can change tickets to this status.'
-  });
-}
 
 // support_tickets / support_ticket_comments are authenticated/service-role
 // only (RLS policies + revoke_anon_privileges.sql revoke anon access), so the
@@ -166,17 +114,6 @@ if (
 // admin handlers use the service-role client so they can see all tickets.
 const adminDb = getAdminClient();
 const userDb = (req) => createUserClient(req.token);
-// backend/api/src/routes/supportRoutes.js (Excerpt)
-
-// ✅ Retained: First clean declaration using validated query params
-const limit = Math.min(100, parsedLimit.value);
-const offset = parsedOffset.value;
-
-// ... intermediate logic ...
-
-// ❌ Removed redundant duplicate declaration:
-// const limit = Math.min(100, Math.max(1, Number(rawLimit) || 100));
-// const offset = Math.max(0, Number(rawOffset) || 0);
 
 const FAQ_COLUMNS = 'id, question, answer, app_type, sort_order';
 const TICKET_COLUMNS = 'id, subject, description, category, status, assigned_to, created_at, updated_at';

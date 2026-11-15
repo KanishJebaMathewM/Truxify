@@ -33,8 +33,9 @@ describe('validatePricePrediction', () => {
     it('rejects non-object inputs', () => {
       expect(validatePricePrediction('string').reason).toBe(RejectionReason.UNEXPECTED_TYPE);
       expect(validatePricePrediction(123).reason).toBe(RejectionReason.UNEXPECTED_TYPE);
-      // Arrays are typeof 'object' so they reach the 'estimated_price' check
-      expect(validatePricePrediction([]).reason).toBe(RejectionReason.MISSING_FIELD);
+      // Arrays are rejected by the explicit Array.isArray guard, not treated
+      // as objects with missing fields.
+      expect(validatePricePrediction([]).reason).toBe(RejectionReason.UNEXPECTED_TYPE);
     });
   });
 

@@ -596,7 +596,7 @@ describe('deviceController', () => {
       expect(next).not.toHaveBeenCalled();
     });
 
-    it.each(['0', '-1', '366', '1.5', '7days', '', ' '])(
+    it.each(['0', '-1', '366', '1.5', '7days', '1e2', '0x10', '+7', '', ' '])(
       'rejects the invalid retention value %j before pruning',
       async (days) => {
         const req = { query: { days } };

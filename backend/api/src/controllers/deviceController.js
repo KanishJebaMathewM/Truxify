@@ -301,7 +301,9 @@ export async function pruneDevices(req, res, next) {
     // non-numeric input as the default and could delete rows with a much
     // shorter retention window than the caller requested.
     const rawDays = req.query?.days;
-    const days = rawDays === undefined ? 30 : Number(rawDays);
+    const days = rawDays === undefined
+      ? 30
+      : (/^\d+$/.test(String(rawDays)) ? Number(rawDays) : NaN);
 
     if (!Number.isInteger(days) || days < 1 || days > 365) {
       return res.status(400).json({

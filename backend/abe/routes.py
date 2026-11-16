@@ -1,9 +1,11 @@
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
-from typing import List, Dict, Any
-from datetime import datetime, timezone
 import logging
+
+from datetime import datetime, timezone
+from typing import Any
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from abe_core import (
     CPABE,
@@ -13,6 +15,7 @@ from abe_core import (
     AccessPolicy,
 )
 
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
@@ -20,64 +23,113 @@ router = APIRouter(
     tags=["Attribute-Based Encryption"],
 )
 
+
 # ------------------------------------------------------------------
 # Initialize ABE Systems
 # ------------------------------------------------------------------
+
+# These instances should be initialized through application lifespan
+# management in a larger production deployment.
 
 cp_abe = CPABE()
 kp_abe = KPABE()
 dabe = DecentralizedABE()
 
+
+# ------------------------------------------------------------------
+# Base Request Model
+# ------------------------------------------------------------------
+
+class ValidatedRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def validate_non_empty_strings(cls, value):
+        """Reject empty or whitespace-only string inputs."""
+
+        if isinstance(value, str):
+            value = value.strip()
+
+            if not value:
+                raise ValueError("String fields cannot be empty")
+
+        elif isinstance(value, list):
+            value = [
+                item.strip() if isinstance(item, str) else item
+                for item in value
+            ]
+
+            if any(
+                isinstance(item, str) and not item
+                for item in value
+            ):
+                raise ValueError("List entries cannot be empty")
+
+        return value
+
+
 # ------------------------------------------------------------------
 # Request Models
 # ------------------------------------------------------------------
 
-class PolicyRequest(BaseModel):
-    expression: str = Field(min_length=1)
-    attributes: List[str] = Field(min_length=1)
+class PolicyRequest(ValidatedRequest):
+    expression: str = Field(min_length=1, max_length=4096)
+    attributes: list[str] = Field(min_length=1, max_length=100)
 
 
-class EncryptRequest(BaseModel):
-    plaintext: str
+class EncryptRequest(ValidatedRequest):
+    plaintext: str = Field(min_length=1, max_length=1_000_000)
     policy: PolicyRequest
 
 
-class DecryptRequest(BaseModel):
-    encrypted_data: Dict[str, Any]
-    user_attributes: List[Dict[str, str]]
+class UserAttributeRequest(ValidatedRequest):
+    name: str = Field(min_length=1, max_length=256)
+    value: str = Field(default="", max_length=1024)
+    issuer: str = Field(default="", max_length=256)
 
 
-class KPDecryptRequest(BaseModel):
-    encrypted_data: Dict[str, Any]
-    user_key: Dict[str, Any]
+class DecryptRequest(ValidatedRequest):
+    encrypted_data: dict[str, Any]
+    user_attributes: list[UserAttributeRequest] = Field(
+        min_length=1,
+        max_length=100,
+    )
 
 
-class UserKeyRequest(BaseModel):
-    attributes: List[str] = Field(min_length=1)
+class KPDecryptRequest(ValidatedRequest):
+    encrypted_data: dict[str, Any]
+    user_key: dict[str, Any]
 
 
-class MultiAuthorityRequest(BaseModel):
-    authorities: List[str] = Field(min_length=1)
+class UserKeyRequest(ValidatedRequest):
+    attributes: list[str] = Field(min_length=1, max_length=100)
+
+
+class MultiAuthorityRequest(ValidatedRequest):
+    authorities: list[str] = Field(min_length=1, max_length=50)
     policy: PolicyRequest
-    plaintext: str
+    plaintext: str = Field(min_length=1, max_length=1_000_000)
 
 
-class AddAuthorityRequest(BaseModel):
-    authority_id: str = Field(min_length=1)
-    public_key: str = Field(min_length=1)
+class AddAuthorityRequest(ValidatedRequest):
+    authority_id: str = Field(min_length=1, max_length=256)
+    public_key: str = Field(min_length=1, max_length=16384)
 
 
-class IssueAttributeRequest(BaseModel):
-    authority_id: str = Field(min_length=1)
-    attribute: str = Field(min_length=1)
-    user: str = Field(min_length=1)
+class IssueAttributeRequest(ValidatedRequest):
+    authority_id: str = Field(min_length=1, max_length=256)
+    attribute: str = Field(min_length=1, max_length=256)
+    user: str = Field(min_length=1, max_length=256)
 
 
 # ------------------------------------------------------------------
 # Helper Functions
 # ------------------------------------------------------------------
 
-def success_response(data: Any) -> Dict[str, Any]:
+def success_response(data: Any) -> dict[str, Any]:
+    """Return a standardized API response."""
+
     return {
         "success": True,
         "data": data,
@@ -85,8 +137,34 @@ def success_response(data: Any) -> Dict[str, Any]:
     }
 
 
-def handle_exception(message: str, exc: Exception):
+def handle_exception(message: str, exc: Exception) -> None:
+    """
+    Convert internal exceptions into safe HTTP responses.
+
+    Internal exception details are logged but not exposed to clients.
+    """
+
+    if isinstance(exc, HTTPException):
+        raise exc
+
+    if isinstance(exc, PermissionError):
+        logger.warning("%s: access denied", message)
+
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied",
+        ) from exc
+
+    if isinstance(exc, ValueError):
+        logger.warning("%s: invalid operation input", message)
+
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid operation input",
+        ) from exc
+
     logger.exception("%s", message)
+
     raise HTTPException(
         status_code=500,
         detail=message,
@@ -94,18 +172,24 @@ def handle_exception(message: str, exc: Exception):
 
 
 def create_policy(request: PolicyRequest) -> AccessPolicy:
+    """Convert an API policy request into an ABE access policy."""
+
     return AccessPolicy(
         expression=request.expression,
         attributes=request.attributes,
     )
 
 
-def create_attributes(items):
+def create_attributes(
+    items: list[UserAttributeRequest],
+) -> list[Attribute]:
+    """Convert API attribute models into ABE Attribute objects."""
+
     return [
         Attribute(
-            name=attr["name"],
-            value=attr.get("value", ""),
-            issuer=attr.get("issuer", ""),
+            name=attr.name,
+            value=attr.value,
+            issuer=attr.issuer,
         )
         for attr in items
     ]
@@ -116,7 +200,9 @@ def create_attributes(items):
 # ------------------------------------------------------------------
 
 @router.post("/cp-abe/encrypt")
-async def cp_abe_encrypt(request: EncryptRequest):
+def cp_abe_encrypt(request: EncryptRequest):
+    """Encrypt plaintext using a ciphertext access policy."""
+
     try:
         policy = create_policy(request.policy)
 
@@ -132,7 +218,9 @@ async def cp_abe_encrypt(request: EncryptRequest):
 
 
 @router.post("/cp-abe/decrypt")
-async def cp_abe_decrypt(request: DecryptRequest):
+def cp_abe_decrypt(request: DecryptRequest):
+    """Decrypt ciphertext using user attributes."""
+
     try:
         attributes = create_attributes(
             request.user_attributes
@@ -150,7 +238,9 @@ async def cp_abe_decrypt(request: DecryptRequest):
 
 
 @router.post("/cp-abe/user-key")
-async def generate_cp_abe_user_key(request: UserKeyRequest):
+def generate_cp_abe_user_key(request: UserKeyRequest):
+    """Generate a CP-ABE user key for specified attributes."""
+
     try:
         result = cp_abe.generate_user_key(
             request.attributes
@@ -167,7 +257,9 @@ async def generate_cp_abe_user_key(request: UserKeyRequest):
 # ------------------------------------------------------------------
 
 @router.post("/kp-abe/encrypt")
-async def kp_abe_encrypt(request: EncryptRequest):
+def kp_abe_encrypt(request: EncryptRequest):
+    """Encrypt plaintext using KP-ABE attribute parameters."""
+
     try:
         result = kp_abe.encrypt(
             request.plaintext,
@@ -181,7 +273,9 @@ async def kp_abe_encrypt(request: EncryptRequest):
 
 
 @router.post("/kp-abe/decrypt")
-async def kp_abe_decrypt(request: KPDecryptRequest):
+def kp_abe_decrypt(request: KPDecryptRequest):
+    """Decrypt KP-ABE ciphertext using a policy-bound user key."""
+
     try:
         result = kp_abe.decrypt(
             request.encrypted_data,
@@ -199,7 +293,9 @@ async def kp_abe_decrypt(request: KPDecryptRequest):
 # ------------------------------------------------------------------
 
 @router.post("/dabe/authority/add")
-async def add_authority(request: AddAuthorityRequest):
+def add_authority(request: AddAuthorityRequest):
+    """Register a decentralized attribute authority."""
+
     try:
         result = dabe.add_authority(
             request.authority_id,
@@ -213,7 +309,9 @@ async def add_authority(request: AddAuthorityRequest):
 
 
 @router.post("/dabe/attribute/issue")
-async def issue_attribute(request: IssueAttributeRequest):
+def issue_attribute(request: IssueAttributeRequest):
+    """Issue an attribute through a registered authority."""
+
     try:
         result = dabe.issue_attribute(
             request.authority_id,
@@ -228,7 +326,9 @@ async def issue_attribute(request: IssueAttributeRequest):
 
 
 @router.post("/dabe/encrypt")
-async def dabe_encrypt(request: MultiAuthorityRequest):
+def dabe_encrypt(request: MultiAuthorityRequest):
+    """Encrypt plaintext using multiple attribute authorities."""
+
     try:
         policy = create_policy(request.policy)
 
@@ -249,25 +349,26 @@ async def dabe_encrypt(request: MultiAuthorityRequest):
 # ------------------------------------------------------------------
 
 @router.get("/stats")
-async def get_abe_stats():
+def get_abe_stats():
+    """
+    Return limited operational information.
+
+    Do not expose master keys, secret-key state, or complete
+    internal attribute and authority registries publicly.
+    """
+
     try:
         stats = {
-            "cp_abe": {
-                "attributes": list(cp_abe.attributes.keys()),
-                "has_master_key": (
-                    cp_abe.master_secret is not None
-                ),
-                "total_attributes": len(cp_abe.attributes),
+            "systems": {
+                "cp_abe": "initialized",
+                "kp_abe": "initialized",
+                "dabe": "initialized",
             },
-            "kp_abe": {
-                "has_master_key": (
-                    kp_abe.master_secret is not None
-                ),
-            },
-            "dabe": {
-                "authorities": list(dabe.authorities.keys()),
-                "total_authorities": len(dabe.authorities),
-            },
+            "available_operations": [
+                "cp-abe",
+                "kp-abe",
+                "dabe",
+            ],
         }
 
         return success_response(stats)

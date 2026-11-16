@@ -1,4 +1,3 @@
-
 ---
 name: Bug report
 about: Create a report to help us identify and fix a bug
@@ -44,5 +43,7 @@ Please complete the following information:
 - **Device:** [e.g. Desktop, Laptop, Smartphone]
 
 ## Additional context
+
+Add any other context about the problem here.
 
 Add any other context about the problem here.

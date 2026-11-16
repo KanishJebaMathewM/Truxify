@@ -2,26 +2,34 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
-vi.mock('../../../../src/middleware/logger.js', () => ({
+vi.mock('../../../src/middleware/logger.js', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
 
-const mockScheduler = {
-  schedule: vi.fn(() => 'task_123'),
-  cancel: vi.fn(() => true),
-  cancelAll: vi.fn((priority) => priority === null ? 5 : 2),
-};
+const { mockScheduler, Priority, PriorityNames } = vi.hoisted(() => {
+  const Priority = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, IDLE: 4 };
+  const PriorityNames = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'IDLE'];
+  return {
+    mockScheduler: {
+      schedule: vi.fn(() => 'task_123'),
+      cancel: vi.fn(() => true),
+      cancelAll: vi.fn((priority) => priority === null ? 5 : 2),
+    },
+    Priority,
+    PriorityNames,
+  };
+});
 
-vi.mock('../../../../scheduler/RenderScheduler.js', () => {
+vi.mock('../../../scheduler/RenderScheduler.js', () => {
   const RenderScheduler = class {
     constructor() { return mockScheduler; }
   };
-  RenderScheduler.Priority = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, IDLE: 4 };
-  RenderScheduler.PriorityNames = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'IDLE'];
-  return { default: RenderScheduler, ...vi.importActual('../../../../scheduler/RenderScheduler.js') };
+  RenderScheduler.Priority = Priority;
+  RenderScheduler.PriorityNames = PriorityNames;
+  return { default: RenderScheduler, Priority, PriorityNames };
 });
 
-import schedulerRouter from '../../../../scheduler/routes.js';
+import schedulerRouter from '../../../scheduler/routes.js';
 
 describe('scheduler routes', () => {
   let app;
@@ -30,7 +38,6 @@ describe('scheduler routes', () => {
     vi.clearAllMocks();
     mockScheduler.schedule.mockReturnValue('task_123');
     mockScheduler.cancel.mockReturnValue(true);
-    mockScheduler.cancelAll.mockReturnValue(2);
     app = express();
     app.use(express.json());
     app.use(schedulerRouter);

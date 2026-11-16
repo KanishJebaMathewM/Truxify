@@ -67,9 +67,11 @@ void main() {
   test('translations differ between locales', () {
     // Catches a delegate accidentally generated from the wrong ARB, which
     // would compile and resolve but serve English everywhere.
-    final en = lookupAppLocalizations(const Locale('en')).appTitle;
-    final hi = lookupAppLocalizations(const Locale('hi')).appTitle;
-    final ta = lookupAppLocalizations(const Locale('ta')).appTitle;
+    // appTitle is the brand name ('Truxify') — correctly identical in every
+    // locale. Use a translated UI key instead.
+    final en = lookupAppLocalizations(const Locale('en')).retry;
+    final hi = lookupAppLocalizations(const Locale('hi')).retry;
+    final ta = lookupAppLocalizations(const Locale('ta')).retry;
 
     expect(hi, isNot(equals(en)));
     expect(ta, isNot(equals(en)));

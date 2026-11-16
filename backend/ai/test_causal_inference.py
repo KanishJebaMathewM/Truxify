@@ -1,41 +1,87 @@
+
+"""Unit tests for causal impact step-change recovery."""
+
 import unittest
-import numpy as np
 
 try:
-    from causalimpact import CausalImpact  # noqa: F401
+    import numpy as np
     from causal_inference import CausalImpact as CausalImpactMeasurer
     HAVE_DEPS = True
-except Exception:
+except ImportError:
+    np = None
+    CausalImpactMeasurer = None
     HAVE_DEPS = False
 
 
-@unittest.skipUnless(HAVE_DEPS, "causalimpact / causal_inference dependencies not available")
+@unittest.skipUnless(
+    HAVE_DEPS,
+    "NumPy or causal_inference dependencies are not available",
+)
 class TestCausalImpactStepRecovery(unittest.TestCase):
+
+    def setUp(self):
+        self.measurer = CausalImpactMeasurer()
+        self.rng = np.random.default_rng(0)
+
     def test_recovers_injected_step_on_post_period(self):
-        measurer = CausalImpactMeasurer()
+        """Verify that a positive step intervention produces a positive effect."""
 
-        # Pre-intervention baseline with mild noise.
-        rng = np.random.default_rng(0)
-        baseline = 10.0 + rng.normal(0, 0.1, 30)
-        # Post-intervention series: a clear +5 step change.
+        baseline = 10.0 + self.rng.normal(0, 0.1, 30)
+
         step = 5.0
-        post = (10.0 + step) + rng.normal(0, 0.1, 30)
+        post = (10.0 + step) + self.rng.normal(0, 0.1, 30)
 
-        pre_data = baseline.astype(float)
-        post_data = post.astype(float)
-        intervention_point = len(pre_data)
+        pre_data = baseline.astype(np.float64)
+        post_data = post.astype(np.float64)
 
-        result = measurer.measure_impact(pre_data, post_data, intervention_point)
+        result = self.measurer.measure_impact(
+            pre_data,
+            post_data,
+        )
 
-        self.assertIsNotNone(result, "measure_impact should fit on the pre-period baseline")
-        self.assertIn("absolute_effect", result)
+        self.assertIsNotNone(
+            result,
+            "measure_impact should return a result",
+        )
 
-        # The estimator must recover a positive effect with the same sign as
-        # the injected step, never the ~0 / inverted result produced when the
-        # model is fit on the post-intervention window.
+        self.assertIsInstance(
+            result,
+            dict,
+            "Result should be a dictionary",
+        )
+
+        self.assertIn(
+            "absolute_effect",
+            result,
+            "Result should contain absolute_effect",
+        )
+
         absolute_effect = result["absolute_effect"]
-        self.assertGreater(absolute_effect, 0)
+
+        self.assertIsInstance(
+            absolute_effect,
+            (int, float, np.integer, np.floating),
+            "absolute_effect should be numeric",
+        )
+
+        self.assertTrue(
+            np.isfinite(absolute_effect),
+            "absolute_effect should be finite",
+        )
+
+        self.assertGreater(
+            absolute_effect,
+            0,
+            "Estimated effect should be positive for a positive step change",
+        )
+
+        self.assertAlmostEqual(
+            float(absolute_effect),
+            step,
+            delta=0.5,
+            msg="Estimated effect should be close to the injected +5 step",
+        )
 
 
-if __name__ == '__main__':
-    unittest.main()
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

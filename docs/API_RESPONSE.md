@@ -51,7 +51,7 @@ The `errors` key is omitted when no error details are supplied.
 
 ```js
 paginated(items, 1, 10, 42);
-// { success: true, statusCode: 200, message, data, pagination: { page, limit, total, totalPages, hasNextPage, hasPrevPage } }
+// { success: true, statusCode: 200, message, data, pagination: { page, limit, total, totalPages, hasNextPage, hasPrevPage, hasPreviousPage } }
 ```
 
 The pagination envelope clamps non-positive/non-finite `limit` values so `totalPages` is always finite.

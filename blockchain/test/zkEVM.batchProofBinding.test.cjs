@@ -19,6 +19,7 @@ const TX_HASH_TYPES = [
   'uint256',
   'address',
   'address',
+  'address',
   'uint256',
   'bytes',
   'uint256',
@@ -122,7 +123,7 @@ describe('zkEVM executeBatch proof binding', function () {
     zkEVM = await ZkEVM.deploy(await verifier.getAddress());
     await zkEVM.waitForDeployment();
 
-    await zkEVM.connect(sender).depositToL2({ value: ethers.parseEther('1') });
+    await zkEVM.connect(sender)["depositToL2()"]({ value: ethers.parseEther('1') });
   }
 
   async function buildTransaction(data = '0x') {

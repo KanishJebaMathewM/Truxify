@@ -6,6 +6,9 @@ on:
       - 'supabase/**'
       - '.github/workflows/supabase-ci.yml'
 
+permissions:
+  contents: read
+
 jobs:
   db-check:
     name: Database Migration Check

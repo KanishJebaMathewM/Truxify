@@ -21,6 +21,7 @@ const supabaseUpdateMock = vi.fn();
 vi.mock('../../src/lib/profileCache.js', () => ({
   invalidateCachedProfile: invalidateCachedProfileMock,
   invalidateCachedSupabaseProfile: vi.fn().mockResolvedValue(undefined),
+  invalidateCachedSupabaseProfileAll: vi.fn().mockResolvedValue(undefined),
   getCachedProfile: vi.fn().mockResolvedValue(null),
   setCachedProfile: vi.fn().mockResolvedValue(undefined),
   isValidCachedProfile: vi.fn().mockReturnValue(true),
@@ -28,8 +29,8 @@ vi.mock('../../src/lib/profileCache.js', () => ({
   TOMBSTONE_TTL_SECONDS: 30,
 }));
 
-vi.mock('../../src/config/db.js', () => ({
-  supabase: {
+vi.mock('../../src/config/db.js', () => {
+  const client = {
     from: () => ({
       update: (data) => {
         supabaseUpdateMock(data);
@@ -43,11 +44,9 @@ vi.mock('../../src/config/db.js', () => ({
         }),
       }),
     }),
-  },
-  firebaseAdmin: null,
-  redisClient: null,
-  mongoDb: null,
-}));
+  };
+  return { supabase: client, supabaseAdmin: client, firebaseAdmin: null, redisClient: null, mongoDb: null };
+});
 
 const { default: profileRouter } = await import('../../src/routes/profileRoutes.js');
 

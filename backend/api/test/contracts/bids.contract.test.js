@@ -3,26 +3,38 @@ import request from 'supertest';
 import express from 'express';
 
 const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
+const { RedisMock } = await vi.importActual('../mocks/redisMock.js');
 const m = createSupabaseMock();
+
+// submitBid / acceptBid take distributed locks — redisLock fails closed
+// (503) without a working client by design, so the suite needs a real
+// RedisMock, not null.
+const mockRedis = new RedisMock();
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
   supabaseAdmin: m.supabase,
   firebaseAdmin: null,
-  redisClient: null,
+  redisClient: mockRedis,
   mongoDb: null,
 }));
 
-vi.mock('../../src/services/escrow.js', () => ({
-  buildDepositTx: vi.fn(),
-  recordDepositTx: vi.fn(),
-  escrowDeposit: vi.fn(),
-  escrowRelease: vi.fn(),
-  submitEscrowRefund: vi.fn(),
-  confirmEscrowRefund: vi.fn(),
-  getEscrowBookingId: vi.fn((orderId) => `escrow:${orderId}`),
-  ESCROW_MATIC_PER_PAISA: 0.01,
-}));
+vi.mock('../../src/services/escrow.js', async () => {
+  // Partial mock: bidAcceptanceService calls paisaToMaticWei /
+  // resolveExpectedDepositAmount for real — omitting them threw a TypeError
+  // that the accept flow surfaces as the misleading safety-cap 422.
+  const actual = await vi.importActual('../../src/services/escrow.js');
+  return {
+    ...actual,
+    buildDepositTx: vi.fn(),
+    recordDepositTx: vi.fn(),
+    escrowDeposit: vi.fn(),
+    escrowRelease: vi.fn(),
+    submitEscrowRefund: vi.fn(),
+    confirmEscrowRefund: vi.fn(),
+    getEscrowBookingId: vi.fn((orderId) => `escrow:${orderId}`),
+  };
+});
 
 vi.mock('../../src/sockets/tracker.js', () => ({
   initWebSocketServer: () => ({}),
@@ -58,6 +70,9 @@ const DRIVER = {
 
 describe('POST /api/orders/:id/bids — submit bid contract', () => {
   beforeEach(() => {
+    // Locks persist in the shared RedisMock across tests — a stale
+    // lock:submitBid key turns the next test's first submission into a 409.
+    mockRedis.clearAll();
     m.store.load_offers = [];
     m.store.load_bids = [];
     m.store.driver_details = [];
@@ -196,7 +211,8 @@ describe('GET /api/orders/:id/bids — view bids contract', () => {
     m.store.orders.push({
       id: 'order-view-1',
       customer_id: CUSTOMER['x-user-id'],
-      order_display_id: 'OD-VIEW',
+      // findOrderByAnyId: non-UUID path ids match order_display_id, not id.
+      order_display_id: 'order-view-1',
     });
     m.store.load_offers.push({
       id: 'load-view-1',
@@ -306,7 +322,9 @@ describe('POST /api/orders/:id/bids/:bidId/accept — accept bid contract', () =
     m.store.driver_details = [];
     m.calls.length = 0;
     mockBuildDepositTx.mockReset();
-    mockBuildDepositTx.mockResolvedValue({ to: '0xescrow', data: '0xdeadbeef' });
+    // Real shape: { txData: { to, data, ... }, bookingId } — a null txData is
+    // the deliberate 'escrow unreachable' signal that maps to 502.
+    mockBuildDepositTx.mockResolvedValue({ txData: { to: '0xescrow', data: '0xdeadbeef' }, bookingId: 'escrow:OD-ACCEPT' });
     mockRecordDepositTx.mockReset();
   });
 
@@ -347,10 +365,11 @@ describe('POST /api/orders/:id/bids/:bidId/accept — accept bid contract', () =
     expectContract(res, 200);
     expect(res.body).toHaveProperty('depositTx');
     expect(typeof res.body.depositTx).toBe('object');
-    expect(res.body.depositTx).toHaveProperty('to');
-    expect(typeof res.body.depositTx.to).toBe('string');
-    expect(res.body.depositTx).toHaveProperty('data');
-    expect(typeof res.body.depositTx.data).toBe('string');
+    expect(res.body.depositTx).toHaveProperty('txData');
+    expect(res.body.depositTx.txData).toHaveProperty('to');
+    expect(typeof res.body.depositTx.txData.to).toBe('string');
+    expect(res.body.depositTx.txData).toHaveProperty('data');
+    expect(typeof res.body.depositTx.txData.data).toBe('string');
   });
 
   it('403: forbidden when bid does not belong to order', async () => {
@@ -435,44 +454,9 @@ describe('POST /api/orders/:id/bids/:bidId/accept — accept bid contract', () =
     expectErrorContract(res, 422);
   });
 
-  it('500: server error when RPC fails', async () => {
-    m.store.orders.push({
-      id: 'order-accept-5',
-      customer_id: CUSTOMER['x-user-id'],
-      order_display_id: 'OD-RPC-FAIL',
-      version: 1,
-    });
-    m.store.load_offers.push({
-      id: 'load-accept-5',
-      order_display_id: 'OD-RPC-FAIL',
-      status: 'available',
-    });
-    m.store.load_bids.push({
-      id: 'bid-accept-5',
-      load_id: 'load-accept-5',
-      driver_id: 'driver-1',
-      bid_amount: 50000,
-      status: 'pending',
-    });
-    m.store.profiles.push(
-      { id: CUSTOMER['x-user-id'], full_name: 'Customer One', polygon_wallet_address: '0x1234567890abcdef1234567890abcdef12345678' },
-      { id: 'driver-1', full_name: 'Driver One' },
-    );
-    m.store.driver_details.push({
-      user_id: 'driver-1',
-      rating: 4.9,
-      truck_id: null,
-      polygon_wallet_address: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
-    });
-
-    const originalRpc = m.supabase.rpc;
-    m.supabase.rpc = vi.fn().mockResolvedValue({ data: null, error: { message: 'accept_bid_tx RPC failed' } });
-
-    const res = await request(buildApp())
-      .post('/api/orders/order-accept-5/bids/bid-accept-5/accept')
-      .set(CUSTOMER);
-
-    m.supabase.rpc = originalRpc;
-    expectServerError(res);
-  });
+  // NOTE: '500 on RPC failure' was removed — since #5724 (two-phase
+  // acceptance) the accept endpoint no longer calls accept_bid_tx; it only
+  // reserves the escrow booking and returns the deposit tx. The RPC runs in
+  // confirm-deposit, whose failure mapping (503 retryable / refund saga) is
+  // covered by test/contracts/orders.contract.test.js.
 });

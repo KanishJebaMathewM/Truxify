@@ -6,3 +6,14 @@ export { default as mongoSanitize } from './mongoSanitize.js';
 export { requirePolicy } from './requirePolicy.js';
 export { authenticate, requireRole } from './auth.js';
 export { requireIdempotency } from './idempotency.js';
+export {
+  timeoutMiddleware,
+  slowRequestLogger,
+  slowRequestLoggerMiddleware,
+  timeoutErrorHandler,
+  createTimeoutMiddleware,
+  vrpTimeoutMiddleware,
+  demandHeatmapTimeoutMiddleware,
+  defaultTimeoutMiddleware,
+  logSlowRequest
+} from './timeout.js';

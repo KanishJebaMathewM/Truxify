@@ -52,7 +52,7 @@ describe("ZK proof verification", function () {
 
   it("rejects a withdrawal with an empty proof", async function () {
     const { zkEVM, user } = await deployZkEVM();
-    await zkEVM.connect(user).depositToL2({ value: ethers.parseEther("1") });
+    await zkEVM.connect(user)["depositToL2()"]({ value: ethers.parseEther("1") });
     await assertRejectsWith(
       zkEVM.connect(user).withdrawFromL2(ethers.parseEther("0.5"), "0x"),
       "Empty proof"
@@ -61,7 +61,7 @@ describe("ZK proof verification", function () {
 
   it("rejects a withdrawal with a malformed proof", async function () {
     const { zkEVM, user } = await deployZkEVM();
-    await zkEVM.connect(user).depositToL2({ value: ethers.parseEther("1") });
+    await zkEVM.connect(user)["depositToL2()"]({ value: ethers.parseEther("1") });
     await assert.rejects(
       zkEVM.connect(user).withdrawFromL2(ethers.parseEther("0.5"), "0xdeadbeef")
     );
@@ -69,18 +69,33 @@ describe("ZK proof verification", function () {
 
   it("rejects a withdrawal with an all-zero proof", async function () {
     const { zkEVM, user } = await deployZkEVM();
-    await zkEVM.connect(user).depositToL2({ value: ethers.parseEther("1") });
-    const zeroProof = encodeProof([0, 0], [[0, 0], [0, 0]], [0, 0], [1, 1]);
+    await zkEVM.connect(user)["depositToL2()"]({ value: ethers.parseEther("1") });
+    // Zero a/b/c with correctly bound public inputs: reaches the fail-closed
+    // placeholder verifier, which returns false -> "Invalid proof".
+    const zeroProof = encodeProof(
+      [0, 0],
+      [
+        [0, 0],
+        [0, 0],
+      ],
+      [0, 0],
+      [BigInt(user.address), ethers.parseEther("0.5")]
+    );
     await assertRejectsWith(
       zkEVM.connect(user).withdrawFromL2(ethers.parseEther("0.5"), zeroProof),
-      "Invalid"
+      "Invalid proof"
     );
   });
 
   it("rejects an empty batch proof", async function () {
     const { zkEVM, owner } = await deployZkEVM();
+    // A well-formed encoded transaction so the batch reaches the proof check.
+    const tx = ethers.AbiCoder.defaultAbiCoder().encode(
+      ["address", "address", "uint256", "bytes", "uint256", "uint256", "uint256", "bytes"],
+      [owner.address, owner.address, 0n, "0x", 0n, 0n, 0n, "0x" + "00".repeat(65)]
+    );
     await assertRejectsWith(
-      zkEVM.connect(owner).executeBatch(["0x1234"], "0x"),
+      zkEVM.connect(owner).executeBatch([tx], "0x"),
       "Empty proof"
     );
   });
@@ -111,9 +126,11 @@ describe("ZK proof verification", function () {
     await kycVerifier.waitForDeployment();
     const [admin, user] = await ethers.getSigners();
 
+    // input[0] must commit to the user address (fail-closed binding); the
+    // fail-closed placeholder verifier then rejects the fabricated proof.
     const verified = await kycVerifier
       .connect(admin)
-      .verifyKYC.staticCall([1, 2], [[1, 2], [1, 2]], [1, 2], [1, 1], user.address);
+      .verifyKYC.staticCall([1, 2], [[1, 2], [1, 2]], [1, 2], [BigInt(user.address), 1], user.address);
     assert.equal(verified, false);
     assert.equal(await kycVerifier.isVerified(user.address), false);
   });

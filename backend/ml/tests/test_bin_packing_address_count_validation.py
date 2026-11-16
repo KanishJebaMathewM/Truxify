@@ -20,9 +20,9 @@ def make_addresses(count):
 
 def test_short_address_list_raises():
     with pytest.raises(ValueError, match="exactly one address per package"):
-        optimise_packing(make_packages(2), make_truck(), make_addresses(1))
+        optimise_packing(make_packages(2), make_truck(), make_addresses(1), {"lat": 19.0, "lng": 72.8})
 
 
 def test_long_address_list_raises():
     with pytest.raises(ValueError, match="exactly one address per package"):
-        optimise_packing(make_packages(1), make_truck(), make_addresses(2))
+        optimise_packing(make_packages(1), make_truck(), make_addresses(2), {"lat": 19.0, "lng": 72.8})

@@ -1,4 +1,4 @@
-﻿import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   generateOrderDisplayId,
   isValidOrderDisplayId,
@@ -57,26 +57,22 @@ describe('OrderDisplayId Comprehensive Enterprise Suite (Issue #14101)', () => {
   });
 
   describe('parseDisplayId', () => {
-    it('returns valid shape with displayId when valid', () => {
+    it('returns valid shape with displayId and null error when valid', () => {
       const id = '#FF20260802K9X2Q7Z4M1A3';
       const result = parseDisplayId(id);
-      expect(result).toEqual({ valid: true, displayId: id });
+      expect(result).toEqual({ valid: true, displayId: id, error: null });
     });
 
-    it('returns valid: false and error for null or undefined input', () => {
-      expect(parseDisplayId(null)).toEqual({ valid: false, error: 'null input' });
-      expect(parseDisplayId(undefined)).toEqual({ valid: false, error: 'null input' });
-    });
-
-    it('returns valid: false and type error for non-string inputs', () => {
-      const result = parseDisplayId(12345);
-      expect(result.valid).toBe(false);
-      expect(result.error).toContain('expected string');
+    it('returns valid: false and error for null, undefined, empty, or non-string input', () => {
+      expect(parseDisplayId(null)).toEqual({ valid: false, error: 'Display ID must be a non-empty string' });
+      expect(parseDisplayId(undefined)).toEqual({ valid: false, error: 'Display ID must be a non-empty string' });
+      expect(parseDisplayId('')).toEqual({ valid: false, error: 'Display ID must be a non-empty string' });
+      expect(parseDisplayId(12345)).toEqual({ valid: false, error: 'Display ID must be a non-empty string' });
     });
 
     it('returns valid: false and format error for malformed display IDs', () => {
       const result = parseDisplayId('#FF20260802INVALID');
-      expect(result).toEqual({ valid: false, error: 'Invalid order display id format' });
+      expect(result).toEqual({ valid: false, displayId: null, error: 'Invalid order display ID format' });
     });
   });
 
@@ -178,17 +174,17 @@ describe('validateDisplayIdBatch (Bulk Validation Extension)', () => {
   it('parseDisplayId returns valid: false with error for null and undefined input', () => {
     const resultNull = parseDisplayId(null);
     expect(resultNull.valid).toBe(false);
-    expect(resultNull.error).toBe('null input');
+    expect(resultNull.error).toBe('Display ID must be a non-empty string');
 
     const resultUndef = parseDisplayId(undefined);
     expect(resultUndef.valid).toBe(false);
-    expect(resultUndef.error).toBe('null input');
+    expect(resultUndef.error).toBe('Display ID must be a non-empty string');
   });
 
- it('parseDisplayId returns valid: false for non-string input', () => {
+  it('parseDisplayId returns valid: false for non-string input', () => {
     const result = parseDisplayId(12345);
     expect(result.valid).toBe(false);
-    expect(result.error).toContain('expected string');
+    expect(result.error).toBe('Display ID must be a non-empty string');
   });
 });
 

@@ -37,7 +37,7 @@ BEGIN
     RAISE EXCEPTION 'Maintenance ticket not found';
   END IF;
 
-  IF v_driver_id <> auth.uid() THEN
+  IF auth.uid() IS NULL OR get_profile_id() <> v_driver_id THEN
     RAISE EXCEPTION 'Unauthorized: you can only add photos to your own tickets';
   END IF;
 

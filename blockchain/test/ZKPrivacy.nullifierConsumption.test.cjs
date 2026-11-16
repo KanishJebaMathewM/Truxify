@@ -62,9 +62,10 @@ describe("ZKPrivacy nullifier consumption", function () {
   it("does not consume the generated nullifier when creating a private transaction", async function () {
     const amount = ethers.parseEther("1");
     const encryptedData = ethers.toUtf8Bytes("encrypted-note");
+    // createPrivateTransaction is payable and requires msg.value == amount
     const tx = await zkPrivacy
       .connect(sender)
-      .createPrivateTransaction(recipient.address, amount, encryptedData);
+      .createPrivateTransaction(recipient.address, amount, encryptedData, { value: amount });
     const receipt = await tx.wait();
     const block = await ethers.provider.getBlock(receipt.blockNumber);
 

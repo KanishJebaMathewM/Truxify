@@ -11,6 +11,7 @@ dependencies:
   flutter:
     sdk: flutter
   intl: ^0.20.2
+  lottie: ^3.1.2  # notifications_screen imports it (was dropped from the manifest)
   supabase_flutter: ^2.9.1
   google_fonts: ^8.1.0
   shimmer: ^3.0.0
@@ -23,8 +24,11 @@ dependencies:
   device_info_plus: ^11.3.0
   web_socket_channel: ^3.0.0
   uuid: ^4.5.1
+  connectivity_plus: ^7.2.0
+  sqflite: ^2.3.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  firebase_auth_mocks: ^0.15.0  # auth_service_test imports it
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ProfileModel } from '../../../src/models/ProfileModel.js';
+import { ProfileModel } from '../../src/models/ProfileModel.js';
 
 describe('ProfileModel', () => {
   describe('fromProfile', () => {
@@ -37,8 +37,11 @@ describe('ProfileModel', () => {
       expect(result.polygonWalletAddress).toBe('0x5678');
     });
 
-    it('handles null/undefined input gracefully', () => {
+    it('handles null input gracefully', () => {
       expect(ProfileModel.fromProfile(null)).toBeNull();
+    });
+
+    it('returns null when input is omitted', () => {
       expect(ProfileModel.fromProfile(undefined)).toBeNull();
     });
 
@@ -75,8 +78,11 @@ describe('ProfileModel', () => {
       expect(result.co2ReducedKg).toBe(1200);
     });
 
-    it('handles null/undefined input gracefully', () => {
+    it('handles null input gracefully', () => {
       expect(ProfileModel.fromCustomerStats(null)).toBeNull();
+    });
+
+    it('returns null when input is omitted', () => {
       expect(ProfileModel.fromCustomerStats(undefined)).toBeNull();
     });
 
@@ -117,8 +123,11 @@ describe('ProfileModel', () => {
       expect(result.kycDocNumber).toBe('ABC123');
     });
 
-    it('handles null/undefined input gracefully', () => {
+    it('handles null input gracefully', () => {
       expect(ProfileModel.fromDriverDetails(null)).toBeNull();
+    });
+
+    it('returns null when input is omitted', () => {
       expect(ProfileModel.fromDriverDetails(undefined)).toBeNull();
     });
 

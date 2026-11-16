@@ -1,194 +1,114 @@
 /**
  * Unit tests for backend/api/src/cache/CacheEvent.js
  *
- * Coverage:
- *   - CacheEvent constructor: type, key, metadata, timestamp
- *   - CacheEvent constructor: throws for missing type
- *   - CacheEvent constructor: throws for missing key
- *   - CacheEvent.toJSON: serializes all fields
- *   - CacheEvent.createInvalidate: correct type and key
- *   - CacheEvent.createRefresh: correct type and key
- *   - CacheEvent.createEvict: correct type and key
- *   - CacheEvent.createWarm: correct type and key
- *   - CacheEvent.isInvalidate/isRefresh/isEvict/isWarm type guards
- *   - CacheEvent.matchesKey: key matching logic
- *   - CacheEvent.getAge: returns ms since timestamp
- *   - CacheEvent.setMeta: adds/overwrites metadata
- *   - CacheEvent.toString: formatted string
- *   - CacheEvent.clone: new instance, new timestamp
- *   - CacheEvent.fromJSON: reconstructs from serialized
+ * Coverage of the factory API (the class-based API was retired):
+ *   - createCacheEvent: valid event shape; invalid type; missing namespace;
+ *     key required for INVALIDATE_KEY; pattern required for INVALIDATE_PATTERN;
+ *     optional fields default to null
+ *   - serializeCacheEvent/deserializeCacheEvent: round-trip; null for
+ *     invalid JSON, missing namespace, or unrecognized type
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { CacheEvent } from '../../src/cache/CacheEvent.js';
+import { describe, it, expect, vi } from 'vitest';
 
-describe('CacheEvent', () => {
-  describe('constructor', () => {
-    it('creates event with type, key, and metadata', () => {
-      const event = new CacheEvent('INVALIDATE', 'user:123', { reason: 'update' });
-      expect(event.type).toBe('INVALIDATE');
-      expect(event.key).toBe('user:123');
-      expect(event.metadata.reason).toBe('update');
-    });
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
+}));
 
-    it('generates timestamp when not provided', () => {
-      const before = Date.now();
-      const event = new CacheEvent('REFRESH', 'order:456');
-      const after = Date.now();
-      expect(event.timestamp).toBeGreaterThanOrEqual(before);
-      expect(event.timestamp).toBeLessThanOrEqual(after);
-    });
+const {
+  CacheEventType,
+  createCacheEvent,
+  serializeCacheEvent,
+  deserializeCacheEvent,
+} = await import('../../src/cache/CacheEvent.js');
 
-    it('uses provided timestamp', () => {
-      const ts = 1700000000000;
-      const event = new CacheEvent('EVICT', 'session:abc', {}, ts);
-      expect(event.timestamp).toBe(ts);
-    });
-
-    it('throws for missing type', () => {
-      expect(() => new CacheEvent(null, 'key:123')).toThrow(TypeError);
-    });
-
-    it('throws for missing key', () => {
-      expect(() => new CacheEvent('INVALIDATE', null)).toThrow(TypeError);
-    });
-  });
-
-  describe('toJSON', () => {
-    it('serializes all fields', () => {
-      const event = new CacheEvent('REFRESH', 'cache:key', { src: 'db' }, 1700000000000);
-      const json = event.toJSON();
-      expect(json.type).toBe('REFRESH');
-      expect(json.key).toBe('cache:key');
-      expect(json.metadata.src).toBe('db');
-      expect(json.timestamp).toBe(1700000000000);
-    });
-
-    it('defaults metadata to empty object', () => {
-      const event = new CacheEvent('INVALIDATE', 'key:123');
-      expect(event.toJSON().metadata).toEqual({});
-    });
-  });
-
-  describe('factory methods', () => {
-    it('createInvalidate sets correct type and key', () => {
-      const event = CacheEvent.createInvalidate('user:profile:123');
-      expect(event.type).toBe('INVALIDATE');
+describe('CacheEvent (factory contract)', () => {
+  describe('createCacheEvent', () => {
+    it('creates a key-invalidation event with a unique id and timestamp', () => {
+      const event = createCacheEvent(CacheEventType.INVALIDATE_KEY, {
+        namespace: 'profile',
+        key: 'user:profile:123',
+      });
+      expect(event.type).toBe('INVALIDATE_KEY');
+      expect(event.namespace).toBe('profile');
       expect(event.key).toBe('user:profile:123');
+      expect(event.id).toMatch(/^[0-9a-f-]{36}$/);
+      expect(typeof event.timestamp).toBe('number');
     });
 
-    it('createRefresh sets correct type', () => {
-      expect(CacheEvent.createRefresh('k').type).toBe('REFRESH');
+    it('assigns a fresh id per event', () => {
+      const a = createCacheEvent(CacheEventType.INVALIDATE_NAMESPACE, { namespace: 'order' });
+      const b = createCacheEvent(CacheEventType.INVALIDATE_NAMESPACE, { namespace: 'order' });
+      expect(a.id).not.toBe(b.id);
     });
 
-    it('createEvict sets correct type', () => {
-      expect(CacheEvent.createEvict('k').type).toBe('EVICT');
+    it('throws TypeError for an unknown event type', () => {
+      expect(() => createCacheEvent('EVICT', { namespace: 'profile' })).toThrow(TypeError);
     });
 
-    it('createWarm sets correct type', () => {
-      expect(CacheEvent.createWarm('k').type).toBe('WARM');
-    });
-  });
-
-  describe('type guards', () => {
-    it('isInvalidate: true for INVALIDATE', () => {
-      expect(CacheEvent.createInvalidate('k').isInvalidate()).toBe(true);
+    it('throws TypeError when namespace is missing or empty', () => {
+      expect(() => createCacheEvent(CacheEventType.REFRESH, {})).toThrow(TypeError);
+      expect(() => createCacheEvent(CacheEventType.REFRESH, { namespace: '  ' })).toThrow(TypeError);
+      expect(() => createCacheEvent(CacheEventType.REFRESH, { namespace: 42 })).toThrow(TypeError);
     });
 
-    it('isInvalidate: false for REFRESH', () => {
-      expect(CacheEvent.createRefresh('k').isInvalidate()).toBe(false);
+    it('requires key for INVALIDATE_KEY', () => {
+      expect(() => createCacheEvent(CacheEventType.INVALIDATE_KEY, { namespace: 'profile' })).toThrow(TypeError);
     });
 
-    it('isRefresh: true for REFRESH', () => {
-      expect(CacheEvent.createRefresh('k').isRefresh()).toBe(true);
+    it('requires pattern for INVALIDATE_PATTERN', () => {
+      expect(() => createCacheEvent(CacheEventType.INVALIDATE_PATTERN, { namespace: 'profile' })).toThrow(TypeError);
+      const event = createCacheEvent(CacheEventType.INVALIDATE_PATTERN, {
+        namespace: 'profile',
+        pattern: 'user:profile:*',
+      });
+      expect(event.pattern).toBe('user:profile:*');
     });
 
-    it('isEvict: true for EVICT', () => {
-      expect(CacheEvent.createEvict('k').isEvict()).toBe(true);
+    it('allows namespace invalidation and version bumps without a key', () => {
+      expect(createCacheEvent(CacheEventType.INVALIDATE_NAMESPACE, { namespace: 'order' }).key).toBeNull();
+      expect(createCacheEvent(CacheEventType.BUMP_VERSION, { namespace: 'order', entityId: 'order-9' }).entityId).toBe('order-9');
     });
 
-    it('isWarm: true for WARM', () => {
-      expect(CacheEvent.createWarm('k').isWarm()).toBe(true);
-    });
-  });
+    it('defaults optional fields to null and preserves provided ones', () => {
+      const event = createCacheEvent(CacheEventType.REFRESH, { namespace: 'lookup' });
+      expect(event.key).toBeNull();
+      expect(event.pattern).toBeNull();
+      expect(event.originInstanceId).toBeNull();
 
-  describe('matchesKey', () => {
-    it('returns true for matching key', () => {
-      expect(CacheEvent.createInvalidate('order:123').matchesKey('order:123')).toBe(true);
-    });
-
-    it('returns false for different key', () => {
-      expect(CacheEvent.createInvalidate('order:123').matchesKey('order:456')).toBe(false);
-    });
-
-    it('returns true for key prefix match', () => {
-      expect(CacheEvent.createInvalidate('profile:user:abc').matchesKey('profile:user:*')).toBe(true);
-    });
-  });
-
-  describe('getAge', () => {
-    it('returns ms since timestamp', () => {
-      const oldTs = Date.now() - 5000;
-      const event = new CacheEvent('REFRESH', 'k', {}, oldTs);
-      expect(event.getAge()).toBeGreaterThanOrEqual(5000);
+      const rich = createCacheEvent(CacheEventType.INVALIDATE_KEY, {
+        namespace: 'profile',
+        key: 'k',
+        entityId: 'user-1',
+        subKey: 'sub',
+        originInstanceId: 'instance-a',
+      });
+      expect(rich.entityId).toBe('user-1');
+      expect(rich.subKey).toBe('sub');
+      expect(rich.originInstanceId).toBe('instance-a');
     });
   });
 
-  describe('setMeta', () => {
-    it('adds metadata field', () => {
-      const event = new CacheEvent('INVALIDATE', 'k');
-      event.setMeta('src', 'db');
-      expect(event.metadata.src).toBe('db');
+  describe('serialize/deserialize round-trip', () => {
+    it('round-trips a full event through JSON', () => {
+      const event = createCacheEvent(CacheEventType.INVALIDATE_KEY, {
+        namespace: 'profile',
+        key: 'user:1',
+        entityId: 'u1',
+      });
+      const back = deserializeCacheEvent(serializeCacheEvent(event));
+      expect(back).toEqual(event);
     });
 
-    it('overwrites existing field', () => {
-      const event = new CacheEvent('INVALIDATE', 'k', { src: 'old' });
-      event.setMeta('src', 'new');
-      expect(event.metadata.src).toBe('new');
-    });
-  });
-
-  describe('toString', () => {
-    it('returns formatted string', () => {
-      const str = CacheEvent.createRefresh('key:123').toString();
-      expect(str).toContain('REFRESH');
-      expect(str).toContain('key:123');
-    });
-  });
-
-  describe('clone', () => {
-    it('creates new instance with same data', () => {
-      const original = CacheEvent.createInvalidate('k', { src: 'db' });
-      const cloned = original.clone();
-      expect(cloned.type).toBe(original.type);
-      expect(cloned.key).toBe(original.key);
+    it('returns null for invalid JSON', () => {
+      expect(deserializeCacheEvent('not-json{')).toBeNull();
     });
 
-    it('new timestamp set', () => {
-      const original = CacheEvent.createRefresh('k');
-      const cloned = original.clone();
-      expect(cloned.timestamp).toBeGreaterThanOrEqual(original.timestamp);
+    it('returns null for a payload missing the namespace', () => {
+      expect(deserializeCacheEvent(JSON.stringify({ type: 'INVALIDATE_KEY', key: 'k' }))).toBeNull();
     });
 
-    it('new object reference', () => {
-      const original = CacheEvent.createWarm('k');
-      const cloned = original.clone();
-      expect(cloned).not.toBe(original);
-    });
-  });
-
-  describe('fromJSON', () => {
-    it('reconstructs from serialized', () => {
-      const json = { type: 'REFRESH', key: 'session:abc', metadata: { src: 'api' }, timestamp: 1700000000000 };
-      const event = CacheEvent.fromJSON(json);
-      expect(event.type).toBe('REFRESH');
-      expect(event.key).toBe('session:abc');
-    });
-
-    it('metadata is deep copied', () => {
-      const json = { type: 'EVICT', key: 'k', metadata: { nested: { value: 1 } }, timestamp: 0 };
-      const event = CacheEvent.fromJSON(json);
-      event.metadata.nested.value = 99;
-      expect(json.metadata.nested.value).toBe(1);
+    it('returns null for an unrecognized event type', () => {
+      expect(deserializeCacheEvent(JSON.stringify({ type: 'EVICT', namespace: 'x' }))).toBeNull();
     });
   });
 });

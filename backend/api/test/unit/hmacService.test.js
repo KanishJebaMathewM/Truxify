@@ -154,11 +154,11 @@ describe('hmacService', () => {
     });
 
     it('exports a default service object matching the named functions', async () => {
-      const { default: hmacService } = await import('../../src/services/hmacService.js?instance=C');
-      expect(hmacService.isNonceValid).toBe(serviceA.isNonceValid);
-      expect(hmacService.isTimestampValid).toBe(serviceA.isTimestampValid);
-      expect(hmacService.generateSignature).toBe(serviceA.generateSignature);
-      expect(hmacService.verifySignature).toBe(serviceA.verifySignature);
+      const serviceC = await import('../../src/services/hmacService.js?instance=C');
+      expect(serviceC.default.isNonceValid).toBe(serviceC.isNonceValid);
+      expect(serviceC.default.isTimestampValid).toBe(serviceC.isTimestampValid);
+      expect(serviceC.default.generateSignature).toBe(serviceC.generateSignature);
+      expect(serviceC.default.verifySignature).toBe(serviceC.verifySignature);
     });
   });
 });

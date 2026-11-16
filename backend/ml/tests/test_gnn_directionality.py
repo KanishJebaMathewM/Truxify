@@ -42,7 +42,7 @@ def test_route_optimizer_does_not_traverse_one_way_roads_backwards():
         {'source': 'B', 'target': 'C', 'distance': 10.0, 'time': 10.0},
     ])
 
-    optimizer = RouteOptimizer()
+    optimizer = RouteOptimizer(allow_untrained=True)
     forward = optimizer.optimize_route('A', 'C', graph_data, objectives=['time'])
     reverse = optimizer.optimize_route('C', 'A', graph_data, objectives=['time'])
 
@@ -58,7 +58,7 @@ def test_reverse_traversal_requires_explicit_reverse_edge():
         {'source': 'B', 'target': 'A', 'distance': 12.0, 'time': 12.0},
     ])
 
-    optimizer = RouteOptimizer()
+    optimizer = RouteOptimizer(allow_untrained=True)
     reverse = optimizer.optimize_route('B', 'A', graph_data, objectives=['time'])
 
     assert reverse is not None
@@ -71,5 +71,6 @@ def test_reverse_traversal_requires_explicit_reverse_edge():
             'cost': 0,
             'fuel': 0,
             'congestion': 0,
+            'edge_key': 0,
         }
     ]

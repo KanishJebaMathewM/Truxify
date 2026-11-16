@@ -79,7 +79,9 @@ describe('securityHeaderDuplicates', () => {
     expect(warnMock).not.toHaveBeenCalled();
   });
 
-  it('does not warn in production', async () => {
+  it('keeps warning in production (deliberate — 9d893fa77)', async () => {
+    // Duplicate security headers are a server misconfiguration worth flagging
+    // in EVERY environment — the production gate was deliberately removed.
     process.env.NODE_ENV = 'production';
 
     const app = createApp((req, res) => {
@@ -90,6 +92,6 @@ describe('securityHeaderDuplicates', () => {
 
     await request(app).get('/test');
 
-    expect(warnMock).not.toHaveBeenCalled();
+    expect(warnMock).toHaveBeenCalledTimes(1);
   });
 });

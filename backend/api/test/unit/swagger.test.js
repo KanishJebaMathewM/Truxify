@@ -1,18 +1,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-vi.mock('swagger-jsdoc', () => ({
-  default: vi.fn(() => ({ openapi: '3.0.0', paths: {} })),
-}))
+let generatedSpec
 
 vi.mock('swagger-ui-express', () => ({
-  default: { serve: 'serve-fn', setup: vi.fn(() => 'setup-fn') },
+  default: {
+    serve: 'serve-fn',
+    setup: vi.fn((spec) => {
+      generatedSpec = spec
+      return 'setup-fn'
+    }),
+  },
 }))
 
 vi.mock('../../src/middleware/logger.js', () => ({
   default: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }))
 
-const { setupSwagger } = await import('../../src/config/swagger.js')
+const { setupSwagger, normalizeApiPublicUrl } = await import('../../src/config/swagger.js')
 
 describe('setupSwagger', () => {
   const originalEnv = process.env.NODE_ENV
@@ -28,10 +32,28 @@ describe('setupSwagger', () => {
     expect(app.use).not.toHaveBeenCalled()
   })
 
+  it('normalizes API_PUBLIC_URL without duplicating the /api prefix', () => {
+    expect(normalizeApiPublicUrl()).toBe('http://localhost:5000')
+    expect(normalizeApiPublicUrl('https://api.example.com')).toBe('https://api.example.com')
+    expect(normalizeApiPublicUrl('https://api.example.com/api')).toBe('https://api.example.com')
+    expect(normalizeApiPublicUrl('https://api.example.com/api/')).toBe('https://api.example.com')
+    expect(normalizeApiPublicUrl('https://example.com/truxify/api')).toBe('https://example.com/truxify')
+  })
+
   it('mounts the docs UI in development', () => {
     process.env.NODE_ENV = 'development'
     const app = { use: vi.fn() }
     setupSwagger(app)
     expect(app.use).toHaveBeenCalledWith('/api/docs', 'serve-fn', 'setup-fn')
+  })
+
+  it('generates the documented OpenAPI paths from the route annotations', () => {
+    process.env.NODE_ENV = 'development'
+    const app = { use: vi.fn() }
+    setupSwagger(app)
+
+    expect(generatedSpec.openapi).toBe('3.0.0')
+    expect(generatedSpec.paths['/api/orders/{id}/milestones']?.put).toBeDefined()
+    expect(generatedSpec.paths['/api/orders/load-offers/en-route']?.get).toBeDefined()
   })
 })

@@ -38,6 +38,17 @@ export const isValidIdentifier = (id) => {
 };
 
 /**
+ * Validation failures are client errors (400), not server faults (500).
+ */
+function statusForError(err) {
+  return Number.isInteger(err?.statusCode) ? err.statusCode : 500;
+}
+
+function errorMessage(err, fallback) {
+  return err.statusCode === 400 ? err.message : fallback;
+}
+
+/**
  * POST /api/carbon-credits/mint
  * Calculates carbon savings from telematics & mints cross-chain carbon tokens.
  * Restricted to carriers, drivers, fleet owners, and admins.
@@ -52,46 +63,20 @@ router.post('/mint', authenticate, userLimiter, async (req, res) => {
 
     const { truck_id, trip_id, distance_km, fuel_saved_liters, load_weight_kg } = req.body;
 
-    if (!truck_id || !trip_id || fuel_saved_liters === undefined) {
+    if (!truck_id || !trip_id || fuel_saved_liters === undefined || fuel_saved_liters === null) {
       return res.status(400).json({ error: 'Missing required parameters: truck_id, trip_id, fuel_saved_liters' });
     }
 
-    if (!isValidIdentifier(truck_id) || !isValidIdentifier(trip_id)) {
-      return res.status(400).json({ error: 'truck_id and trip_id must be valid alphanumeric identifiers (1-64 chars)' });
-    }
-
-    const distanceKm = Number(distance_km ?? 0);
-    const fuelSavedLiters = Number(fuel_saved_liters);
-    const loadWeightKg = Number(load_weight_kg ?? 0);
-
-    if (![distanceKm, fuelSavedLiters, loadWeightKg].every(Number.isFinite) ||
-        distanceKm < 0 || loadWeightKg < 0) {
-      return res.status(400).json({ error: 'Carbon metrics must be finite, non-negative numbers' });
-    }
-
-    if (fuelSavedLiters <= 0) {
-      return res.status(400).json({ error: 'fuel_saved_liters must be a positive finite number greater than zero' });
-    }
-
-    if (distanceKm > MAX_DISTANCE_KM) {
-      return res.status(400).json({ error: `distance_km exceeds maximum threshold of ${MAX_DISTANCE_KM} km` });
-    }
-
-    if (fuelSavedLiters > MAX_FUEL_SAVED_LITERS) {
-      return res.status(400).json({ error: `fuel_saved_liters exceeds maximum single-trip threshold of ${MAX_FUEL_SAVED_LITERS} L` });
-    }
-
-    if (loadWeightKg > MAX_LOAD_WEIGHT_KG) {
-      return res.status(400).json({ error: `load_weight_kg exceeds maximum limit of ${MAX_LOAD_WEIGHT_KG} kg` });
-    }
-
+    // Pass the raw values through: the service owns the numeric contract, so
+    // 'abc' and -100 are rejected there instead of being coerced to NaN and
+    // persisted as a minted credit.
     const token = await carbonTokenService.calculateAndMintCarbonCredits({
       ownerId: req.user.id,
-      truckId: truck_id.trim(),
-      tripId: trip_id.trim(),
-      distanceKm,
-      fuelSavedLiters,
-      loadWeightKg
+      truckId: truck_id,
+      tripId: trip_id,
+      distanceKm: distance_km,
+      fuelSavedLiters: fuel_saved_liters,
+      loadWeightKg: load_weight_kg
     });
 
     return res.status(201).json({
@@ -99,9 +84,42 @@ router.post('/mint', authenticate, userLimiter, async (req, res) => {
       token
     });
   } catch (err) {
-    return res.status(500).json({ error: err.message || 'Failed to mint carbon credit tokens' });
+    return res.status(statusForError(err)).json({
+      error: errorMessage(err, 'Failed to mint carbon credit tokens')
+    });
   }
 });
+
+/**
+ * @openapi
+ * /api/carbon-credits/purchase:
+ *   post:
+ *     tags: [Carbon Credits]
+ *     summary: Purchase and retire carbon credits
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [token_id, buyer_address]
+ *             properties:
+ *               token_id:
+ *                 type: string
+ *               buyer_address:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Carbon credits purchased and retired successfully
+ *       400:
+ *         description: Missing required parameters
+ *       401:
+ *         description: Missing or invalid authentication token
+ *       500:
+ *         description: Carbon credit purchase failed
+ */
 
 /**
  * POST /api/carbon-credits/purchase
@@ -142,10 +160,36 @@ router.post('/purchase', authenticate, userLimiter, async (req, res) => {
       token: redeemedToken
     });
   } catch (err) {
-    const status = err.message?.toLowerCase().includes('not found') ? 404 : 500;
-    return res.status(status).json({ error: err.message || 'Failed to purchase carbon credit tokens' });
+    return res.status(statusForError(err)).json({
+      error: errorMessage(err, 'Failed to purchase carbon credit tokens')
+    });
   }
 });
+
+/**
+ * @openapi
+ * /api/carbon-credits/{tokenId}:
+ *   get:
+ *     tags: [Carbon Credits]
+ *     summary: Get carbon credit token details
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: tokenId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Carbon credit token details and chain verification state
+ *       401:
+ *         description: Missing or invalid authentication token
+ *       404:
+ *         description: Carbon credit token not found
+ *       500:
+ *         description: Carbon credit lookup failed
+ */
 
 /**
  * GET /api/carbon-credits/:tokenId

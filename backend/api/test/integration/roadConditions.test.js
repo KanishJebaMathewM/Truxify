@@ -1,13 +1,18 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import request from 'supertest';
 import express from 'express';
-import { supabaseAdmin } from '../../../src/config/db.js';
-import roadConditionRoutes from '../../../src/routes/roadConditionRoutes.js';
-import { errorHandler } from '../../../src/middleware/errorHandler.js';
-import { generateTestToken } from '../../helpers/auth.js';
+import { supabaseAdmin } from '../../src/config/db.js';
+import roadConditionRoutes from '../../src/routes/roadConditionRoutes.js';
+import { errorHandler } from '../../src/middleware/errorHandler.js';
+import { generateTestToken } from '../helpers/auth.js';
 
 // Mock DB
-vi.mock('../../../src/config/db.js', () => ({
+vi.mock('../../src/config/db.js', () => ({
+  // roadConditionRoutes' rate limiter reads redisClient via the rateLimiter
+  // middleware — the mock must export it.
+  redisClient: null,
+  // authenticate reads firebaseAdmin for token verification.
+  firebaseAdmin: null,
   supabaseAdmin: {
     from: vi.fn().mockReturnThis(),
     insert: vi.fn(),
@@ -20,11 +25,42 @@ vi.mock('../../../src/config/db.js', () => ({
   supabase: {}
 }));
 
+vi.mock('../../src/middleware/rateLimiter.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  const erl = await import('express-rate-limit');
+  return {
+    ...actual,
+    createStore: () => new erl.MemoryStore(),
+    safeIpKeyGenerator: () => 'test-key',
+  };
+});
+
+// Avoid loading the (pending-fix) profileCache module through the auth chain
+vi.mock('../../src/lib/profileCache.js', () => ({
+  getCachedSupabaseProfile: vi.fn(),
+  setCachedSupabaseProfile: vi.fn(),
+  getCachedCustomerStats: vi.fn(),
+  setCachedCustomerStats: vi.fn(),
+  getCachedDriverDetails: vi.fn(),
+  setCachedDriverDetails: vi.fn(),
+  isValidCachedProfile: vi.fn(),
+}));
+
 // Setup app
 const app = express();
 app.use(express.json());
 app.use('/api/road-conditions', roadConditionRoutes);
 app.use(errorHandler);
+
+// This suite exercises real Bearer JWT verification, so it opts out of the
+// header-based bypass that test/setup.js enables for other integration tests.
+// (bypassAuth is read per-request inside authenticate, so this takes effect
+// before any request is sent.)
+process.env.BYPASS_AUTH = 'false';
+process.env.ENABLE_TEST_AUTH = 'false';
+// Without a pinned secret, config/jwtSecret generates a random per-process
+// one — tokens signed by the test helper's fallback would never verify.
+process.env.JWT_SECRET = 'road-conditions-suite-secret-key-01';
 
 describe('Road Condition Routes Integration', () => {
   const driverToken = generateTestToken({ id: 'driver-123', role: 'driver' });
@@ -113,7 +149,9 @@ describe('Road Condition Routes Integration', () => {
         .query({ lat: 45.0 }); // Missing lng
 
       expect(res.status).toBe(400);
-      expect(res.body.error).toBe('Latitude (lat) and longitude (lng) are required');
+      // The handler reports per-field errors (deliberate) — and zod v4
+      // dropped invalid_type_error, so the schema uses the `error` param.
+      expect(res.body.error).toBe('Invalid lng: longitude must be a finite number');
     });
   });
 });

@@ -175,7 +175,7 @@ class _LumperFeeLendingScreenState extends State<LumperFeeLendingScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text('TRUXIFY VIRTUAL DEBIT', style: TextStyle(color: Colors.white70, letterSpacing: 1.5, fontWeight: FontWeight.bold)),
-              Icon(Icons.contactless, color: Colors.white.withOpacity(0.8)),
+              Icon(Icons.contactless, color: Colors.white.withValues(alpha: 0.8)),
             ],
           ),
           const SizedBox(height: 32),

@@ -92,9 +92,14 @@ sgx_status_t ecall_store_data(
 sgx_status_t ecall_retrieve_data(
     uint32_t index,
     uint8_t* data,
+    uint32_t max_len,
     uint32_t* data_len
 ) {
     if (index >= storage_count) {
+        return SGX_ERROR_INVALID_PARAMETER;
+    }
+    
+    if (secure_storage[index].length > max_len) {
         return SGX_ERROR_INVALID_PARAMETER;
     }
     

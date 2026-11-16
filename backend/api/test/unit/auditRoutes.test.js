@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 vi.mock('../../src/middleware/auth.js', () => ({
   authenticate: (req, _res, next) => next(),
+  requireRole: () => (_req, _res, next) => next(),
 }));
 
 vi.mock('../../src/middleware/rateLimiter.js', () => ({
@@ -29,6 +30,9 @@ const { dbMock, svcMock } = vi.hoisted(() => ({
 }));
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   get supabaseAdmin() { return dbMock.supabaseAdmin; },
   get supabase() { return null; },
 }));

@@ -27,7 +27,9 @@ void main() {
       MultiProvider(
         providers: [
           ChangeNotifierProvider(create: (_) => TextScaleProvider()),
-          Provider<LanguageProvider>.value(value: languageProvider),
+          // provider rejects plain Provider for Listenable/ChangeNotifier
+          // subtypes (updates would not propagate) — use the right type.
+          ChangeNotifierProvider<LanguageProvider>.value(value: languageProvider),
         ],
         child: const TruxifyApp(),
       ),

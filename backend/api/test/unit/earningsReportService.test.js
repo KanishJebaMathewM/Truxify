@@ -54,6 +54,14 @@ describe('getEarningsCutoff', () => {
     expect(cutoff.toISOString()).toBe('2025-06-15T00:00:00.000Z');
   });
 
+  it('uses the UTC day for the day period even when the local day differs (IST evening)', () => {
+    // 2026-08-05T19:00:00Z is 00:30 IST on Aug 6. The trip_date keys are UTC
+    // days, so "today" must start at 2026-08-05T00:00Z — never Aug 4.
+    const cutoff = getEarningsCutoff('day', new Date('2026-08-05T19:00:00Z'));
+    expect(cutoff.toISOString()).toBe('2026-08-05T00:00:00.000Z');
+    expect(toDateKey(cutoff)).toBe('2026-08-05');
+  });
+
   it('returns 7 days ago for week period', () => {
     const now = new Date('2025-06-15T00:00:00Z');
     const cutoff = getEarningsCutoff('week', now);
@@ -156,4 +164,5 @@ describe('buildWeeklyChart', () => {
       expect(bucket).toHaveProperty('earnings');
     }
   });
+
 });

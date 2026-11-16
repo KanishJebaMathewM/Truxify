@@ -33,6 +33,9 @@ export function hashOtp(otp, saltHex) {
  */
 export function verifyOtpHash(otp, otpRecord) {
   if (!otpRecord) return false
+  if (otp === null || otp === undefined || (typeof otp === 'string' && otp.trim() === '')) {
+    return false
+  }
   if (otpRecord.otp_salt) {
     const { hash: submittedHash } = hashOtp(otp, otpRecord.otp_salt)
     const expected = String(otpRecord.otp_hash || '')
@@ -54,7 +57,8 @@ export function constantTimeEqualHex(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') {
     return false
   }
-  if (!/^[0-9a-fA-F]*$/.test(a) || !/^[0-9a-fA-F]*$/.test(b)) {
+  // Buffer.from(hex) silently discards a trailing nibble; require whole bytes.
+  if (!/^(?:[0-9a-fA-F]{2})*$/.test(a) || !/^(?:[0-9a-fA-F]{2})*$/.test(b)) {
     return false
   }
 

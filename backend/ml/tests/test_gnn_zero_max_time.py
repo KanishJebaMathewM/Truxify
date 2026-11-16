@@ -23,7 +23,7 @@ def sample_network():
 
 
 def test_zero_max_time_is_enforced(sample_network):
-    optimizer = RouteOptimizer()
+    optimizer = RouteOptimizer(allow_untrained=True)
 
     result = optimizer.optimize_route(
         'A',
@@ -36,7 +36,7 @@ def test_zero_max_time_is_enforced(sample_network):
 
 
 def test_zero_hos_limit_is_enforced(sample_network):
-    optimizer = RouteOptimizer()
+    optimizer = RouteOptimizer(allow_untrained=True)
 
     result = optimizer.optimize_route(
         'A',

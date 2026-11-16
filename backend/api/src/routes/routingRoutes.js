@@ -1,9 +1,12 @@
-const express = require('express');
+import express from 'express';
+import { getRoute, getDistanceMatrix } from '../controllers/routingController.js';
+
 const router = express.Router();
-const routingController = require('../controllers/routingController');
-const authMiddleware = require('../middleware/authMiddleware');
 
-router.get('/route', authMiddleware, routingController.getRoute);
-router.post('/matrix', authMiddleware, routingController.getDistanceMatrix);
+/**
+ * Route handlers for telematics routing and N x M distance matrix.
+ */
+router.get('/route', getRoute);
+router.post('/matrix', getDistanceMatrix);
 
-module.exports = router;
+export default router;

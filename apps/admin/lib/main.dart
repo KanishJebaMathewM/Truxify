@@ -1,7 +1,6 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'utils/support_ticket_parser.dart';
 
 /// Backend connection settings, injected at build time via --dart-define.

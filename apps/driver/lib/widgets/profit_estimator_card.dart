@@ -49,7 +49,7 @@ class ProfitEstimatorCard extends StatelessWidget {
             const SizedBox(height: 8),
             _buildRow(
               context,
-              'Est. Fuel Cost (${fuelEfficiencyKmpl} km/l)',
+              'Est. Fuel Cost ($fuelEfficiencyKmpl km/l)',
               '-${formatCurrency.format(estimatedFuelCost)}',
               color: TruxifyColors.error,
             ),

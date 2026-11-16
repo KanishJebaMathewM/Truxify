@@ -17,7 +17,8 @@ class TestMetaModel:
     def test_maml_init(self):
         model = MAMLModel(input_dim=10, output_dim=1)
         assert model is not None
-        assert hasattr(model, 'adapt')
+        # adapt() lives on the MAML algorithm wrapper, not the network.
+        assert hasattr(MAML(model, inner_lr=0.1, outer_lr=0.1), 'adapt')
 
     def test_meta_train_step_backprops_to_meta_params(self):
         """Regression test for #13118: the inner-loop update must not detach

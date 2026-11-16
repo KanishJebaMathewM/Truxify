@@ -1,7 +1,55 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import express from 'express';
+// test/integration/healthRoutes.test.js (Excerpt)
 
+describe('GET /api/health - Integration Tests', () => {
+  it('logs HEALTH_SUPABASE_CHECK_FAILED when Supabase ping fails', async () => {
+    // Mock Supabase failure
+    supabaseMock.rpc.mockRejectedValueOnce(new Error('Connection timeout'));
+
+    const res = await request(app).get('/api/health');
+
+    expect(res.status).toBe(503);
+    // FIX: Align assertion with updated event name per issue #18634
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'HEALTH_SUPABASE_CHECK_FAILED',
+        error: expect.stringContaining('Connection timeout'),
+      })
+    );
+  });
+
+  it('logs HEALTH_MONGO_CHECK_FAILED when MongoDB connection fails', async () => {
+    mongoMock.db.admin().ping.mockRejectedValueOnce(new Error('Mongo unreachable'));
+
+    const res = await request(app).get('/api/health');
+
+    expect(res.status).toBe(503);
+    // FIX: Align assertion with updated event name per issue #18634
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'HEALTH_MONGO_CHECK_FAILED',
+        error: expect.stringContaining('Mongo unreachable'),
+      })
+    );
+  });
+
+  it('logs HEALTH_REDIS_CHECK_FAILED when Redis ping fails', async () => {
+    redisMock.ping.mockRejectedValueOnce(new Error('Redis connection lost'));
+
+    const res = await request(app).get('/api/health');
+
+    expect(res.status).toBe(503);
+    // FIX: Align assertion with updated event name per issue #18634
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'HEALTH_REDIS_CHECK_FAILED',
+        error: expect.stringContaining('Redis connection lost'),
+      })
+    );
+  });
+});
 // Define mocks that we can mutate per-test
 let mockSupabase = null;
 let mockSupabaseAdmin = null;
@@ -94,8 +142,10 @@ describe('GET /api/health', () => {
     expect(res.body.status).toBe('degraded');
     expect(res.body.services.supabase).toBe('failed');
     expect(loggerErrorSpy).toHaveBeenCalledWith(
-      { err: expect.any(Error) },
-      '[health] Supabase check failed'
+      // 7226f91d8 deliberately renamed the health events to *_CHECK_FAILED
+      // and dropped the '[health]' message prefix.
+      { event: 'HEALTH_SUPABASE_CHECK_FAILED', error: 'Supabase network error' },
+      'Supabase check failed'
     );
   });
 
@@ -130,8 +180,8 @@ describe('GET /api/health', () => {
     expect(res.body.status).toBe('degraded');
     expect(res.body.services.mongodb).toBe('failed');
     expect(loggerErrorSpy).toHaveBeenCalledWith(
-      { err: expect.any(Error) },
-      '[health] MongoDB check failed'
+      { event: 'HEALTH_MONGODB_CHECK_FAILED', error: 'MongoDB timeout' },
+      'MongoDB check failed'
     );
   });
 
@@ -144,8 +194,8 @@ describe('GET /api/health', () => {
     expect(res.body.status).toBe('ok');
     expect(res.body.services.redis).toBe('failed');
     expect(loggerErrorSpy).toHaveBeenCalledWith(
-      { err: expect.any(Error) },
-      '[health] Redis check failed'
+      { event: 'HEALTH_REDIS_CHECK_FAILED', error: 'Redis connection refused' },
+      'Redis check failed'
     );
   });
 
@@ -218,14 +268,47 @@ describe('GET /api/health/ready', () => {
 
 describe('GET /api/health/sentry-debug', () => {
   let app;
+  let previousNodeEnv;
+  let previousDebugFlag;
 
   beforeEach(() => {
+    previousNodeEnv = process.env.NODE_ENV;
+    previousDebugFlag = process.env.SENTRY_DEBUG_ENABLED;
+    process.env.NODE_ENV = 'development';
+    delete process.env.SENTRY_DEBUG_ENABLED;
     app = buildApp();
     mockCaptureDebugException.mockReset();
   });
 
+  afterEach(() => {
+    if (previousNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
+    if (previousDebugFlag === undefined) {
+      delete process.env.SENTRY_DEBUG_ENABLED;
+    } else {
+      process.env.SENTRY_DEBUG_ENABLED = previousDebugFlag;
+    }
+  });
+
   it('returns 404 when the debug route is not enabled', async () => {
-    delete process.env.SENTRY_DEBUG_ENABLED;
+    const res = await request(app).get('/api/health/sentry-debug');
+    expect(res.status).toBe(404);
+    expect(mockCaptureDebugException).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the debug flag is false', async () => {
+    process.env.SENTRY_DEBUG_ENABLED = 'false';
+    const res = await request(app).get('/api/health/sentry-debug');
+    expect(res.status).toBe(404);
+    expect(mockCaptureDebugException).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 in production even when debug is enabled', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.SENTRY_DEBUG_ENABLED = 'true';
     const res = await request(app).get('/api/health/sentry-debug');
     expect(res.status).toBe(404);
     expect(mockCaptureDebugException).not.toHaveBeenCalled();

@@ -171,12 +171,15 @@ void main() {
 
       await tester.tap(find.textContaining("I've Paid"));
       await tester.pump(); // confirm starts
-      await tester.pump(); // status poll resolves -> success state
+      await tester.pump(); // status poll resolves
 
       expect(find.textContaining('Booking Confirmed'), findsOneWidget);
 
-      // Flush the auto-navigation timer so no timers leak after teardown.
-      await tester.pump(const Duration(milliseconds: 1900));
+      // Flush the auto-navigation chain (success animation + 1200ms delay)
+      // so no timers leak after teardown — 1900ms was shorter than the chain.
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 2));
       await tester.pump();
     });
 
@@ -190,8 +193,8 @@ void main() {
       await reachUpiSheet(tester);
 
       await tester.tap(find.textContaining("I've Paid"));
-      await tester.pump();
-      await tester.pump();
+      await tester.pump(); // confirm starts
+      await tester.pump(); // status poll resolves
 
       expect(find.text('Verifying your payment'), findsOneWidget);
       expect(find.text('Check payment status'), findsOneWidget);
@@ -205,12 +208,64 @@ void main() {
       await reachUpiSheet(tester);
 
       await tester.tap(find.textContaining("I've Paid"));
-      await tester.pump();
-      await tester.pump();
+      await tester.pump(); // confirm starts
+      await tester.pump(); // status poll resolves
 
       expect(find.text('Verifying your payment'), findsOneWidget);
       expect(find.textContaining('could not verify'), findsOneWidget);
       expect(find.text('Check payment status'), findsOneWidget);
     });
+
+    testWidgets(
+        'hardware back button pops the booking confirmation screen instead of exiting app',
+        (tester) async {
+      await tester.pumpWidget(
+        TruxifyScope(
+          controller: TruxifyController(),
+          child: MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => BookingConfirmationScreen(
+                          draft: _draft,
+                          truck: _truck,
+                          orderService: mockOrderService,
+                          paymentRepository: mockPaymentRepository,
+                          addressRepository: mockAddressRepository,
+                          apiClient: mockApiClient,
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Open Booking Screen'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      // Open screen
+      await tester.tap(find.text('Open Booking Screen'));
+      await tester.pumpAndSettle();
+      expect(find.byType(BookingConfirmationScreen), findsOneWidget);
+      expect(find.byType(PopScope), findsOneWidget);
+
+      // Simulate Android hardware back button press
+      final dynamic widgetsBinding = tester.binding;
+      final bool handled = await widgetsBinding.handlePopRoute();
+      await tester.pumpAndSettle();
+
+      // Screen should pop back to the previous screen in the stack
+      expect(handled, isTrue);
+      expect(find.byType(BookingConfirmationScreen), findsNothing);
+      expect(find.text('Open Booking Screen'), findsOneWidget);
+    });
   });
 }
+

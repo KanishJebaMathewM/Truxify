@@ -6,6 +6,7 @@ import base64
 from datetime import datetime
 from services.voice_ai_service import VoiceAIService
 from security import require_user
+from audio_limits import read_limited_audio
 
 router = APIRouter(prefix="/voice", tags=["Voice AI"])
 
@@ -35,14 +36,8 @@ async def process_voice(
 ):
     """Process voice command with language detection"""
     try:
-        # Read audio
         if audio:
-            audio_data = await audio.read()
-            if not audio_data:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Audio file cannot be empty"
-                    )
+            audio_data = await read_limited_audio(audio)
         else:
             raise HTTPException(status_code=400, detail="Audio data required")
         
@@ -60,6 +55,8 @@ async def process_voice(
             timestamp=result.get('timestamp', datetime.now().isoformat())
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         return VoiceResponse(
             success=False,
@@ -74,13 +71,15 @@ async def detect_language(
 ):
     """Detect language from audio"""
     try:
-        audio_data = await audio.read()
+        audio_data = await read_limited_audio(audio)
         result = await voice_service.detect_language(audio_data)
         return {
             'success': True,
             'data': result,
             'timestamp': datetime.now().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         return {
             'success': False,
@@ -95,18 +94,15 @@ async def transcribe_speech(
 ):
     """Transcribe speech with dialect support"""
     try:
-        audio_data = await audio.read()
-        if not audio_data:
-            raise HTTPException(
-                status_code=400,
-                detail="Audio file cannot be empty"
-                 )
+        audio_data = await read_limited_audio(audio)
         result = await voice_service.transcribe_speech(audio_data, language_code)
         return {
             'success': True,
             'data': result,
             'timestamp': datetime.now().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         return {
             'success': False,

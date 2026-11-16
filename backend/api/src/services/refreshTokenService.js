@@ -1,9 +1,39 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import {
+  generateFamilyId,
+  registerTokenFamily,
+  verifyAndRotateFamily,
+  revokeTokenFamily,
+  isFamilyRevoked,
+} from '../security/tokenFamilyManager.js';
 
-const supabaseUrl = process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || 'placeholder-key';
-export const supabase = createClient(supabaseUrl, supabaseKey);
+let supabaseClient = null;
+
+/**
+ * Returns the service-role Supabase client used for refresh-token persistence.
+ * Fails closed instead of falling back to the anon key or a placeholder host.
+ */
+export function getSupabaseClient() {
+  if (supabaseClient) return supabaseClient;
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error(
+      'Refresh token service is not configured: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required'
+    );
+  }
+
+  supabaseClient = createClient(supabaseUrl, supabaseKey);
+  return supabaseClient;
+}
+
+export const supabase = {
+  from(...args) {
+    return getSupabaseClient().from(...args);
+  },
+};
 
 export const REFRESH_TOKEN_EXPIRY_DAYS = 30;
 
@@ -15,25 +45,30 @@ export const hashRefreshToken = (token) =>
   crypto.createHash('sha256').update(token).digest('hex');
 
 export const revokeToken = async (token) => {
-  await supabase
+  const { error } = await supabase
     .from('refresh_tokens')
     .update({ is_revoked: true, revoked_at: new Date().toISOString() })
     .eq('token_hash', hashRefreshToken(token));
+  if (error) throw new Error('Failed to revoke refresh token', { cause: error });
 };
 
 export const revokeAllUserTokens = async (userId) => {
-  await supabase
+  const { error } = await supabase
     .from('refresh_tokens')
     .update({ is_revoked: true, revoked_at: new Date().toISOString() })
     .eq('user_id', userId)
     .eq('is_revoked', false);
+  if (error) throw new Error('Failed to revoke user refresh tokens', { cause: error });
 };
 
-export const createRefreshToken = async (userId, deviceId, deviceInfo) => {
+export const createRefreshToken = async (userId, deviceId, deviceInfo, familyId = null, generation = 0) => {
   const token = generateRefreshToken();
   const tokenHash = hashRefreshToken(token);
+  const activeFamilyId = familyId || generateFamilyId();
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRY_DAYS);
+
+  registerTokenFamily(activeFamilyId, generation);
 
   const { data, error } = await supabase
     .from('refresh_tokens')
@@ -42,6 +77,8 @@ export const createRefreshToken = async (userId, deviceId, deviceInfo) => {
       token_hash: tokenHash,
       device_id: deviceId,
       device_info: deviceInfo,
+      family_id: activeFamilyId,
+      generation: generation,
       expires_at: expiresAt.toISOString(),
       is_revoked: false,
       created_at: new Date().toISOString(),
@@ -50,7 +87,7 @@ export const createRefreshToken = async (userId, deviceId, deviceInfo) => {
     .single();
 
   if (error) throw new Error('Failed to create refresh token', { cause: error });
-  return { ...data, token };
+  return { ...data, token, familyId: activeFamilyId, generation };
 };
 
 export const rotateRefreshToken = async (oldToken, deviceId, deviceInfo) => {
@@ -64,18 +101,38 @@ export const rotateRefreshToken = async (oldToken, deviceId, deviceInfo) => {
     throw new Error('Invalid or expired refresh token');
   }
 
-  if (tokenRecord.is_revoked) {
+  const currentFamilyId = tokenRecord.family_id;
+  const currentGen = tokenRecord.generation ?? 0;
+
+  if (tokenRecord.is_revoked || (currentFamilyId && isFamilyRevoked(currentFamilyId))) {
+    if (currentFamilyId) {
+      revokeTokenFamily(currentFamilyId, 'TOKEN_REUSE_DETECTED');
+    }
     await revokeAllUserTokens(tokenRecord.user_id);
     throw new Error('Token reuse detected. All sessions revoked.');
   }
 
-  if (new Date(tokenRecord.expires_at) < new Date()) {
+  const expiresAtMs = new Date(tokenRecord.expires_at).getTime();
+  if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
     await revokeToken(oldToken);
     throw new Error('Refresh token expired');
   }
 
+  const rotationCheck = verifyAndRotateFamily(currentFamilyId, currentGen);
+  if (!rotationCheck.valid) {
+    await revokeAllUserTokens(tokenRecord.user_id);
+    throw new Error('Token reuse detected. All sessions revoked.');
+  }
+
   await revokeToken(oldToken);
-  const newTokenData = await createRefreshToken(tokenRecord.user_id, deviceId, deviceInfo);
+  const nextGen = rotationCheck.nextGen ?? (currentGen + 1);
+  const newTokenData = await createRefreshToken(
+    tokenRecord.user_id,
+    deviceId,
+    deviceInfo,
+    currentFamilyId,
+    nextGen
+  );
   return newTokenData;
 };
 
@@ -87,3 +144,4 @@ const refreshTokenService = {
 };
 
 export default refreshTokenService;
+

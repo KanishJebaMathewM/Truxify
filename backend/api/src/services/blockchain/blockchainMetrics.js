@@ -16,19 +16,45 @@ class BlockchainMetrics {
       lastMetricsUpdate: new Date().toISOString(),
     };
 
+    this._timer = null;
+    this.aggregating = false;
+
     this.startMetricsCollection();
   }
 
   startMetricsCollection() {
-    const metricsInterval = parseInt(process.env.METRICS_COLLECTION_INTERVAL_MS || '60000', 10);
+    if (this._timer) return;
 
-    setInterval(async () => {
+    const configuredInterval = parseInt(process.env.METRICS_COLLECTION_INTERVAL_MS, 10);
+    const metricsInterval = Number.isFinite(configuredInterval) && configuredInterval > 0
+      ? configuredInterval
+      : 60000;
+
+    this._timer = setInterval(async () => {
+      if (this.aggregating) {
+        logger.warn('[BlockchainMetrics] Skipping metrics aggregation; previous run is still in progress');
+        return;
+      }
+
+      this.aggregating = true;
       try {
         await this.aggregateMetrics();
       } catch (error) {
         logger.error('Failed to aggregate blockchain metrics', error);
+      } finally {
+        this.aggregating = false;
       }
     }, metricsInterval);
+
+    this._timer.unref?.();
+  }
+
+  stopMetricsCollection() {
+    if (this._timer) {
+      clearInterval(this._timer);
+      this._timer = null;
+    }
+    this.aggregating = false;
   }
 
   recordPaymentEvent(status) {

@@ -8,7 +8,16 @@ const SENTRY_ERROR_FILTERS = [
 ];
 
 export function shouldIgnoreError(err) {
+  if (!err || typeof err !== 'object') return false;
   return SENTRY_ERROR_FILTERS.some((f) => err.code === f.code);
+}
+
+function shouldIgnoreEvent(event) {
+  const values = Array.isArray(event?.exception?.values) ? event.exception.values : [];
+  return values.some((value) => SENTRY_ERROR_FILTERS.some((filter) => {
+    if (value?.type === filter.code) return true;
+    return typeof value?.value === 'string' && value.value.includes(filter.code);
+  }));
 }
 
 export function initSentry() {
@@ -19,11 +28,7 @@ export function initSentry() {
     dsn,
     environment: process.env.NODE_ENV || "development",
     beforeSend(event) {
-      if (event.exception?.values?.[0]?.value) {
-        const err = new Error(event.exception.values[0].value);
-        err.code = event.exception.values[0].type || undefined;
-        if (shouldIgnoreError(err)) return null;
-      }
+      if (shouldIgnoreEvent(event)) return null;
       return event;
     },
   });
@@ -40,10 +45,20 @@ export async function flushSentry(timeoutMs = 2000) {
 }
 
 export function sentryRequestHandler() {
-  if (typeof Sentry.Handlers?.requestHandler === 'function') {
-    return Sentry.Handlers.requestHandler();
-  }
-  return (req, res, next) => next();
+  const base =
+    typeof Sentry.Handlers?.requestHandler === 'function'
+      ? Sentry.Handlers.requestHandler()
+      : (req, res, next) => next();
+  return (req, res, next) => {
+    if (req.user) {
+      Sentry.setUser({
+        id: req.user.id,
+        email: req.user.email,
+        role: req.user.role,
+      });
+    }
+    return base(req, res, next);
+  };
 }
 
 export function captureException(err) {
@@ -61,8 +76,14 @@ export function captureDebugException(err) {
 }
 
 export function sentryErrorHandler() {
-  if (typeof Sentry.Handlers?.errorHandler === 'function') {
-    return Sentry.Handlers.errorHandler();
-  }
-  return Sentry.expressErrorHandler();
+  const base =
+    typeof Sentry.Handlers?.errorHandler === 'function'
+      ? Sentry.Handlers.errorHandler()
+      : typeof Sentry.expressErrorHandler === 'function'
+        ? Sentry.expressErrorHandler()
+        : (err, req, res, next) => next(err);
+  return (err, req, res, next) => {
+    Sentry.captureException(err);
+    return base(err, req, res, next);
+  };
 }

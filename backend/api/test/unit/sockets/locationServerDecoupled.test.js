@@ -55,7 +55,10 @@ vi.mock('socket.io', () => ({ Server: sio.Server }));
 vi.mock('jsonwebtoken', () => ({ default: { verify: vi.fn(), sign: vi.fn() } }));
 vi.mock('../../../src/middleware/logger.js', () => ({ default: mockLogger }));
 vi.mock('../../../src/models/GpsLog.js', () => ({ GpsLog: { create: vi.fn() } }));
-vi.mock('../../../src/config/db.js', () => ({ supabase: supabaseMock }));
+vi.mock('../../../src/config/db.js', () => ({ 
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
+  supabase: supabaseMock }));
 vi.mock('../../../src/sockets/telemetryBuffer.js', () => telemetryBufferMock);
 
 const { initLocationServer, closeLocationServer } = await import('../../../src/sockets/locationServer.js');
@@ -102,14 +105,18 @@ describe('locationServer — broadcast decoupled from buffered telemetry persist
     await closeLocationServer();
   });
 
-  it('buffers a GPS ping into the telemetry pipeline and broadcasts to the booking room', () => {
+  it('buffers a GPS ping into the telemetry pipeline and broadcasts to the booking room', async () => {
     const socket = fakeSocket();
     getConnectionHandler('/driver')(socket);
     const onUpdate = getHandler(socket, 'location_update');
 
-    onUpdate({ lat: 19.07, lng: 72.87, speed: 42, heading: 90, timestamp: '2026-01-01T00:00:00Z' });
+    const pingTimestamp = new Date().toISOString();
+    onUpdate({ lat: 19.07, lng: 72.87, speed: 42, heading: 90, timestamp: pingTimestamp });
+    // The handler is async (sequence gate + telemetry write): flush microtasks
+    // before asserting the buffered record and the broadcast.
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
 
-    // Persistence record is pushed into the shared buffer — synchronous.
     expect(telemetryBufferMock.default.enqueue).toHaveBeenCalledTimes(1);
     const record = telemetryBufferMock.default.enqueue.mock.calls[0][0];
     expect(record).toMatchObject({
@@ -133,13 +140,13 @@ describe('locationServer — broadcast decoupled from buffered telemetry persist
       lng: 72.87,
       speed: 42,
       heading: 90,
-      timestamp: '2026-01-01T00:00:00.000Z',
+      timestamp: pingTimestamp,
       bookingId: 'b1',
     });
     expect(customerNs._to).toBe('booking:b1');
   });
 
-  it('fail-open: a failing telemetry buffer does NOT block the broadcast', () => {
+  it('fail-open: a failing telemetry buffer does NOT block the broadcast', async () => {
     const socket = fakeSocket();
     getConnectionHandler('/driver')(socket);
     const onUpdate = getHandler(socket, 'location_update');
@@ -148,6 +155,8 @@ describe('locationServer — broadcast decoupled from buffered telemetry persist
       throw new Error('MongoDB down');
     });
     onUpdate({ lat: 1, lng: 2 });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
 
     const customerNs = getNs('/customer');
     expect(customerNs.emit).toHaveBeenCalledWith(

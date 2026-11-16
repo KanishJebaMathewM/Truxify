@@ -137,7 +137,7 @@ class _PwaDispatchScreenState extends State<PwaDispatchScreen> {
       child: ListTile(
         contentPadding: const EdgeInsets.all(16),
         leading: CircleAvatar(
-          backgroundColor: statusColor.withOpacity(0.2),
+          backgroundColor: statusColor.withValues(alpha: 0.2),
           child: Icon(statusIcon, color: statusColor),
         ),
         title: Text('${t.truckId} - ${t.driverName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),

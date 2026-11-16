@@ -2,6 +2,19 @@ import logger from './logger.js';
 import { AppError } from '../utils/errors.js';
 
 export function errorHandler(err, req, res, next) {
+  if (req?.timedout || err?.code === 'ETIMEDOUT' || err?.timeout) {
+    logger.warn(
+      { requestId: req?.requestId, ip: req?.ip, method: req?.method, path: req?.originalUrl },
+      'Request exceeded timeout limit'
+    );
+    res.set('Retry-After', '5');
+    return res.status(503).json({
+      error: 'REQUEST_TIMEOUT',
+      message: 'Request exceeded the time limit. Please try again.',
+      retryAfter: 5
+    });
+  }
+
   if (err?.type === 'entity.too.large') {
     logger.warn(
       { requestId: req.requestId, ip: req.ip, method: req.method, path: req.originalUrl },

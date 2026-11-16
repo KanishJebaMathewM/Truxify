@@ -1,6 +1,11 @@
 const assert = require("node:assert/strict");
 const { ethers } = require("hardhat");
 const { expect } = require("chai");
+const { mine } = require("@nomicfoundation/hardhat-network-helpers");
+
+// Releases are gated on block.number >= deposit.blockMin (creation block +
+// RELEASE_DELAY_BLOCKS = 20). Mine past the MEV-protection window.
+const mineReleaseWindow = () => mine(20);
 
 /**
  * Reveal/security tests for MEVProtectedEscrow against the real contract
@@ -55,6 +60,7 @@ describe("MEVProtectedEscrow reveal security", function () {
 
     const depositId = await createDeposit(escrow, customer, driver, preimage, amount);
 
+    await mineReleaseWindow();
     const before = await ethers.provider.getBalance(driver.address);
     await expect(escrow.connect(relayer).releaseDepositPrivate(depositId, preimage))
       .to.emit(escrow, "DepositReleasedMEV")
@@ -76,6 +82,7 @@ describe("MEVProtectedEscrow reveal security", function () {
 
     const depositId = await createDeposit(escrow, customer, driver, preimage, amount);
 
+    await mineReleaseWindow();
     await expect(
       escrow.connect(relayer).releaseDepositPrivate(depositId, wrongPreimage)
     ).to.be.revertedWith("Invalid preimage");
@@ -106,6 +113,7 @@ describe("MEVProtectedEscrow reveal security", function () {
 
     const depositId = await createDeposit(escrow, customer, driver, preimage, amount);
 
+    await mineReleaseWindow();
     await escrow.connect(relayer).releaseDepositPrivate(depositId, preimage);
     await expect(
       escrow.connect(relayer).releaseDepositPrivate(depositId, preimage)
@@ -126,6 +134,7 @@ describe("MEVProtectedEscrow reveal security", function () {
 
     const depositId = await createDeposit(escrow, customer, driver, preimage, amount);
 
+    await mineReleaseWindow();
     await expect(
       escrow.connect(relayer).releaseDepositPrivate(depositId, preimage)
     ).to.be.revertedWith("Caller is not trusted MEV relayer");
@@ -152,8 +161,8 @@ describe("MEVProtectedEscrow reveal security", function () {
     // Before REFUND_WINDOW the refund must be rejected.
     await expect(escrow.refundDeposit(depositId)).to.be.revertedWith("Refund window not open");
 
-    // Mine past the 5760-block refund window.
-    await ethers.provider.send("hardhat_mine", ["0x1690", "0x1"]);
+    // Mine past blockMin (creation + 20 blocks) + REFUND_WINDOW (5760 blocks).
+    await ethers.provider.send("hardhat_mine", ["0x16B0", "0x1"]);
 
     const before = await ethers.provider.getBalance(customer.address);
     await expect(escrow.refundDeposit(depositId))
@@ -173,6 +182,7 @@ describe("MEVProtectedEscrow reveal security", function () {
 
     const depositId = await createDeposit(escrow, customer, driver, preimage, amount);
 
+    await mineReleaseWindow();
     await escrow.connect(relayer).releaseDepositPrivate(depositId, preimage);
     await expect(escrow.refundDeposit(depositId)).to.be.revertedWith("Already released");
   });

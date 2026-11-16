@@ -1,8 +1,263 @@
 /**
- * Returns an error message if the lat/lng pair is out of bounds, or null when valid.
+ * Validates a single coordinate component (latitude or longitude) against geographic bounds.
+ *
+ * @param {any} value - The coordinate value to validate
+ * @param {'lat'|'latitude'|'lng'|'lon'|'longitude'} [type='lat'] - Coordinate axis
+ * @param {string} [fieldName] - Field name to use in error messages
+ * @returns {{ valid: boolean, value?: number, error?: string }}
  */
-export function validateCoordinateRange(lat, lng) {
-  if (lat < -90 || lat > 90) return 'lat must be between -90 and 90';
-  if (lng < -180 || lng > 180) return 'lng must be between -180 and 180';
+export function validateCoordinate(value, type = 'lat', fieldName = type) {
+  if (value === null || value === undefined) {
+    return { valid: false, error: `${fieldName} is required` };
+  }
+  if (typeof value === 'boolean' || Array.isArray(value) || (typeof value === 'object' && value !== null)) {
+    return { valid: false, error: `${fieldName} must be a valid number` };
+  }
+  if (typeof value === 'string' && value.trim() === '') {
+    return { valid: false, error: `${fieldName} cannot be empty` };
+  }
+
+  const num = Number(value);
+  if (!Number.isFinite(num)) {
+    return { valid: false, error: `${fieldName} must be a finite number` };
+  }
+
+  const isLat = type === 'lat' || type === 'latitude';
+  const min = isLat ? -90 : -180;
+  const max = isLat ? 90 : 180;
+
+  if (num < min || num > max) {
+    return { valid: false, error: `${fieldName} must be between ${min} and ${max}` };
+  }
+
+  return { valid: true, value: num };
+}
+
+/**
+ * Returns an error message if the lat/lng pair is out of bounds or invalid, or null when valid.
+ */
+export function validateCoordinateRange(lat, lng, latName = 'lat', lngName = 'lng') {
+  const latRes = validateCoordinate(lat, 'lat', latName);
+  if (!latRes.valid) return latRes.error;
+  const lngRes = validateCoordinate(lng, 'lng', lngName);
+  if (!lngRes.valid) return lngRes.error;
   return null;
 }
+
+const EARTH_RADIUS_KM = 6371;
+
+/**
+ * Calculates exact spherical distance between two geographic coordinates using Haversine formula.
+ *
+ * @param {number} lat1 Latitude of point 1
+ * @param {number} lon1 Longitude of point 1
+ * @param {number} lat2 Latitude of point 2
+ * @param {number} lon2 Longitude of point 2
+ * @param {'km'|'miles'} [unit='km'] Output distance unit
+ * @returns {number} Distance in specified unit
+ */
+export function haversineDistance(lat1, lon1, lat2, lon2, unit = 'km') {
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+
+  const rLat1 = (lat1 * Math.PI) / 180;
+  const rLat2 = (lat2 * Math.PI) / 180;
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(rLat1) * Math.cos(rLat2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const distanceKm = EARTH_RADIUS_KM * c;
+
+  return unit === 'miles' ? distanceKm * 0.621371 : distanceKm;
+}
+
+/**
+ * Computes a rectangular bounding box around a center coordinate for fast pre-filtering.
+ * A longitude interval with minLng > maxLng crosses the antimeridian.
+ *
+ * @param {number} centerLat Center latitude
+ * @param {number} centerLng Center longitude
+ * @param {number} radiusKm Search radius in kilometers
+ * @returns {{ minLat: number, maxLat: number, minLng: number, maxLng: number }}
+ */
+export function getBoundingBox(centerLat, centerLng, radiusKm) {
+  const angle = Math.min(Math.PI, radiusKm / EARTH_RADIUS_KM);
+  const latDelta = angle * 180 / Math.PI;
+  const latRad = (centerLat * Math.PI) / 180;
+  const minLat = Math.max(-90, centerLat - latDelta);
+  const maxLat = Math.min(90, centerLat + latDelta);
+
+  // A spherical cap touching either pole can contain every longitude.
+  if (minLat <= -90 || maxLat >= 90) {
+    return { minLat, maxLat, minLng: -180, maxLng: 180 };
+  }
+  const lngDelta = Math.asin(Math.min(1, Math.sin(angle) / Math.cos(latRad))) * 180 / Math.PI;
+  const wrapLongitude = (lng) => ((lng + 540) % 360) - 180;
+
+  return {
+    minLat,
+    maxLat,
+    minLng: wrapLongitude(centerLng - lngDelta),
+    maxLng: wrapLongitude(centerLng + lngDelta),
+  };
+}
+
+/**
+ * Fast scalar bounding-box check without trigonometric functions.
+ *
+ * @param {{ lat: number, lng: number }} point Candidate coordinate
+ * @param {{ minLat: number, maxLat: number, minLng: number, maxLng: number }} box Bounding box
+ * @returns {boolean} True if point lies inside the bounding box
+ */
+export function isWithinBoundingBox(point, box) {
+  const lat = point.lat ?? point.latitude;
+  const lng = point.lng ?? point.longitude;
+  if (lat == null || lng == null) return false;
+
+  // +180 and -180 describe the same meridian, including zero-radius boxes.
+  const longitude = lng === 180 ? -180 : lng;
+  const withinLongitude = box.minLng <= box.maxLng
+    ? longitude >= box.minLng && longitude <= box.maxLng
+    : longitude >= box.minLng || longitude <= box.maxLng;
+  return (
+    lat >= box.minLat &&
+    lat <= box.maxLat &&
+    withinLongitude
+  );
+}
+
+/**
+ * High-performance candidate filtering using Bounding-Box pre-filtering followed by exact Haversine calculation.
+ * Pre-filters candidates using fast scalar comparisons to eliminate 80-90% of out-of-range points
+ * before running expensive trigonometric calculations.
+ *
+ * @param {Array<{ lat: number, lng: number, [key: string]: any }>} candidates Candidate points
+ * @param {{ lat: number, lng: number }} center Search center coordinate
+ * @param {number} radiusKm Search radius in km
+ * @param {Object} [opts] Options
+ * @param {boolean} [opts.includeStats=false] If true, includes pre-filtering efficiency metrics
+ * @returns {Array<Object> | { matches: Array<Object>, stats: Object }}
+ */
+export function filterCoordinatesByRadius(candidates, center, radiusKm, opts = {}) {
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return opts.includeStats ? { matches: [], stats: { total: 0, passedBox: 0, matches: 0 } } : [];
+  }
+
+  const centerLat = center?.lat ?? center?.latitude;
+  const centerLng = center?.lng ?? center?.longitude;
+  if (!Number.isFinite(centerLat) || !Number.isFinite(centerLng) || !Number.isFinite(radiusKm) || radiusKm <= 0) {
+    return opts.includeStats
+      ? { matches: [], stats: { total: candidates.length, passedBox: 0, matches: 0, eliminatedByBox: candidates.length, efficiencyPercent: 0 } }
+      : [];
+  }
+
+  const box = getBoundingBox(centerLat, centerLng, radiusKm);
+  let passedBoxCount = 0;
+  const matches = [];
+
+  for (let i = 0; i < candidates.length; i++) {
+    const item = candidates[i];
+    const itemLat = item.lat ?? item.latitude;
+    const itemLng = item.lng ?? item.longitude;
+
+    if (itemLat == null || itemLng == null) continue;
+
+    // 1. Fast scalar bounding box pre-filter
+    if (!isWithinBoundingBox({ lat: itemLat, lng: itemLng }, box)) {
+      continue;
+    }
+
+    passedBoxCount++;
+
+    // 2. Exact Haversine distance evaluation
+    const distance = haversineDistance(centerLat, centerLng, itemLat, itemLng, 'km');
+    if (distance <= radiusKm) {
+      matches.push({
+        ...item,
+        distance: Math.round(distance * 1000) / 1000,
+      });
+    }
+  }
+
+  matches.sort((a, b) => a.distance - b.distance);
+
+  if (opts.includeStats) {
+    const eliminatedByBox = candidates.length - passedBoxCount;
+    const efficiencyPercent = Math.round((eliminatedByBox / candidates.length) * 100);
+    return {
+      matches,
+      stats: {
+        total: candidates.length,
+        passedBox: passedBoxCount,
+        matches: matches.length,
+        eliminatedByBox,
+        efficiencyPercent,
+      },
+    };
+  }
+
+  return matches;
+}
+
+/**
+ * Calculates initial compass bearing in degrees (0 - 360) from point 1 to point 2.
+ *
+ * @param {number} lat1 - Latitude of starting point
+ * @param {number} lon1 - Longitude of starting point
+ * @param {number} lat2 - Latitude of destination point
+ * @param {number} lon2 - Longitude of destination point
+ * @returns {number|null} Bearing in degrees clockwise from true north [0, 360), or null if invalid
+ */
+export function calculateBearing(lat1, lon1, lat2, lon2) {
+  if (
+    !Number.isFinite(lat1) ||
+    !Number.isFinite(lon1) ||
+    !Number.isFinite(lat2) ||
+    !Number.isFinite(lon2)
+  ) {
+    return null;
+  }
+
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
+
+  const y = Math.sin(deltaLambda) * Math.cos(phi2);
+  const x =
+    Math.cos(phi1) * Math.sin(phi2) -
+    Math.sin(phi1) * Math.cos(phi2) * Math.cos(deltaLambda);
+
+  const theta = Math.atan2(y, x);
+  const bearing = ((theta * 180) / Math.PI + 360) % 360;
+
+  return Math.round(bearing * 100) / 100;
+}
+
+/**
+ * Maps a compass bearing in degrees to an 8-point cardinal direction.
+ *
+ * @param {number} bearingDegrees - Compass bearing [0, 360)
+ * @returns {string|null} Cardinal direction ('N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW') or null
+ */
+export function getCardinalDirection(bearingDegrees) {
+  if (!Number.isFinite(bearingDegrees)) {
+    return null;
+  }
+  const normalized = ((bearingDegrees % 360) + 360) % 360;
+  const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  const index = Math.round(normalized / 45) % 8;
+  return directions[index];
+}
+
+export default {
+  validateCoordinate,
+  validateCoordinateRange,
+  haversineDistance,
+  getBoundingBox,
+  isWithinBoundingBox,
+  filterCoordinatesByRadius,
+  calculateBearing,
+  getCardinalDirection,
+};

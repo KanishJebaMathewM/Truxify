@@ -12,25 +12,42 @@ export default function headerSizeMonitor(req, res, next) {
     return next();
   }
 
-  let totalSize = 0;
+  // Measure the bytes on the wire. Counting only names and values omits the
+  // ': ', CRLF and request-line overhead, so a request can be several hundred
+  // bytes over the configured threshold and still pass. Node preserves the
+  // original pairs in rawHeaders; fall back to the parsed map only when it is
+  // unavailable (for example in unit tests).
+  let rawTotal = 0;
+  if (Array.isArray(req.rawHeaders)) {
+    for (let i = 0; i < req.rawHeaders.length; i += 2) {
+      rawTotal += Buffer.byteLength(String(req.rawHeaders[i] ?? ''));
+      rawTotal += Buffer.byteLength(String(req.rawHeaders[i + 1] ?? ''));
+      rawTotal += 4; // ': ' + CRLF
+    }
+    rawTotal += 2; // final CRLF
+  }
 
+  // Middleware and tests can add values to req.headers after Node has built
+  // rawHeaders. Measure that view as well and use the larger result.
+  let parsedTotal = 0;
   for (const [name, value] of Object.entries(req.headers)) {
-    totalSize += Buffer.byteLength(name);
-
+    parsedTotal += Buffer.byteLength(name) + 4;
     if (Array.isArray(value)) {
       for (const item of value) {
-        totalSize += Buffer.byteLength(String(item));
+        parsedTotal += Buffer.byteLength(String(item));
       }
     } else if (value !== undefined) {
-      totalSize += Buffer.byteLength(String(value));
+      parsedTotal += Buffer.byteLength(String(value));
     }
   }
+  let totalSize = Math.max(rawTotal, parsedTotal);
 
   if (totalSize > limit) {
     logger.warn(
       {
         method: req.method,
         path: req.originalUrl,
+        ip: req.ip,
         headerSize: totalSize,
         limit,
       },

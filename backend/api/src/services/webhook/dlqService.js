@@ -143,93 +143,52 @@ export const dlqService = {
   },
 
   /**
-   * Fenced completion: only the worker that currently owns a 'processing' row
-   * (matching claimed_by) with an unexpired lease may resolve it. If another
-   * replica reclaimed the row after lease expiry, the update matches zero rows
-   * and this worker loses ownership.
+   * Admit only a live exact attempt using the database clock. Renew before the
+   * handler so a queued batch item receives its own processing lease.
    */
-  async completeClaim(eventId, workerId) {
-    const now = new Date().toISOString();
-    const { data: completed, error } = await dlqDb()
-      .from('webhook_failures')
-      .update({
-        status: 'resolved',
-        resolved_at: now,
-        error_message: null,
-        updated_at: now,
-        claimed_by: null,
-        claimed_at: null,
-        lease_expires_at: null,
-      })
-      .eq('id', eventId)
-      .eq('status', 'processing')
-      .eq('claimed_by', workerId)
-      .select('id');
-
-    if (error) {
-      logger.error(`[DLQ] Failed to mark event ${eventId} as resolved: ${error.message}`);
-      return false;
-    }
-    return Boolean(completed && completed.length > 0);
+  async admitClaim(event, workerId, leaseMs) {
+    return this.attemptRpc('admit_webhook_failure_attempt', event.id, workerId, event.attempt_count, {
+      p_lease_seconds: Math.max(1, Math.floor(leaseMs / 1000)),
+    });
   },
 
-  /**
-   * Fenced retryable-failure transition: processing -> pending with an
-   * incremented retry_count, next_retry_at from the exponential backoff, and
-   * cleared claim/lease metadata.
-   */
-  async requeueClaim(eventId, workerId, retryCount, nextRetryAt, error) {
-    const now = new Date().toISOString();
-    const { data: requeued, error: updateErr } = await dlqDb()
-      .from('webhook_failures')
-      .update({
-        status: 'pending',
-        retry_count: retryCount,
-        next_retry_at: nextRetryAt,
-        error_message: sanitizeError(error),
-        updated_at: now,
-        claimed_by: null,
-        claimed_at: null,
-        lease_expires_at: null,
-      })
-      .eq('id', eventId)
-      .eq('status', 'processing')
-      .eq('claimed_by', workerId)
-      .select('id');
-
-    if (updateErr) {
-      logger.error(`[DLQ] Failed to requeue event ${eventId} for retry: ${updateErr.message}`);
+  // Missing/malformed generations never fall back to worker-name-only writes.
+  async attemptRpc(name, eventId, workerId, attemptCount, params) {
+    if (!Number.isSafeInteger(attemptCount) || attemptCount < 1) return false;
+    try {
+      const { data, error } = await dlqDb().rpc(name, {
+        p_event_id: eventId, p_worker_id: workerId, p_attempt_count: attemptCount, ...params,
+      });
+      if (error) {
+        logger.error(`[DLQ] ${name} failed for ${eventId}: ${error.message}`);
+        return false;
+      }
+      return data === true;
+    } catch (error) {
+      logger.error(`[DLQ] ${name} failed for ${eventId}: ${error.message}`);
       return false;
     }
-    return Boolean(requeued && requeued.length > 0);
   },
 
-  /**
-   * Fenced permanent-failure transition: processing -> failed_permanently.
-   */
-  async failClaim(eventId, workerId, finalRetryCount, error) {
-    const now = new Date().toISOString();
-    const { data: failed, error: updateErr } = await dlqDb()
-      .from('webhook_failures')
-      .update({
-        status: 'failed_permanently',
-        retry_count: finalRetryCount,
-        error_message: sanitizeError(error),
-        updated_at: now,
-        claimed_by: null,
-        claimed_at: null,
-        lease_expires_at: null,
-      })
-      .eq('id', eventId)
-      .eq('status', 'processing')
-      .eq('claimed_by', workerId)
-      .select('id');
+  /** Settlement is atomic on generation and a live database-clock lease. */
+  async completeClaim(eventId, workerId, attemptCount) {
+    return this.attemptRpc('settle_webhook_failure_attempt', eventId, workerId, attemptCount, {
+      p_status: 'resolved', p_retry_count: null, p_next_retry_at: null, p_error_message: null,
+    });
+  },
 
-    if (updateErr) {
-      logger.error(`[DLQ] Failed to mark event ${eventId} as failed_permanently: ${updateErr.message}`);
-      return false;
-    }
-    return Boolean(failed && failed.length > 0);
+  async requeueClaim(eventId, workerId, retryCount, nextRetryAt, error, attemptCount) {
+    return this.attemptRpc('settle_webhook_failure_attempt', eventId, workerId, attemptCount, {
+      p_status: 'pending', p_retry_count: retryCount, p_next_retry_at: nextRetryAt,
+      p_error_message: sanitizeError(error),
+    });
+  },
+
+  async failClaim(eventId, workerId, finalRetryCount, error, attemptCount) {
+    return this.attemptRpc('settle_webhook_failure_attempt', eventId, workerId, attemptCount, {
+      p_status: 'failed_permanently', p_retry_count: finalRetryCount, p_next_retry_at: null,
+      p_error_message: sanitizeError(error),
+    });
   },
 
   /**
@@ -262,7 +221,8 @@ export const dlqService = {
    *
    * A crashed worker's 'processing' rows are reclaimed by any other replica once
    * the lease expires, and business processors are idempotent so a reclaimed
-   * event cannot apply its side effects twice.
+   * event must rely on the business processor's separate idempotency checks.
+   * Admission/settlement cannot cancel an already-started handler after expiry.
    */
   async processQueue(processFnMap, options = {}) {
     const workerId = options.workerId || getWorkerId();
@@ -282,6 +242,12 @@ export const dlqService = {
     const summary = { claimed: claimedEvents.length, resolved: 0, retried: 0, failed: 0, lost: 0 };
 
     for (const event of claimedEvents) {
+      const admitted = await this.admitClaim(event, workerId, leaseMs);
+      if (!admitted) {
+        summary.lost += 1;
+        logger.warn(`[DLQ] Admission lost for event ${event.id}; handler skipped.`);
+        continue;
+      }
       const startedAt = Date.now();
       try {
         const handler = processFnMap?.[event.provider];
@@ -292,13 +258,13 @@ export const dlqService = {
         await handler(event.event_type, event.payload);
 
         // Success: resolve only if we still own the claim.
-        const owned = await this.completeClaim(event.id, workerId);
+        const owned = await this.completeClaim(event.id, workerId, event.attempt_count);
         if (owned) {
           summary.resolved += 1;
           logger.info(`[DLQ] Successfully resolved DLQ event ${event.id}`);
         } else {
           summary.lost += 1;
-          logger.warn(`[DLQ] Event ${event.id} reclaimed by another worker — completion ignored (idempotency preserved).`);
+          logger.warn(`[DLQ] Event ${event.id} no longer owns a live attempt — completion ignored.`);
         }
       } catch (procErr) {
         const handled = await this.recordFailure(event, workerId, procErr);
@@ -310,7 +276,7 @@ export const dlqService = {
           logger.error(`[DLQ] Retry scheduled for event ${event.id}: ${procErr.message}`);
         } else {
           summary.lost += 1;
-          logger.warn(`[DLQ] Event ${event.id} reclaimed by another worker — retry/failure transition ignored.`);
+          logger.warn(`[DLQ] Event ${event.id} no longer owns a live attempt — retry/failure transition ignored.`);
         }
       }
 
@@ -338,17 +304,17 @@ export const dlqService = {
     // can never succeed on a retry, so dead-letter them immediately instead of
     // burning retries and delaying operator visibility.
     if (isPermanentFailure(procErr)) {
-      const owned = await this.failClaim(event.id, workerId, newRetryCount, procErr);
+      const owned = await this.failClaim(event.id, workerId, newRetryCount, procErr, event.attempt_count);
       return owned ? 'permanent' : 'lost';
     }
 
     if (nextBackoffMin === undefined) {
-      const owned = await this.failClaim(event.id, workerId, newRetryCount, procErr);
+      const owned = await this.failClaim(event.id, workerId, newRetryCount, procErr, event.attempt_count);
       return owned ? 'permanent' : 'lost';
     }
 
     const nextRetryAt = new Date(now + nextBackoffMin * 60000).toISOString();
-    const owned = await this.requeueClaim(event.id, workerId, newRetryCount, nextRetryAt, procErr);
+    const owned = await this.requeueClaim(event.id, workerId, newRetryCount, nextRetryAt, procErr, event.attempt_count);
     return owned ? 'retry' : 'lost';
   },
 

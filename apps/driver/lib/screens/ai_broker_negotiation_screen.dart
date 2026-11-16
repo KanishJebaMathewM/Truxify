@@ -119,7 +119,7 @@ class _AIBrokerNegotiationScreenState extends State<AIBrokerNegotiationScreen> {
                   Text(s.brokerName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                    decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                    decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
                     child: Text(s.status.toUpperCase(), style: TextStyle(color: statusColor, fontWeight: FontWeight.bold)),
                   )
                 ],

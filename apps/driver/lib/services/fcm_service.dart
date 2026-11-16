@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 
 import 'api_client.dart';
 
+export 'package:truxify_shared/src/services/fcm_service.dart' hide FcmService;
+
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   debugPrint('[FCM] Background message: ${message.messageId}');
@@ -132,4 +134,3 @@ class FcmService {
 
   static Future<void> _sendTokenToBackend(String? token) => sendTokenToBackend(token);
 }
-export 'package:truxify_shared/src/services/fcm_service.dart' hide FcmService;

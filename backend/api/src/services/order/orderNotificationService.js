@@ -7,10 +7,19 @@ import {
   getActiveDeliveryOtp,
 } from '../notificationService.js';
 
-export const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES || '15', 10);
-export const OTP_MAX_FAILED_ATTEMPTS = parseInt(process.env.OTP_MAX_FAILED_ATTEMPTS || '5', 10);
-export const OTP_LOCKOUT_MINUTES = parseInt(process.env.OTP_LOCKOUT_MINUTES || '30', 10);
-const IN_MEMORY_OTP_MAP_MAX_SIZE = parseInt(process.env.IN_MEMORY_OTP_MAP_MAX_SIZE || '10000', 10);
+function boundedPositiveInt(raw, fallback, min, max) {
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) return fallback;
+  return parsed;
+}
+
+// A zero/negative lockout produced `EX 0` (an invalid Redis TTL) or a lock
+// that expired immediately, and a non-numeric attempt limit made every
+// comparison false. Bound both values instead of trusting the environment.
+export const OTP_TTL_MINUTES = boundedPositiveInt(process.env.OTP_TTL_MINUTES, 15, 1, 24 * 60);
+export const OTP_MAX_FAILED_ATTEMPTS = boundedPositiveInt(process.env.OTP_MAX_FAILED_ATTEMPTS, 5, 1, 100);
+export const OTP_LOCKOUT_MINUTES = boundedPositiveInt(process.env.OTP_LOCKOUT_MINUTES, 30, 1, 24 * 60);
+const IN_MEMORY_OTP_MAP_MAX_SIZE = boundedPositiveInt(process.env.IN_MEMORY_OTP_MAP_MAX_SIZE, 10000, 1, 1000000);
 export const DELIVERY_OTP_READY_STATUSES = new Set(['arriving']);
 
 const inMemoryOtpFailedAttempts = new Map();
@@ -97,7 +106,8 @@ export async function recordOtpFailure(orderId) {
     }
   }
 
-  if (inMemoryOtpFailedAttempts.size >= IN_MEMORY_OTP_MAP_MAX_SIZE) {
+  // Updating an existing attempt counter does not require another map slot.
+  if (!inMemoryOtpFailedAttempts.has(orderId) && inMemoryOtpFailedAttempts.size >= IN_MEMORY_OTP_MAP_MAX_SIZE) {
     const oldestKey = inMemoryOtpFailedAttempts.keys().next().value;
     inMemoryOtpFailedAttempts.delete(oldestKey);
   }

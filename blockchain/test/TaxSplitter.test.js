@@ -11,6 +11,9 @@ describe("TaxSplitter Contract", function () {
     const totalAmount = ethers.parseEther("1.0");
 
     // 12% GST + 1% TDS = 13% tax = 0.13 ETH, net = 0.87 ETH
+    // Verify balances relative to the pre-payout balance (signer balances are
+    // shared across test files in the same chain, so absolute assertions break).
+    const driverBefore = await ethers.provider.getBalance(driver.address);
     const tx = await splitter.splitPayout(
       payoutId,
       driver.address,
@@ -22,9 +25,8 @@ describe("TaxSplitter Contract", function () {
     );
     await tx.wait();
 
-    // Verify balances (approximate due to gas, but receiver has no gas costs)
     const driverBalance = await ethers.provider.getBalance(driver.address);
-    expect(driverBalance).to.be.greaterThan(ethers.parseEther("10000.86")); // Default signers start with 10000 ETH
+    expect(driverBalance - driverBefore).to.equal(ethers.parseEther("0.87")); // net = 87% of 1 ETH
   });
 
   it("Should revert when combined tax rates exceed 100%", async function () {

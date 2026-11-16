@@ -1,6 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import StateDivergenceDetector, { FINALITY_THRESHOLD } from '../../../../src/services/blockchain/stateDivergenceDetector.js';
 
+vi.mock('@sentry/node', () => ({
+  captureException: vi.fn(),
+}));
+
 vi.mock('../../../../src/middleware/logger.js', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
@@ -12,6 +16,9 @@ vi.mock('ethers', () => ({
 }));
 
 vi.mock('../../../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: { from: vi.fn() },
 }));
 

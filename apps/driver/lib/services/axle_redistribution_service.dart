@@ -30,7 +30,7 @@ class AxleRedistributionService {
         driveLbs: 34500, // Shifting...
         tandemLbs: 32800, // Shifting...
       ),
-      targetPsiAdjustment: +14.5,
+      targetPsiAdjustment: 14.5,
     ));
     
     await Future.delayed(const Duration(seconds: 4));

@@ -161,7 +161,10 @@ void main() {
 
       expect(
         () => service.fetchWalletTransactions(),
-        throwsA(isA<Exception>().having((e) => e.toString(), 'message', contains('Unauthorized access'))),
+        // 401 with no refreshable session surfaces the ApiClient's
+        // session-expired message (the ApiAuthException branch — previously
+        // this fell through to the generic 'Network error' message).
+        throwsA(isA<Exception>().having((e) => e.toString(), 'message', contains('Session expired'))),
       );
       
       service.dispose();
@@ -280,7 +283,13 @@ void main() {
         expect(request.url.queryParameters['start_date'], equals('2026-06-01'));
         expect(request.url.queryParameters['end_date'], equals('2026-06-30'));
         expect(request.url.queryParameters['format'], equals('json'));
-        return http.Response(jsonEncode(mockStatement), 200);
+        // The body contains non-ASCII ('→') — Response(String) assumes
+        // latin-1 and throws. Encode as UTF-8 bytes (same as #17666).
+        return http.Response.bytes(
+          utf8.encode(jsonEncode(mockStatement)),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
       });
 
       final supabaseClient = FakeSupabaseClient(auth: mockAuth);

@@ -31,6 +31,9 @@ function runLiquibase(args, password) {
   });
 }
 
+const MISSING_CONFIG_MESSAGE =
+    'DATABASE_URL, DB_USERNAME, and DB_PASSWORD environment variables are required';
+
 class LiquibaseService {
     constructor() {
         this.liquibasePath = path.join(__dirname, '../../database/liquibase');
@@ -38,14 +41,25 @@ class LiquibaseService {
         this.username = process.env.DB_USERNAME;
         this.password = process.env.DB_PASSWORD;
 
-        if (!this.dbUrl || !this.username || !this.password) {
-            throw new Error('DATABASE_URL, DB_USERNAME, and DB_PASSWORD environment variables are required');
+        // This is a module-level singleton that src/index.js loads through the
+        // admin routes, so throwing here stopped the whole API from starting on
+        // any deployment without these variables (DB_USERNAME is not even in
+        // .env.example). Report it where it matters: on each Liquibase call.
+        if (this.isConfigured()) {
+            logger.info('✅ Liquibase Service initialized');
+        } else {
+            logger.warn('Liquibase disabled: ' + MISSING_CONFIG_MESSAGE);
         }
-        
-        logger.info('✅ Liquibase Service initialized');
+    }
+
+    isConfigured() {
+        return Boolean(this.dbUrl && this.username && this.password);
     }
 
     async runMigrations() {
+        if (!this.isConfigured()) {
+            return { success: false, error: MISSING_CONFIG_MESSAGE };
+        }
         try {
             const args = [
                 `--changeLogFile=${this.liquibasePath}/changelog-master.xml`,
@@ -70,6 +84,9 @@ class LiquibaseService {
     }
 
     async rollback(rollbackCount = 1) {
+        if (!this.isConfigured()) {
+            return { success: false, error: MISSING_CONFIG_MESSAGE };
+        }
         try {
             const parsedCount = parseInt(rollbackCount, 10);
             if (!Number.isFinite(parsedCount) || parsedCount < 1) {
@@ -100,6 +117,9 @@ class LiquibaseService {
     }
 
     async getStatus() {
+        if (!this.isConfigured()) {
+            return { success: false, error: MISSING_CONFIG_MESSAGE };
+        }
         try {
             const args = [
                 `--changeLogFile=${this.liquibasePath}/changelog-master.xml`,
@@ -123,6 +143,9 @@ class LiquibaseService {
     }
 
     async validate() {
+        if (!this.isConfigured()) {
+            return { success: false, error: MISSING_CONFIG_MESSAGE };
+        }
         try {
             const args = [
                 `--changeLogFile=${this.liquibasePath}/changelog-master.xml`,

@@ -80,9 +80,10 @@ export const CacheNamespace = {
 };
 
 // ── Built-in namespaces ─────────────────────────────────────────────
+const profileNamespaceTtl = parseInt(process.env.REDIS_CACHE_TTL, 10);
 CacheNamespace.register('profile', {
   prefix: 'user:profile',
-  defaultTtl: parseInt(process.env.REDIS_CACHE_TTL || '900', 10),
+  defaultTtl: Number.isFinite(profileNamespaceTtl) ? profileNamespaceTtl : 900,
 });
 CacheNamespace.register('order', { defaultTtl: 300 });
 CacheNamespace.register('driver', { defaultTtl: 300 });

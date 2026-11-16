@@ -95,6 +95,8 @@ const POLICIES = {
   'wim:request-bypass':        { roles: [ROLES.DRIVER] },
   'wim:verify-bypass':         { roles: [ROLES.DRIVER, ROLES.ADMIN] },
 
+  'ifta:generate-report':      { roles: [ROLES.DRIVER, ROLES.ADMIN] },
+
   'maintenance:upload-photos':  { roles: [ROLES.DRIVER] },
 
   'ticket:create':             {},

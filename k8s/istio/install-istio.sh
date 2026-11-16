@@ -7,7 +7,7 @@ curl -L https://istio.io/downloadIstio | sh -
 cd istio-*
 
 # Add istioctl to PATH
-export PATH=$PWD/bin:$PATH
+export PATH="$PWD/bin:$PATH"
 
 # Install Istio with demo profile
 istioctl install --set profile=demo -y

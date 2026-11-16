@@ -1,7 +1,13 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { __testing } from '../../../src/services/voiceService.js';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-const { trimCache, audioCache, MAX_CACHE_SIZE, CACHE_TTL_MS } = __testing;
+vi.mock('../../src/config/db.js', () => ({
+  supabaseAdmin: { from: vi.fn() },
+  supabase: {},
+}));
+
+import { __testing, audioCache } from '../../src/services/voiceService.js';
+
+const { trimCache, MAX_CACHE_SIZE, CACHE_TTL_MS } = __testing;
 
 describe('trimCache', () => {
   beforeEach(() => {
@@ -42,16 +48,13 @@ describe('trimCache', () => {
 
   it('deletes expired entries before checking capacity', () => {
     const now = Date.now();
-    // Fill with expired entries
     for (let i = 0; i < MAX_CACHE_SIZE + 10; i++) {
       audioCache.set(`expired${i}`, { buffer: Buffer.from('a'), userId: 'u1', timestamp: now - CACHE_TTL_MS - 1 });
     }
-    // Add some recent entries
     for (let i = 0; i < 5; i++) {
       audioCache.set(`recent${i}`, { buffer: Buffer.from('b'), userId: 'u2', timestamp: now });
     }
     trimCache();
-    // All expired should be gone, recent should remain
     expect(audioCache.size).toBe(5);
   });
 });

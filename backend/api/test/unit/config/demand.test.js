@@ -73,11 +73,11 @@ describe('demandConfig', () => {
     it('falls back to default when env values are invalid (non-numeric, NaN, or whitespace)', async () => {
       const demandConfig = await loadDemandConfig({
         DEMAND_BASE_EARNING_RATE: 'invalid-number',
-        DEMAND_ROUTE_MULTIPLIER_BASE: '   ',
+        DEMAND_ROUTE_MULTIPLIER_BASE: '    ',
         DEMAND_ROUTE_MULTIPLIER_STEP: 'NaN',
         DEMAND_NEXT_24H_FACTOR: 'Infinity',
         DEMAND_NEXT_48H_FACTOR: '',
-        DEMAND_PEAK_HOURS: '   ,  , ',
+        DEMAND_PEAK_HOURS: '    ,   , ',
       });
 
       expect(demandConfig.baseEarningRate).toBe(18.50);

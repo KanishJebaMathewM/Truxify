@@ -4,6 +4,8 @@ Thank you for considering contributing to Truxify! We appreciate every contribut
 
 Truxify is a broker-free, ML-powered, blockchain-secured freight platform built to connect manufacturers directly with truck drivers across India. By contributing, you help empower India's 1.4 crore truck drivers with transparent pricing, instant payments, and route optimization.
 
+💬 **Join our Community**: Have questions, feature ideas, or want to collaborate on Truxify and other open-source projects? Join our [Discord Server](https://discord.gg/7MhyE48Au)!
+
 ---
 
 ## 📐 Table of Contents
@@ -54,7 +56,7 @@ Ensure you have the following installed on your local machine:
 | Tool | Recommended Version | Download Link |
 |---|---|---|
 | **Flutter SDK** | `>= 3.19.0` | [flutter.dev](https://flutter.dev) |
-| **Node.js** | `>= 20.x` (LTS) | [nodejs.org](https://nodejs.org) |
+| **Node.js** | `>= 22.x` (LTS) | [nodejs.org](https://nodejs.org) |
 | **Python** | `>= 3.11.x` | [python.org](https://python.org) |
 | **Docker & Compose** | Latest | [docker.com](https://www.docker.com) |
 | **Git** | Latest | [git-scm.com](https://git-scm.com) |
@@ -141,12 +143,12 @@ Copy `.env.example` at the repository root or in component directories to set yo
 
 | Variable | Description | Default / Example |
 |---|---|---|
-| `PORT` | Node.js Backend API Port | `8080` |
+| `PORT` | Node.js Backend API Port | `5000` |
 | `JWT_SECRET` | Backend JWT signing secret | `truxify-jwt-secret-key` |
 | `POLYGON_RPC_URL` | Polygon JSON-RPC Endpoint | `https://polygon-mumbai.g.alchemy.com/v2/...` |
 | `ESCROW_CONTRACT_ADDRESS` | Deployed TruxifyEscrow contract | `0x1234567890abcdef1234567890abcdef12345678` |
-| `UPSTASH_REDIS_REST_URL` | Redis Caching REST Endpoint | `https://...upstash.io` |
-| `UPSTASH_REDIS_REST_TOKEN` | Redis Caching Authentication Token | `AZ...` |
+| `REDIS_REST_URL` | Redis Caching REST Endpoint | `https://...upstash.io` |
+| `REDIS_REST_TOKEN` | Redis Caching Authentication Token | `AZ...` |
 | `N8N_DISPUTE_WEBHOOK_URL` | n8n Dispute Resolution Webhook | `https://n8n.truxify.com/webhook/dispute` |
 | `BYPASS_AUTH` | Bypass Firebase Auth in local dev | `true` |
 
@@ -200,6 +202,19 @@ git commit --no-verify -m "fix(cache): resolve Redis cache-aside TTL expiry on d
 5. **No Verification Bypass in PRs**: Ensure pre-commit hooks pass.
 
 ---
+
+### ✅ Before Opening a Pull Request
+
+Before opening your PR, verify:
+
+- [ ] You are working on a dedicated branch and not `main`.
+- [ ] Your changes are limited to the scope of the issue.
+- [ ] Relevant tests have been run and pass successfully.
+- [ ] Code formatting and linting checks have been completed.
+- [ ] No API keys, passwords, tokens, or other secrets are included.
+- [ ] Documentation has been updated if your changes require it.
+- [ ] The related issue is linked in the PR description.
+- [ ] You have reviewed your changes and confirmed the PR is ready for review.
 
 ## 🏷️ Issue Labels Guide
 

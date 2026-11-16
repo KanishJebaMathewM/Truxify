@@ -62,7 +62,7 @@ class _LoadPointDetailScreenState extends State<LoadPointDetailScreen> {
                                 _point.id,
                                 nextClaimed,
                               );
-                              if (!mounted) return;
+                              if (!context.mounted) return;
                               setState(() {
                                 _point = _point.copyWith(claimed: nextClaimed);
                               });
@@ -74,7 +74,7 @@ class _LoadPointDetailScreenState extends State<LoadPointDetailScreen> {
                                 ),
                               );
                             } catch (e) {
-                              if (!mounted) return;
+                              if (!context.mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(content: Text('Failed to update: $e')),
                               );

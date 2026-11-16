@@ -74,6 +74,21 @@ Heavy optional deep learning frameworks (e.g., PyTorch Geometric, OpenCV, MediaP
 
 All endpoints require the `X-API-Key` header matching the environment `ML_API_KEY`.
 
+### ETA model training capacity
+
+`POST /eta/train` uses the dedicated training executor rather than consuming
+inference slots. `ML_TRAINING_MAX_WORKERS` (default `2`) bounds admitted training
+jobs across models in each process. Duplicate jobs for one model return HTTP
+409; excess jobs return 503 immediately. `ML_TRAINING_TIMEOUT_SECONDS` (default
+`300`) limits the request duration; ETA training returns 504 on timeout.
+
+A timed-out or disconnected request signals cancellation, but Python cannot
+terminate a running worker thread. Its capacity remains occupied until it exits.
+ETA training keeps the current model available, trains a separate instance, and
+replaces the saved artifact atomically after checking cancellation. Failed or
+cancelled training preserves the previous model. These limits apply per service
+process; CPU isolation across replicas requires separate training infrastructure.
+
 ---
 
 ## 🧪 Running Unit Tests
@@ -101,3 +116,20 @@ docker compose up ml-engine -d
 # Verify Health
 curl http://localhost:8001/health
 ```
+
+### Inference response and admission limits
+
+Inference admission is process-wide, including overlapping event loops.
+`ML_MAX_CONCURRENT_INFERENCE` bounds submitted native work; worker count is raised
+to this limit when needed. `ML_INFERENCE_MAX_WAITERS` (default32) bounds waiting
+requests, and `ML_INFERENCE_QUEUE_TIMEOUT_SECONDS` (default5s) bounds their wait.
+Saturation returns503. `ML_INFERENCE_TIMEOUT_SECONDS` (default30s) bounds an
+admitted response and returns504. Callable failures retain their own exception
+semantics. All limits are validated at startup and during configuration.
+
+A disconnected/timed-out caller cannot release a still-running worker's slot.
+Native completion releases capacity, even after the caller's loop closes or a
+pool is replaced. Python threads are not killed on timeout: a permanently stuck
+callable retains capacity until completion/process replacement. This deliberately
+bounds further submission rather than promising that arbitrary computation stops.
+Training uses its separate bounded admission and cancellation/publication policy.

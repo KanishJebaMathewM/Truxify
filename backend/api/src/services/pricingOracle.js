@@ -1,6 +1,48 @@
 /**
  * Baseline rate multipliers per equipment type ($/mile baseline).
  */
+// backend/api/src/services/pricing.js (Excerpt)
+
+import logger from '../middleware/logger.js';
+
+/**
+ * Calculates estimated trip pricing including distance, base fare, and scaled toll estimates.
+ * @param {Object} params - Pricing calculation parameters
+ * @param {number} params.distanceKm - Trip distance in kilometers
+ * @param {string} params.vehicleType - Category of truck/vehicle
+ * @param {number} [params.tollFactor=1.0] - Optional dynamic multiplier factor for toll estimates
+ */
+export function calculateTripPrice({ distanceKm, vehicleType, tollFactor = 1.0 }) {
+  if (distanceKm < 0) {
+    throw new Error('Distance cannot be negative.');
+  }
+
+  // Base rate card lookups
+  const baseFare = 50.00;
+  const perKmRate = 18.00;
+  const staticBaseToll = distanceKm * 2.50; // Base toll estimate per km
+
+  // ✅ Apply dynamic tollFactor scaling (defaulting to 1.0)
+  const normalizedTollFactor = typeof tollFactor === 'number' && !isNaN(tollFactor) ? tollFactor : 1.0;
+  const calculatedToll = Number((staticBaseToll * normalizedTollFactor).toFixed(2));
+
+  const distanceFare = distanceKm * perKmRate;
+  const subtotal = baseFare + distanceFare + calculatedToll;
+
+  logger.info({ distanceKm, vehicleType, tollFactor: normalizedTollFactor, calculatedToll }, 'Calculated trip price with dynamic toll factor');
+
+  return {
+    success: true,
+    currency: 'INR',
+    breakdown: {
+      baseFare,
+      distanceFare,
+      tollAmount: calculatedToll,
+      tollFactor: normalizedTollFactor,
+      subtotal: Number(subtotal.toFixed(2)),
+    },
+  };
+}
 const BASELINE_RATES_PER_MILE = {
     DRY_VAN: 2.35,
     REEFER: 2.85,
@@ -9,6 +51,18 @@ const BASELINE_RATES_PER_MILE = {
 };
 
 const NATIONAL_AVG_FUEL_PRICE = 3.90; // USD per gallon baseline
+
+function validationError(message) {
+    const error = new RangeError(message);
+    error.statusCode = 400;
+    return error;
+}
+
+function assertPositiveFinite(name, value) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+        throw validationError(`${name} must be a finite number greater than 0.`);
+    }
+}
 
 /**
  * Calculates Fair Market Value (FMV) for a given load based on live market factors.
@@ -28,6 +82,16 @@ export function calculateFairMarketValue(load = {}, marketConditions = {}) {
         truckToLoadRatio: rawRatio = 1.0, // < 1.0 indicates high demand / carrier market; > 1.0 indicates capacity surplus
         localFuelPriceUSD: rawFuelPrice = NATIONAL_AVG_FUEL_PRICE
     } = marketConditions;
+
+    if (Object.prototype.hasOwnProperty.call(load, 'currentOfferedPayout')) {
+        assertPositiveFinite('currentOfferedPayout', currentOfferedPayout);
+    }
+    if (rawRatio !== undefined && rawRatio !== null && Number.isFinite(rawRatio) && rawRatio <= 0) {
+        throw validationError('truckToLoadRatio must be greater than 0.');
+    }
+    if (rawFuelPrice !== undefined && rawFuelPrice !== null && Number.isFinite(rawFuelPrice) && rawFuelPrice <= 0) {
+        throw validationError('localFuelPriceUSD must be greater than 0.');
+    }
 
     // Guard: non-positive or non-finite distanceMiles produces no meaningful FMV
     if (!Number.isFinite(distanceMiles) || distanceMiles <= 0) {

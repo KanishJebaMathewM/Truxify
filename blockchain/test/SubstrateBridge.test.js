@@ -9,8 +9,13 @@ describe("SubstrateBridge Cross-Chain Engine", function () {
 
     const msgHash = ethers.keccak256(ethers.toUtf8Bytes("XCM_TX_BILL_OF_LADING_101"));
 
-    // Owner-signed ECDSA signature over the message hash
-    const signature = await owner.signMessage(ethers.getBytes(msgHash));
+    // Owner-signed EIP-191 signature over the bound message digest:
+    // keccak256(abi.encodePacked(messageHash, destParachainId, recipient, amount)) (issue #11988).
+    const digest = ethers.solidityPackedKeccak256(
+      ["bytes32", "uint32", "address", "uint256"],
+      [msgHash, 2000, relayer.address, 500]
+    );
+    const signature = await owner.signMessage(ethers.getBytes(digest));
 
     const tx = await bridge.relayXcmMessage(msgHash, 2000, relayer.address, 500, signature);
     await tx.wait();
@@ -43,6 +48,6 @@ describe("SubstrateBridge Cross-Chain Engine", function () {
 
     await expect(
       bridge.connect(attacker).relayXcmMessage(msgHash, 2000, relayer.address, 500, signature)
-    ).to.be.revertedWith("OwnableUnauthorizedAccount");
+    ).to.be.revertedWithCustomError(bridge, "OwnableUnauthorizedAccount");
   });
 });

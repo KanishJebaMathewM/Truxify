@@ -63,7 +63,7 @@ void main() {
       final response = VoiceAiService.buildResponse(order);
       expect(
         response,
-        equals('Your shipment is currently in transit and expected to reach Vadodara by Today 4:30 PM.'),
+        equals('Your shipment is currently in transit. Expected to reach Vadodara by Today 4:30 PM.'),
       );
     });
 
@@ -88,7 +88,7 @@ void main() {
       final response = VoiceAiService.buildResponse(order);
       expect(
         response,
-        equals('Your shipment is currently driver assigned and expected to reach Mumbai by Today 5:00 PM.'),
+        equals('Your shipment is currently driver assigned. Expected to reach Mumbai by Today 5:00 PM.'),
       );
     });
 
@@ -112,7 +112,7 @@ void main() {
       final response = VoiceAiService.buildResponse(order);
       expect(
         response,
-        equals('Your shipment is currently pending and expected to reach Delhi by Tomorrow 10:00 AM.'),
+        equals('Your shipment is currently pending. Expected to reach Delhi by Tomorrow 10:00 AM.'),
       );
     });
 
@@ -125,7 +125,7 @@ void main() {
       final response = VoiceAiService.buildResponse(order);
       expect(
         response,
-        equals('Your shipment is currently pending and expected to reach Delhi by Tomorrow 10:00 AM.'),
+        equals('Your shipment is currently pending. Expected to reach Delhi by Tomorrow 10:00 AM.'),
       );
     });
 
@@ -137,7 +137,7 @@ void main() {
       final response = VoiceAiService.buildResponse(order);
       expect(
         response,
-        equals('Your shipment is currently in transit and expected to reach your destination by Today 8:00 PM.'),
+        equals('Your shipment is currently in transit. Expected to reach your destination by Today 8:00 PM.'),
       );
     });
 
@@ -150,7 +150,7 @@ void main() {
       final response = VoiceAiService.buildResponse(order);
       expect(
         response,
-        equals('Your shipment is currently in transit and expected to reach your destination by Today 8:00 PM.'),
+        equals('Your shipment is currently in transit. Expected to reach your destination by Today 8:00 PM.'),
       );
     });
 

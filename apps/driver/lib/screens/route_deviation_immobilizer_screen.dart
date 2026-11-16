@@ -132,7 +132,7 @@ class _RouteDeviationImmobilizerScreenState extends State<RouteDeviationImmobili
     
     return Container(
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(color: isLimpMode ? Colors.red[900]!.withOpacity(0.3) : Colors.black, borderRadius: BorderRadius.circular(16), border: Border.all(color: isLimpMode ? Colors.redAccent : Colors.grey[800]!)),
+      decoration: BoxDecoration(color: isLimpMode ? Colors.red[900]!.withValues(alpha: 0.3) : Colors.black, borderRadius: BorderRadius.circular(16), border: Border.all(color: isLimpMode ? Colors.redAccent : Colors.grey[800]!)),
       child: Row(
         children: [
           Icon(Icons.speed, color: isLimpMode ? Colors.redAccent : Colors.white, size: 48),

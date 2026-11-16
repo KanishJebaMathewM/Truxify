@@ -1,11 +1,12 @@
+import logging
+import os
 from datetime import datetime
+from typing import Any
+
+from app.models.eta_prediction import eta_predictor
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Dict, Any, Optional
 from services.ab_testing import ABTestModel
-from app.models.eta_prediction import eta_predictor
-import os
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -17,13 +18,13 @@ ab_service = ABTestModel(db_url)
 
 class PredictionRequest(BaseModel):
     order_id: str
-    features: Dict[str, Any]
-    request_id: Optional[str] = None
+    features: dict[str, Any]
+    request_id: str | None = None
 
 class MetricsRequest(BaseModel):
     test_id: str
     model_version: str
-    metrics: Dict[str, float]
+    metrics: dict[str, float]
     request_id: str
 
 
@@ -41,7 +42,6 @@ def _feature(request, key, fallback, cast, minimum=None):
     if minimum is not None and parsed < minimum:
         raise ValueError(f"Feature '{key}' must be >= {minimum}")
     return parsed
-
 
 @router.post("/predict")
 async def predict_with_ab(request: PredictionRequest):
@@ -89,13 +89,16 @@ async def predict_with_ab(request: PredictionRequest):
 async def log_metrics(metrics: MetricsRequest):
     """Log model performance metrics"""
     try:
-        ab_service.log_metrics(
+        admitted = ab_service.log_metrics(
             metrics.test_id,
             metrics.model_version,
             metrics.metrics,
             metrics.request_id
         )
-        return {'status': 'success', 'message': 'Metrics logged'}
+        return {'status': 'success' if admitted else 'ignored_terminal',
+                'message': 'Metrics logged' if admitted else 'Experiment is terminal'}
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Internal error: {e}")
 
@@ -113,8 +116,8 @@ async def evaluate_test(test_id: str):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/rollback/{test_id}")
-async def trigger_rollback(test_id: str):
-    """Trigger manual rollback"""
+def trigger_rollback(test_id: str):
+    """Run the owned native rollback on FastAPI's synchronous worker pool."""
     try:
         result = ab_service.trigger_rollback(test_id)
         return result

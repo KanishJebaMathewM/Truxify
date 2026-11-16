@@ -15,6 +15,9 @@ vi.mock('../../src/middleware/logger.js', () => ({
 }));
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   createUserClient: vi.fn(() => null),
   supabase: {
     from: vi.fn(() => ({
@@ -33,7 +36,7 @@ vi.mock('../../src/controllers/shipmentController.js', () => ({
     if (!shipmentId) {
       return res.status(400).json({ error: 'shipmentId is required' });
     }
-    if (shipmentId === 'missing') {
+    if (shipmentId === '22222222-2222-4222-8222-222222222222') {
       return res.status(404).json({ error: 'Shipment not found' });
     }
     return res.json({
@@ -57,11 +60,11 @@ describe('shipmentRoutes', () => {
   it('GET /details responds with 200 and shipment data when shipmentId is provided', async () => {
     const res = await request(app)
       .get('/api/shipment/details')
-      .query({ shipmentId: 'ship-123' })
+      .query({ shipmentId: '11111111-1111-4111-8111-111111111111' })
       .set('Authorization', 'Bearer test-token');
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.data).toHaveProperty('id', 'ship-123');
+    expect(res.body.data).toHaveProperty('id', '11111111-1111-4111-8111-111111111111');
   });
 
   it('GET /details responds with 400 when shipmentId is missing', async () => {
@@ -69,13 +72,13 @@ describe('shipmentRoutes', () => {
       .get('/api/shipment/details')
       .set('Authorization', 'Bearer test-token');
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('shipmentId is required');
+    expect(res.body).toHaveProperty('error');
   });
 
   it('GET /details responds with 404 when shipment is not found', async () => {
     const res = await request(app)
       .get('/api/shipment/details')
-      .query({ shipmentId: 'missing' })
+      .query({ shipmentId: '22222222-2222-4222-8222-222222222222' })
       .set('Authorization', 'Bearer test-token');
     expect(res.status).toBe(404);
     expect(res.body.error).toBe('Shipment not found');

@@ -2,30 +2,33 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:driver/services/marketplace_repository.dart';
+import 'package:truxify_driver/services/marketplace_repository.dart';
+import 'package:truxify_driver/models/app_models.dart';
 
 /// A [RealtimeChannel] double that records the `onPostgresChanges` callback so
 /// a test can synthesise a postgres insert without a live WebSocket, and that
 /// returns `this` from [subscribe] so no network activity happens.
 class FakeRealtimeChannel extends RealtimeChannel {
-  FakeRealtimeChannel() : super('new_load_offers', const RealtimeChannelConfig());
+  FakeRealtimeChannel() : super('new_load_offers', RealtimeClient('ws://localhost', headers: {}));
 
   void Function(PostgresChangePayload)? _onPostgresChanges;
 
   @override
   RealtimeChannel onPostgresChanges({
-    required PostgresChangeEvent event,
-    required String schema,
-    String? table,
-    PostgresChangeFilter? filter,
     required void Function(PostgresChangePayload) callback,
+    required PostgresChangeEvent event,
+    PostgresChangeFilter? filter,
+    List<PostgresChangeFilter>? filters,
+    String? schema,
+    List<String>? select,
+    String? table,
   }) {
     _onPostgresChanges = callback;
     return this;
   }
 
   @override
-  Future<void> subscribe([Duration? timeout]) => Future.value();
+  RealtimeChannel subscribe([void Function(RealtimeSubscribeStatus, Object?)? callback, Duration? timeout]) => this;
 
   /// Simulates a single `INSERT` on `load_offers`, driving the registered
   /// callback exactly once (as a real DB insert would).
@@ -35,6 +38,7 @@ class FakeRealtimeChannel extends RealtimeChannel {
         eventType: PostgresChangeEvent.insert,
         newRecord: record,
         oldRecord: const <String, dynamic>{},
+        errors: null,
         schema: 'public',
         table: 'load_offers',
         commitTimestamp: DateTime.now(),
@@ -60,9 +64,9 @@ class FakeSupabaseClient extends SupabaseClient {
       fakeChannel;
 
   @override
-  Future<void> removeChannel(RealtimeChannel channel) {
+  Future<String> removeChannel(RealtimeChannel channel) async {
     removeChannelCalled = true;
-    return Future.value();
+    return 'ok';
   }
 }
 
@@ -94,24 +98,35 @@ void main() {
 
     test('cancelling one subscriber keeps the other alive (ref-counted channel)',
         () async {
-      final repo = MarketplaceRepository(
-        client: SupabaseClient('https://example.supabase.co', 'test-anon-key'),
-      );
+      // Note: the previous version awaited the survivor's onDone AFTER
+      // cancelling it — impossible by Dart stream semantics (cancel()
+      // suppresses onDone). The real contract: after one subscriber cancels,
+      // the surviving subscriber still receives events.
+      final fakeClient = FakeSupabaseClient();
+      final repo = MarketplaceRepository(client: fakeClient);
 
       final first = repo.subscribeToNewLoads();
       final second = repo.subscribeToNewLoads();
 
-      final secondActive = Completer<void>();
-      final subSecond = second.listen(
-        (_) {},
-        onDone: () => secondActive.complete(),
-      );
+      final receivedFirst = <LoadOffer>[];
+      final receivedSecond = <LoadOffer>[];
+      final subFirst = first.listen(receivedFirst.add);
+      final subSecond = second.listen(receivedSecond.add);
 
-      await first.listen((_) {}).cancel();
-
+      await subFirst.cancel();
       expect(subSecond.isPaused, isFalse);
+      expect(fakeClient.removeChannelCalled, isFalse);
+
+      fakeClient.fakeChannel.emitPostgresInsert(
+          <String, dynamic>{'id': 'load-after-cancel', 'status': 'available'});
+      await Future<void>.delayed(Duration.zero);
+
+      expect(receivedFirst, isEmpty);
+      expect(receivedSecond, hasLength(1));
+
       await subSecond.cancel();
-      await secondActive.future.timeout(const Duration(seconds: 2));
+      // Last listener gone — the shared channel is torn down.
+      expect(fakeClient.removeChannelCalled, isTrue);
     });
 
     test(

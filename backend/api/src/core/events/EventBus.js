@@ -1,10 +1,13 @@
 import EventEmitter from 'events';
+import { performance } from 'node:perf_hooks';
 import logger from '../../middleware/logger.js';
 import { EventMetadata, EVENT_CATEGORIES } from './EventMetadata.js';
 import { EventRegistry } from './EventRegistry.js';
 import { ContextPropagator } from '../telemetry/ContextPropagator.js';
 import { context, trace, SpanStatusCode } from '@opentelemetry/api';
 import spanFactory, { STANDARD_ATTRIBUTES } from '../telemetry/SpanFactory.js';
+
+const MAX_DEDUPLICATION_ENTRIES = 10_000;
 
 class EventBus extends EventEmitter {
   constructor() {
@@ -14,6 +17,7 @@ class EventBus extends EventEmitter {
     this._registry = new EventRegistry();
     this._deduplication = new Map();
     this._deduplicationWindowMs = 60000;
+    this._deduplicationCleanupTimer = null;
     this._listenerWrappers = new Map();
     this._metrics = {
       published: 0,
@@ -355,24 +359,42 @@ class EventBus extends EventEmitter {
     const eventId = event.metadata?.eventId;
     if (!eventId) return false;
 
-    const now = Date.now();
-    const lastSeen = this._deduplication.get(eventId);
-    if (lastSeen && (now - lastSeen) < this._deduplicationWindowMs) {
+    const now = performance.now();
+    this._pruneExpiredDeduplication(now);
+    if (this._deduplication.has(eventId)) {
       return true;
     }
 
-    this._deduplication.set(eventId, now);
-
-    if (this._deduplication.size > 10000) {
-      const cutoff = now - this._deduplicationWindowMs;
-      for (const [key, timestamp] of this._deduplication) {
-        if (timestamp < cutoff) {
-          this._deduplication.delete(key);
-        }
-      }
+    // Map iteration follows insertion order, which is also timestamp order.
+    // Under a burst, prefer the newest IDs without scanning the whole map.
+    if (this._deduplication.size >= MAX_DEDUPLICATION_ENTRIES) {
+      this._deduplication.delete(this._deduplication.keys().next().value);
     }
-
+    this._deduplication.set(eventId, now);
+    this._ensureDeduplicationCleanupTimer();
     return false;
+  }
+
+  _pruneExpiredDeduplication(now) {
+    const cutoff = now - this._deduplicationWindowMs;
+    while (this._deduplication.size > 0) {
+      const [eventId, timestamp] = this._deduplication.entries().next().value;
+      if (timestamp > cutoff) break;
+      this._deduplication.delete(eventId);
+    }
+  }
+
+  _ensureDeduplicationCleanupTimer() {
+    if (this._deduplicationCleanupTimer) return;
+    const interval = Math.max(1, Math.floor(this._deduplicationWindowMs / 2));
+    this._deduplicationCleanupTimer = setInterval(() => {
+      this._pruneExpiredDeduplication(performance.now());
+      if (this._deduplication.size === 0) {
+        clearInterval(this._deduplicationCleanupTimer);
+        this._deduplicationCleanupTimer = null;
+      }
+    }, interval);
+    this._deduplicationCleanupTimer.unref?.();
   }
 
   async _publishToAdapters(event, options) {

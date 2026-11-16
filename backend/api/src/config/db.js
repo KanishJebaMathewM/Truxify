@@ -12,7 +12,18 @@ import logger from '../middleware/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+import pkg from 'pg';
+const { Pool } = pkg;
 
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
+
+export default {
+  query: (text, params) => pool.query(text, params),
+  getClient: () => pool.connect()
+};
 // Load environment variables relative to this module instead of process.cwd()
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
@@ -213,6 +224,24 @@ export function createTelemetryCollectionIndexes(db, { ttlSeconds } = {}) {
   ).catch(err => logger.error({ err }, 'Failed to create 2dsphere index on telemetry'));
 }
 
+/**
+ * Creates indexes on `slow_requests` collection for monitoring query performance:
+ * - timestamp (-1) for recent slow request lookups
+ * - durationMs (-1) for highest-latency request lookups
+ *
+ * @param {import('mongodb').Db} db
+ */
+export function createSlowRequestsCollectionIndexes(db) {
+  if (!db) return;
+  db.collection('slow_requests').createIndex(
+    { timestamp: -1 }
+  ).catch(err => logger.error({ err }, 'Failed to create timestamp index on slow_requests'));
+
+  db.collection('slow_requests').createIndex(
+    { durationMs: -1 }
+  ).catch(err => logger.error({ err }, 'Failed to create durationMs index on slow_requests'));
+}
+
 // Wrap in async IIFE so mongoClient.connect() can use await instead of .then()
 // This ensures the module properly waits for the connection before reporting readiness
 (async () => {
@@ -226,6 +255,7 @@ export function createTelemetryCollectionIndexes(db, { ttlSeconds } = {}) {
       // Create indexes on telemetry collection (TTL retention, per-order reads,
       // and geo searches). Idempotent; failures are logged inside the helper.
       createTelemetryCollectionIndexes(mongoDb);
+      createSlowRequestsCollectionIndexes(mongoDb);
       if (_mongoDbResolve) _mongoDbResolve();
     } catch (err) {
       logger.error({ err }, 'Failed to connect to MongoDB server');

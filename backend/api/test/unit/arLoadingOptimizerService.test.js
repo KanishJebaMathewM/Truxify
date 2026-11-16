@@ -1,7 +1,18 @@
-import { describe, it, expect } from 'vitest';
-import { arLoadingOptimizerService } from '../../src/services/arLoadingOptimizerService.js';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
+import {
+  arLoadingOptimizerService,
+  MAX_RETAINED_LOADING_PLANS,
+} from '../../src/services/arLoadingOptimizerService.js';
 
 describe('arLoadingOptimizerService', () => {
+  beforeEach(() => {
+    arLoadingOptimizerService.clearLoadingPlans();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   const defaultContainer = {
     lengthCm: 1615,
     widthCm: 259,
@@ -32,7 +43,7 @@ describe('arLoadingOptimizerService', () => {
     });
 
     expect(plan).toBeDefined();
-    expect(plan.planId).toMatch(/^AR-PLAN-\d+$/);
+    expect(plan.planId).toMatch(/^PLAN-[0-9a-f-]{36}$/);
     expect(plan.totalWeightKg).toBe(1800);
     expect(plan.maxPayloadKg).toBe(20000);
     expect(plan.volumeUtilizationPercent).toBeGreaterThan(0);
@@ -96,5 +107,40 @@ describe('arLoadingOptimizerService', () => {
       planId: plan.planId,
       ownerId: 'owner-a',
     });
+  });
+
+  it('expires loading plans after the retention window', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+    const plan = await arLoadingOptimizerService.generateLoadingPlan({
+      ownerId: 'owner-expiry',
+      container: defaultContainer,
+      pallets: samplePallets,
+    });
+
+    expect(arLoadingOptimizerService.getLoadingPlanCount()).toBe(1);
+
+    vi.setSystemTime(new Date('2026-01-01T01:00:00.001Z'));
+
+    await expect(arLoadingOptimizerService.getLoadingPlan(plan.planId, 'owner-expiry')).resolves.toBeNull();
+    expect(arLoadingOptimizerService.getLoadingPlanCount()).toBe(0);
+  });
+
+  it('rejects new plans once the registry reaches capacity', async () => {
+    for (let index = 0; index < MAX_RETAINED_LOADING_PLANS; index += 1) {
+      await arLoadingOptimizerService.generateLoadingPlan({
+        ownerId: `owner-${index}`,
+        container: defaultContainer,
+        pallets: samplePallets,
+      });
+    }
+
+    expect(arLoadingOptimizerService.getLoadingPlanCount()).toBe(MAX_RETAINED_LOADING_PLANS);
+    await expect(arLoadingOptimizerService.generateLoadingPlan({
+      ownerId: 'owner-overflow',
+      container: defaultContainer,
+      pallets: samplePallets,
+    })).rejects.toMatchObject({ statusCode: 429 });
   });
 });

@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:truxify_customer/utils/location_permission_helper.dart';
+import 'package:truxify/utils/location_permission_helper.dart';
 
 void main() {
   group('LocationPermissionHelper Unit Tests', () {

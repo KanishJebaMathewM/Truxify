@@ -37,7 +37,7 @@ def test_parallel_edges_are_all_exported_to_pytorch_data():
 
     assert graph_data.edge_index.shape[1] == 2
     assert graph_data.edge_attr.shape == (2, 5)
-    assert sorted(graph_data.edge_attr[:, 1].tolist()) == pytest.approx([0.08, 0.20])
+    assert sorted(graph_data.edge_attr[:, 1].tolist()) == pytest.approx([8.0, 20.0])
 
 
 def test_route_optimizer_selects_the_better_parallel_segment():

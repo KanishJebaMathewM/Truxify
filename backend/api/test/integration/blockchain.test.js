@@ -14,7 +14,8 @@ vi.mock('../../src/core/container.js', () => ({
 
 vi.mock('../../src/services/escrow.js', () => ({
   getEscrowBookingId: (id) => `booking-${id}`,
-  getEscrowBooking: (...args) => mockGetEscrowBooking(...args)
+  getEscrowBooking: (...args) => mockGetEscrowBooking(...args),
+  getOnChainEscrowBooking: (...args) => mockGetEscrowBooking(...args)
 }));
 
 vi.mock('../../src/middleware/auth.js', () => ({

@@ -36,17 +36,19 @@ describe("AssetProvenance Handoffs", function () {
     ).to.be.revertedWith("Only owner can seed initial custody");
   });
 
-  it("Should not mark a record verified when no proof hash is supplied", async function () {
+  it("Should reject a handoff when no proof hash is supplied (fail-closed)", async function () {
     const [owner, carrierA] = await ethers.getSigners();
     const AssetProvenance = await ethers.getContractFactory("AssetProvenance");
     const provenance = await AssetProvenance.deploy();
 
     const cargoHash = ethers.keccak256(ethers.toUtf8Bytes("CARGO_CONTAINER_INDEX_3003"));
 
-    await provenance.recordHandoff(cargoHash, carrierA.address, ethers.ZeroHash);
+    // The contract fails closed: a zero proof hash can never enter the trail.
+    await expect(
+      provenance.recordHandoff(cargoHash, carrierA.address, ethers.ZeroHash)
+    ).to.be.revertedWith("A non-empty ZK proof hash is required to verify the handoff");
 
-    const record = await provenance.provenanceTrail(cargoHash, 0);
-    expect(record.verified).to.equal(false);
+    expect(await provenance.getHandoffCount(cargoHash)).to.equal(0);
   });
 
   it("Should mark a record verified when a proof hash is supplied", async function () {
@@ -73,7 +75,7 @@ describe("AssetProvenance Handoffs", function () {
 
     await expect(
       provenance.connect(stranger).recordHandoff(cargoHash, stranger.address, zkpHash)
-    ).to.be.revertedWith("Only the asset owner can open the provenance trail");
+    ).to.be.revertedWith("Only owner can seed initial custody");
   });
 
   it("Should allow the owner to open the trail and not hard-code verified true", async function () {

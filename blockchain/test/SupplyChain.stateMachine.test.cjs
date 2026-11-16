@@ -83,9 +83,11 @@ describe("SupplyChain state machine & verification", function () {
     await sc.updateShipmentStatus(shipmentId, "IN_TRANSIT", "ROUTE A");
     await sc.updateShipmentStatus(shipmentId, "ARRIVED", "W2");
     await sc.updateShipmentStatus(shipmentId, "DELIVERED", "W2");
+    // DELIVERED deactivates the shipment, so any further update fails closed
+    // on the liveness guard before the transition table is consulted.
     await assertRejectsWith(
       sc.updateShipmentStatus(shipmentId, "CANCELLED", "W1"),
-      "Invalid transition"
+      "Shipment not active"
     );
   });
 

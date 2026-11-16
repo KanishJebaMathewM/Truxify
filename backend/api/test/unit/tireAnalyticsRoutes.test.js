@@ -182,6 +182,19 @@ describe('tireAnalyticsRoutes', () => {
       expect(res.body.error).toMatch(/Invalid TPMS telemetry at index 0/i);
     });
 
+    it('maps report capacity exhaustion to 429', async () => {
+      const capacityError = new Error('Tire analytics report capacity reached; try again later');
+      capacityError.statusCode = 429;
+      tireAnalyticsServiceMock.analyzeTireHealth.mockRejectedValue(capacityError);
+
+      const res = await request(makeApp())
+        .post('/api/tire-analytics/analyze')
+        .send(validPayload);
+
+      expect(res.status).toBe(429);
+      expect(res.body.error).toMatch(/capacity reached/i);
+    });
+
     it('handles unexpected calculation failure with 500', async () => {
       tireAnalyticsServiceMock.analyzeTireHealth.mockRejectedValue(new Error('Sensor compute error'));
 

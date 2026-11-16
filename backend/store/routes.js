@@ -123,8 +123,9 @@ router.post('/store/atomic', (req, res) => {
 // Server-defined, allowlisted custom operations. Clients request a registered
 // `name`; the callable is resolved server-side so a client can never supply
 // executable code from the request body. Unknown names are rejected with 400.
+// Each handler receives the caller's tenant store; there is no shared store.
 const OP_REGISTRY = {
-    incrementCounter: (op) => {
+    incrementCounter: (op, store) => {
         const key = op.key;
         const current = store.get(key) || 0;
         store.set(key, current + (typeof op.amount === 'number' ? op.amount : 1));
@@ -132,7 +133,6 @@ const OP_REGISTRY = {
 };
 
 // Execute transaction
-const CUSTOM_OP_REGISTRY = {};
 
 router.post('/store/transaction', async (req, res) => {
     try {
@@ -143,7 +143,15 @@ router.post('/store/transaction', async (req, res) => {
                 error: 'operations array required'
             });
         }
-        
+
+        // Reject unknown custom ops before touching the store. Answering from
+        // inside the transaction callback let the handler go on to send a
+        // second response ("headers already sent").
+        const unknownOp = operations.find((op) => op.type === 'custom' && !OP_REGISTRY[op.name]);
+        if (unknownOp) {
+            return res.status(400).json({ success: false, error: 'unknown custom op' });
+        }
+
         const result = await req.store.transactionAsync(async (tx) => {
             for (const op of operations) {
                 if (op.type === 'set') {
@@ -152,15 +160,12 @@ router.post('/store/transaction', async (req, res) => {
                     tx.addOperation(() => req.store.update(op.updates));
                 } else if (op.type === 'custom') {
                     const handler = OP_REGISTRY[op.name];
-                    if (!handler) {
-                        return res
-                            .status(400)
-                            .json({ success: false, error: 'unknown custom op' });
-                    }
-                    tx.addOperation(() => handler(op));
+                    tx.addOperation(() => handler(op, req.store));
                 }
             }
-            return tx.execute();
+            // transactionAsync commits (runs the queued operations) once this
+            // callback resolves; tx.execute() expects an operation argument.
+            return { operationCount: operations.length };
         });
         
         res.json({

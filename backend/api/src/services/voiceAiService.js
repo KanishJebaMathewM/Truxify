@@ -17,7 +17,7 @@ const transcribeAudio = async (audioBuffer, mimeType) => {
         });
         return response.data.text;
     } catch (err) {
-        console.error('Whisper transcription failed:', err.message);
+        logger.error({ err }, 'Whisper transcription failed');
         throw new Error('Failed to transcribe audio');
     }
 };
@@ -36,14 +36,14 @@ const generateLLMResponse = async (transcript, bookingData, language = 'English'
         });
         return response.data.choices[0].message.content;
     } catch (err) {
-        console.error('LLM generation failed:', err.message);
+        logger.error({ err }, 'LLM generation failed');
         throw new Error('Failed to generate response');
     }
 };
 
 const generateTTS = async (text) => {
     if (!ELEVENLABS_API_KEY) {
-        console.warn('ElevenLabs API key missing, skipping TTS');
+        logger.warn('ElevenLabs API key missing, skipping TTS');
         return null;
     }
 
@@ -68,7 +68,7 @@ const generateTTS = async (text) => {
         const base64Audio = Buffer.from(response.data).toString('base64');
         return `data:audio/mpeg;base64,${base64Audio}`;
     } catch (err) {
-        console.error('ElevenLabs TTS failed:', err.message);
+        logger.error({ err }, 'ElevenLabs TTS failed');
         throw new Error('Failed to generate audio');
     }
 };

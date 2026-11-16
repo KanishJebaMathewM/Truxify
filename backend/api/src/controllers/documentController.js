@@ -266,7 +266,7 @@ const uploadDocument = async (req, res) => {
 return res.status(403).json({ error: error.message });
     }
 
-console.error('Document upload controller error:', error.message);
+logger.error({ err: error, requestId: req.id }, 'Document upload controller error');
 return res.status(500).json({ error: 'Failed to process document upload' });
   }
 };
@@ -281,7 +281,7 @@ const listDocuments = async (req, res) => {
       data: result.documents,
     });
   } catch (error) {
-    console.error('List documents controller error:', error.message);
+    logger.error({ err: error, requestId: req.id }, 'List documents controller error');
     return res.status(500).json({ error: 'Failed to retrieve documents' });
   }
 };
@@ -306,7 +306,7 @@ const removeDocument = async (req, res) => {
       return res.status(404).json({ error: error.message });
     }
 
-    console.error('Remove document controller error:', error.message);
+    logger.error({ err: error, requestId: req.id }, 'Remove document controller error');
     return res.status(500).json({ error: 'Failed to delete document' });
   }
 };

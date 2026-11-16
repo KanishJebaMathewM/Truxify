@@ -8,11 +8,13 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('kafkajs', () => ({
-  Kafka: vi.fn(() => ({
-    admin: mocks.admin,
-    producer: vi.fn(),
-    consumer: vi.fn(),
-  })),
+  Kafka: vi.fn(function () {
+    return {
+      admin: mocks.admin,
+      producer: vi.fn(),
+      consumer: vi.fn(),
+    };
+  }),
 }));
 
 vi.mock('../../api/src/middleware/logger.js', () => ({

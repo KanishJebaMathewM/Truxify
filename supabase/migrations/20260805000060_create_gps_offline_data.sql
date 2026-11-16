@@ -23,8 +23,10 @@ create index if not exists idx_gps_offline_data_peer_unsynced
   on gps_offline_data (peerId, synced);
 
 -- The WebRTC service uses the service/client key; keep rows locked down for
--- any row-level requests.
+-- any row-level requests by explicitly restricting to the service_role.
 alter table gps_offline_data enable row level security;
 
+drop policy if exists gps_offline_data_service_policy on gps_offline_data;
+
 create policy gps_offline_data_service_policy on gps_offline_data
-  for all using (true) with check (true);
+  for all to service_role using (true) with check (true);

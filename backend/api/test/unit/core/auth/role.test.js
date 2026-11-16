@@ -1,30 +1,30 @@
 import { describe, it, expect } from 'vitest';
-import { Role } from '../../../../src/core/auth/Role.js';
-import { Permission } from '../../../../src/core/auth/Permission.js';
+import { ROLES, isValidRole, allRoles } from '../../../../src/core/auth/Role.js';
 
-describe('Role', () => {
-  it('should create a role with a name', () => {
-    const role = new Role('admin');
-    expect(role.name).toBe('admin');
+// The Role class (addPermission/hasPermission) was removed in the
+// policy-engine redesign — Role.js now exports the frozen ROLES constants and
+// validation helpers. These tests pin the current contract.
+describe('Role constants', () => {
+  it('exposes the canonical role strings', () => {
+    expect(ROLES).toEqual(Object.freeze({
+      CUSTOMER: 'customer',
+      DRIVER: 'driver',
+      ADMIN: 'admin',
+    }));
+    expect(Object.isFrozen(ROLES)).toBe(true);
   });
 
-  it('should add permissions to the role', () => {
-    const role = new Role('editor');
-    const perm = new Permission('articles', 'write');
-    role.addPermission(perm);
-    expect(role.hasPermission(perm)).toBe(true);
+  it('validates known roles and rejects unknown ones', () => {
+    expect(isValidRole('customer')).toBe(true);
+    expect(isValidRole('driver')).toBe(true);
+    expect(isValidRole('admin')).toBe(true);
+    expect(isValidRole('superuser')).toBe(false);
+    expect(isValidRole('')).toBe(false);
+    expect(isValidRole(null)).toBe(false);
+    expect(isValidRole(42)).toBe(false);
   });
 
-  it('should check if role has a permission', () => {
-    const role = new Role('viewer');
-    role.addPermission(new Permission('orders', 'read'));
-    expect(role.hasPermission(new Permission('orders', 'read'))).toBe(true);
-    expect(role.hasPermission(new Permission('orders', 'write'))).toBe(false);
-  });
-
-  it('should support wildcard permissions', () => {
-    const role = new Role('superuser');
-    role.addPermission(new Permission('*', '*'));
-    expect(role.hasPermission(new Permission('anything', 'any_action'))).toBe(true);
+  it('lists all roles', () => {
+    expect(allRoles()).toEqual(['customer', 'driver', 'admin']);
   });
 });

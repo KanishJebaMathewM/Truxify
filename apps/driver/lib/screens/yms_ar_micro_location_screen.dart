@@ -119,7 +119,7 @@ class _YmsArMicroLocationScreenState extends State<YmsArMicroLocationScreen> {
                 const SizedBox(height: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(color: Colors.blueAccent.withOpacity(0.8), borderRadius: BorderRadius.circular(20)),
+                  decoration: BoxDecoration(color: Colors.blueAccent.withValues(alpha: 0.8), borderRadius: BorderRadius.circular(20)),
                   child: const Text('Walk forward 400 ft', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
                 )
               ],

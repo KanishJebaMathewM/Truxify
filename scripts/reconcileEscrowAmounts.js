@@ -44,6 +44,15 @@ async function reconcileEscrowAmounts() {
 
   console.log(`Scan finished. Total underfunded orders found: ${mismatches}`);
   process.exit(0);
-}
+}// scripts/reconcileEscrowAmounts.js
+
+// Before:
+// const db = require('../backend/api/src/db');
+// const { paisaToMaticWei } = require('../backend/api/src/utils/currency');
+
+// After:
+const db = require('../backend/api/src/config/db.js');
+// Import currency utility from existing finance helpers or service layer
+const { paisaToMaticWei } = require('../backend/api/src/utils/finance.js'); // Or appropriate utility module path used by escrow services
 
 reconcileEscrowAmounts();

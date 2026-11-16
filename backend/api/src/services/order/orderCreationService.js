@@ -11,16 +11,18 @@ import { generateOrderDisplayId, ORDER_DISPLAY_ID_MAX_RETRIES } from '../../lib/
 
 // Targeting knobs for the new-trip driver broadcast. Env-configurable so a
 // burst of order creations can never trigger an unbounded notification fan-out.
-const NEW_TRIP_NOTIFY_RADIUS_KM = Number(process.env.NEW_TRIP_NOTIFY_RADIUS_KM) > 0
-  ? Number(process.env.NEW_TRIP_NOTIFY_RADIUS_KM)
+const configuredRadiusKm = Number(process.env.NEW_TRIP_NOTIFY_RADIUS_KM);
+const NEW_TRIP_NOTIFY_RADIUS_KM = Number.isFinite(configuredRadiusKm * 1000) && configuredRadiusKm > 0
+  ? configuredRadiusKm
   : 50;
-const NEW_TRIP_NOTIFY_MAX_DRIVERS = Number(process.env.NEW_TRIP_NOTIFY_MAX_DRIVERS) > 0
-  ? Number(process.env.NEW_TRIP_NOTIFY_MAX_DRIVERS)
-  : 50;
-const NEW_TRIP_NOTIFY_BATCH_SIZE = Number(process.env.NEW_TRIP_NOTIFY_BATCH_SIZE) > 0
-  ? Number(process.env.NEW_TRIP_NOTIFY_BATCH_SIZE)
-  : 25;
+const NEW_TRIP_NOTIFY_MAX_DRIVERS = positiveCount(process.env.NEW_TRIP_NOTIFY_MAX_DRIVERS, 50);
+const NEW_TRIP_NOTIFY_BATCH_SIZE = positiveCount(process.env.NEW_TRIP_NOTIFY_BATCH_SIZE, 25);
 const DRIVER_LOCATION_FRESHNESS_MS = 15 * 60 * 1000;
+
+function positiveCount(value, fallback) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 /**
  * Find drivers that should be notified about a new trip: those online and
@@ -182,18 +184,32 @@ export async function createOrder({ orderData, userId, user, idempotencyKey = nu
     });
   }
 
+    let finalBaseFreight = pricing.baseFreight;
+    let finalTollEstimate = pricing.tollEstimate;
+    let finalPlatformFee = pricing.platformFee;
+    let finalTotalAmount = pricing.totalAmount;
     let estimatedPrice = null;
+
     try {
       const trafficMultiplier = await getLiveTrafficMultiplier(pickup_lat, pickup_lng);
 
       const mlResult = await predictPrice({
         distanceKm: pricing.distanceKm,
         cargoWeightKg: Number(weight_tonnes) * 1000,
+        truckType: 'medium_truck',
         routeOrigin: pickup_address,
         routeDestination: drop_address,
         trafficMultiplier,
       });
-      estimatedPrice = mlResult.estimatedPricePaisa;
+      if (mlResult && mlResult.estimatedPricePaisa > 0) {
+        estimatedPrice = mlResult.estimatedPricePaisa;
+        finalTotalAmount = mlResult.estimatedPricePaisa;
+        finalPlatformFee = Math.round(mlResult.estimatedPricePaisa * 0.05);
+        finalBaseFreight = Math.max(0, mlResult.estimatedPricePaisa - finalPlatformFee - finalTollEstimate);
+        if (finalBaseFreight === 0) {
+          finalTollEstimate = Math.max(0, mlResult.estimatedPricePaisa - finalPlatformFee);
+        }
+      }
     } catch (mlErr) {
       logger.warn({ err: mlErr.message }, 'Price prediction unavailable, falling back to base pricing');
     }
@@ -225,10 +241,10 @@ export async function createOrder({ orderData, userId, user, idempotencyKey = nu
         p_is_stackable: is_stackable,
         p_is_fragile: is_fragile,
         p_special_requirements: special_requirements || null,
-        p_base_freight: pricing.baseFreight,
-        p_toll_estimate: pricing.tollEstimate,
-        p_platform_fee: pricing.platformFee,
-        p_total_amount: pricing.totalAmount,
+        p_base_freight: finalBaseFreight,
+        p_toll_estimate: finalTollEstimate,
+        p_platform_fee: finalPlatformFee,
+        p_total_amount: finalTotalAmount,
         p_estimated_price: estimatedPrice,
         p_payment_method_id: payment_method_id || null,
         p_upi_id: upi_id || null,

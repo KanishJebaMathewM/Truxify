@@ -209,6 +209,9 @@ class TestFindReturnLoads:
 
     def test_road_eta_is_used_for_pickup_deadline(self, monkeypatch):
         class FakeResponse:
+            def close(self):
+                return None
+
             def raise_for_status(self):
                 return None
 
@@ -247,6 +250,9 @@ class TestFindReturnLoads:
 
     def test_unreachable_road_route_is_not_replaced_by_haversine_fallback(self, monkeypatch):
         class FakeResponse:
+            def close(self):
+                return None
+
             def raise_for_status(self):
                 return None
 

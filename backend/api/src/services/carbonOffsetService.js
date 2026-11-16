@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 const CARBON_RATE_PER_KG_KM = 0.00015;
 const OFFSET_PRICE_PER_TON = 15.0;
 
@@ -23,7 +25,7 @@ const purchaseOffset = async (userId, packageId, shipmentId) => {
     throw new Error('Invalid offset package selected.');
   }
 
-  const certificateId = `CERT-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+  const certificateId = `CERT-${Date.now()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
 
   return {
     success: true,

@@ -1,5 +1,6 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
+const { anyValue } = require("@nomicfoundation/hardhat-chai-matchers/withArgs");
 
 describe("ZKIdentity DID URI registration", function () {
     async function deployIdentity() {
@@ -25,7 +26,7 @@ describe("ZKIdentity DID URI registration", function () {
 
         await expect(identity.connect(user).registerDID(didURI, merkleRoot))
             .to.emit(identity, "DIDRegistered")
-            .withArgs(user.address, didURI, merkleRoot);
+            .withArgs(user.address, didURI, merkleRoot, anyValue); // + timestamp arg
 
         const document = await identity.didRegistry(user.address);
         expect(document.didURI).to.equal(didURI);

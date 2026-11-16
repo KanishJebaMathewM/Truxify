@@ -154,6 +154,8 @@ export class EventStoreCore {
 
     this.eventStreams = new Map(); // aggregateId -> domain events (in-memory cache)
     this.snapshots = new Map(); // aggregateId -> validated snapshot
+    this._eventLoads = new Map(); // aggregateId -> current read owner
+    this._snapshotLoads = new Map();
   }
 
   // ---- Cache --------------------------------------------------------------
@@ -166,27 +168,60 @@ export class EventStoreCore {
     if (aggregateId === undefined || aggregateId === null) {
       this.eventStreams.clear();
       this.snapshots.clear();
+      this._eventLoads.clear();
+      this._snapshotLoads.clear();
       return;
     }
     this.eventStreams.delete(aggregateId);
     this.snapshots.delete(aggregateId);
+    this._eventLoads.delete(aggregateId);
+    this._snapshotLoads.delete(aggregateId);
   }
 
   // ---- Event stream -------------------------------------------------------
 
-  async getEventStream(aggregateId) {
-    if (this.eventStreams.has(aggregateId)) {
-      return this.eventStreams.get(aggregateId);
+  /**
+   * One current load per cache slot. Object identity is the publication fence:
+   * deleting a slot revokes ownership without retaining generation tombstones.
+   * Superseded callers join the current load (or read the published value),
+   * rather than returning the stale result they originally fetched.
+   */
+  _loadCached(cache, loads, aggregateId, fetchValue) {
+    if (cache.has(aggregateId)) {
+      return Promise.resolve(cache.get(aggregateId));
+    }
+    if (loads.has(aggregateId)) {
+      return loads.get(aggregateId).promise;
     }
 
-    const rawRows = await this.db.fetchEventStream(aggregateId);
-    const events = (rawRows || [])
-      .map(normalizeEventRow)
-      .filter(Boolean)
-      .sort((a, b) => Number(a.version) - Number(b.version));
+    const owner = {};
+    loads.set(aggregateId, owner);
+    owner.promise = Promise.resolve()
+      .then(fetchValue)
+      .then((value) => {
+        if (loads.get(aggregateId) !== owner) {
+          return this._loadCached(cache, loads, aggregateId, fetchValue);
+        }
+        cache.set(aggregateId, value);
+        return value;
+      })
+      .finally(() => {
+        // An invalidated read must not remove its replacement on completion.
+        if (loads.get(aggregateId) === owner) {
+          loads.delete(aggregateId);
+        }
+      });
+    return owner.promise;
+  }
 
-    this.eventStreams.set(aggregateId, events);
-    return events;
+  async getEventStream(aggregateId) {
+    return this._loadCached(this.eventStreams, this._eventLoads, aggregateId, async () => {
+      const rawRows = await this.db.fetchEventStream(aggregateId);
+      return (rawRows || [])
+        .map(normalizeEventRow)
+        .filter(Boolean)
+        .sort((a, b) => Number(a.version) - Number(b.version));
+    });
   }
 
   /**
@@ -328,14 +363,23 @@ export class EventStoreCore {
   }
 
   _cacheEvent(aggregateId, event) {
-    if (!this.eventStreams.has(aggregateId)) {
-      this.eventStreams.set(aggregateId, []);
-    }
+    this._eventLoads.delete(aggregateId);
     const stream = this.eventStreams.get(aggregateId);
-    if (!stream.some((e) => e.version === event.version)) {
-      stream.push(event);
-      stream.sort((a, b) => Number(a.version) - Number(b.version));
+    if (!stream) {
+      // The committed event alone cannot stand in for unread older history.
+      return;
     }
+    if (stream.some((existing) => Number(existing.version) === event.version)) {
+      return;
+    }
+    const latestVersion = stream.length ? Number(stream[stream.length - 1].version) : 0;
+    if (latestVersion !== event.version - 1) {
+      // The authoritative append may follow events written by another instance.
+      this.eventStreams.delete(aggregateId);
+      return;
+    }
+    // Do not mutate arrays already returned to concurrent replay callers.
+    this.eventStreams.set(aggregateId, [...stream, event]);
   }
 
   // ---- Snapshots ----------------------------------------------------------
@@ -346,26 +390,16 @@ export class EventStoreCore {
    * full replay instead of trusting corrupted state.
    */
   async getSnapshot(aggregateId) {
-    if (this.snapshots.has(aggregateId)) {
-      return this.snapshots.get(aggregateId);
-    }
-
-    let row = null;
     try {
-      row = await this.db.fetchSnapshot(aggregateId);
+      return await this._loadCached(this.snapshots, this._snapshotLoads, aggregateId, async () => {
+        const row = await this.db.fetchSnapshot(aggregateId);
+        return row ? this._validateSnapshot(row) : null;
+      });
     } catch (error) {
+      // A read failure is not cached as absence; the next call can retry.
       this.logger.error?.(`Snapshot read failed for ${aggregateId}:`, error);
       return null;
     }
-
-    if (!row) {
-      this.snapshots.set(aggregateId, null);
-      return null;
-    }
-
-    const snapshot = this._validateSnapshot(row);
-    this.snapshots.set(aggregateId, snapshot);
-    return snapshot;
   }
 
   _validateSnapshot(row) {
@@ -427,6 +461,7 @@ export class EventStoreCore {
       throw toEventStoreError(error, { aggregateId });
     }
 
+    this._snapshotLoads.delete(aggregateId);
     this.snapshots.set(aggregateId, {
       aggregateId,
       version: snapshotVersion,

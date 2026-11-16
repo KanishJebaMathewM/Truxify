@@ -35,6 +35,9 @@ export class RpcProviderManager {
     this.state = CIRCUIT_STATES.CLOSED;
     this.lastStateChangeTime = Date.now();
 
+    this._stateGeneration = 0;
+    this._recoveryProbe = null;
+
     this._providers = this.rpcUrls.map((url) => new ethers.JsonRpcProvider(url));
   }
 
@@ -58,8 +61,7 @@ export class RpcProviderManager {
   recordSuccess() {
     this.consecutiveFailures = 0;
     if (this.state === CIRCUIT_STATES.HALF_OPEN) {
-      this.state = CIRCUIT_STATES.CLOSED;
-      this.lastStateChangeTime = Date.now();
+      this._transitionTo(CIRCUIT_STATES.CLOSED);
     }
   }
 
@@ -72,11 +74,9 @@ export class RpcProviderManager {
       this.state === CIRCUIT_STATES.CLOSED &&
       this.consecutiveFailures >= this.failureThreshold
     ) {
-      this.state = CIRCUIT_STATES.OPEN;
-      this.lastStateChangeTime = Date.now();
+      this._transitionTo(CIRCUIT_STATES.OPEN);
     } else if (this.state === CIRCUIT_STATES.HALF_OPEN) {
-      this.state = CIRCUIT_STATES.OPEN;
-      this.lastStateChangeTime = Date.now();
+      this._transitionTo(CIRCUIT_STATES.OPEN);
     }
   }
 
@@ -89,9 +89,45 @@ export class RpcProviderManager {
       this.state === CIRCUIT_STATES.OPEN &&
       Date.now() - this.lastStateChangeTime >= this.cooldownMs
     ) {
-      this.state = CIRCUIT_STATES.HALF_OPEN;
-      this.lastStateChangeTime = Date.now();
+      this._transitionTo(CIRCUIT_STATES.HALF_OPEN);
     }
+  }
+
+  /** Advance the health generation whenever the primary circuit changes state. */
+  _transitionTo(state) {
+    this.state = state;
+    this.lastStateChangeTime = Date.now();
+    this._stateGeneration++;
+  }
+
+  /** Capture feedback identity and reserve a single native recovery callback. */
+  _beginAttempt() {
+    this._checkStateTransition();
+    const recovering = this.state === CIRCUIT_STATES.HALF_OPEN;
+    const useFallback = this.state === CIRCUIT_STATES.OPEN || (recovering && this._recoveryProbe !== null);
+    const providerIndex = useFallback
+      ? (this.primaryIndex + 1) % this._providers.length
+      : this.primaryIndex;
+    if (recovering && useFallback && providerIndex === this.primaryIndex) {
+      throw new Error('RPC primary recovery probe is already in progress; no fallback configured');
+    }
+    const probe = recovering && !useFallback ? {} : null;
+    if (probe) this._recoveryProbe = probe;
+    return {
+      provider: this._providers[providerIndex],
+      generation: this._stateGeneration,
+      primary: !useFallback,
+      probe,
+    };
+  }
+
+  /** Only the current primary generation may change primary health. */
+  _recordAttempt(attempt, successful) {
+    if (!attempt?.primary || attempt.generation !== this._stateGeneration ||
+        attempt.provider !== this._providers[this.primaryIndex]) return;
+    if (attempt.probe && this._recoveryProbe !== attempt.probe) return;
+    if (successful) this.recordSuccess();
+    else this.recordFailure();
   }
 
   /**
@@ -108,19 +144,26 @@ export class RpcProviderManager {
 
     let lastError = null;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const provider = this.getProvider();
+      let context;
       try {
-        const result = await fn(provider);
-        this.recordSuccess();
+        context = this._beginAttempt();
+        const result = await fn(context.provider);
+        this._recordAttempt(context, true);
         return result;
       } catch (err) {
         lastError = err;
-        this.recordFailure();
-
-        if (attempt < maxRetries) {
-          const delay = initialDelayMs * Math.pow(2, attempt) + Math.random() * 100;
-          await new Promise((res) => setTimeout(res, delay));
+        this._recordAttempt(context, false);
+      } finally {
+        // State changes do not release native ownership. Only actual callback
+        // settlement does, and an old callback cannot clear another owner.
+        if (context?.probe && this._recoveryProbe === context.probe) {
+          this._recoveryProbe = null;
         }
+      }
+
+      if (attempt < maxRetries) {
+        const delay = initialDelayMs * Math.pow(2, attempt) + Math.random() * 100;
+        await new Promise((res) => setTimeout(res, delay));
       }
     }
     throw lastError;

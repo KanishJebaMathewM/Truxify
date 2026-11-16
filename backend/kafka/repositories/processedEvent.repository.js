@@ -203,14 +203,18 @@ class ProcessedEventRepository {
       if (redisClient && lockValue) {
         try {
           await releaseLock(lockKey, lockValue);
-        } catch (_) {}
+        } catch (err) {
+          logger.debug({ err }, '[ProcessedEventRepository] Failed to release Redis lock');
+        }
       }
       return false;
     } catch (error) {
       if (redisClient && lockValue) {
         try {
           await releaseLock(lockKey, lockValue);
-        } catch (_) {}
+        } catch (err) {
+          logger.debug({ err }, '[ProcessedEventRepository] Failed to release Redis lock');
+        }
       }
       logger.error(`Failed to claim processed event ${eventId} on ${topic} (group ${consumerGroup}):`, error);
       throw error;
@@ -268,7 +272,9 @@ class ProcessedEventRepository {
       if (redisClient && lockValue) {
         try {
           await releaseLock(resourceKey, lockValue);
-        } catch (_) {}
+        } catch (err) {
+          logger.debug({ err }, '[ProcessedEventRepository] Failed to release Redis lock');
+        }
       }
       this.activeClaims.delete(claimKey);
     }
@@ -326,7 +332,9 @@ class ProcessedEventRepository {
       if (redisClient && lockValue) {
         try {
           await releaseLock(resourceKey, lockValue);
-        } catch (_) {}
+        } catch (err) {
+          logger.debug({ err }, '[ProcessedEventRepository] Failed to release Redis lock');
+        }
       }
       this.activeClaims.delete(claimKey);
     }

@@ -1,0 +1,50 @@
+-- Create DAO members table
+CREATE TABLE IF NOT EXISTS dao_members (
+    user_address VARCHAR(255) PRIMARY KEY,
+    tx_hash VARCHAR(255) NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE NOT NULL,
+    joined_at TIMESTAMPTZ NOT NULL,
+    left_tx_hash VARCHAR(255),
+    left_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Create DAO proposals table
+CREATE TABLE IF NOT EXISTS dao_proposals (
+    proposal_id VARCHAR(255) PRIMARY KEY,
+    proposer VARCHAR(255) NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    proposal_type VARCHAR(100) NOT NULL,
+    tx_hash VARCHAR(255) NOT NULL,
+    status VARCHAR(50) DEFAULT 'pending' NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    executed_tx_hash VARCHAR(255),
+    executed_at TIMESTAMPTZ
+);
+
+-- Create DAO votes table
+CREATE TABLE IF NOT EXISTS dao_votes (
+    id SERIAL PRIMARY KEY,
+    proposal_id VARCHAR(255) REFERENCES dao_proposals(proposal_id) ON DELETE CASCADE,
+    voter_address VARCHAR(255) NOT NULL,
+    voting_power NUMERIC(38, 18) NOT NULL,
+    tx_hash VARCHAR(255) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    CONSTRAINT unique_proposal_voter UNIQUE (proposal_id, voter_address)
+);
+
+-- Enable Row Level Security
+ALTER TABLE dao_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dao_proposals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dao_votes ENABLE ROW LEVEL SECURITY;
+
+-- Configure basic access policies
+CREATE POLICY "Allow public read access on dao_members" ON dao_members FOR SELECT USING (true);
+CREATE POLICY "Allow service modifications on dao_members" ON dao_members FOR ALL USING (true) WITH CHECK (true);
+
+CREATE POLICY "Allow public read access on dao_proposals" ON dao_proposals FOR SELECT USING (true);
+CREATE POLICY "Allow service modifications on dao_proposals" ON dao_proposals FOR ALL USING (true) WITH CHECK (true);
+
+CREATE POLICY "Allow public read access on dao_votes" ON dao_votes FOR SELECT USING (true);
+CREATE POLICY "Allow service modifications on dao_votes" ON dao_votes FOR ALL USING (true) WITH CHECK (true);

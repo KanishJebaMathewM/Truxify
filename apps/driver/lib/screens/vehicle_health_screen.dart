@@ -59,7 +59,7 @@ class _VehicleHealthScreenState extends State<VehicleHealthScreen> {
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.red),
                   ),
                   const SizedBox(height: 10),
-                  ...data.warnings.map((w) => _buildWarningBanner(w)).toList(),
+                  ...data.warnings.map((w) => _buildWarningBanner(w)),
                 ]
               ],
             ),

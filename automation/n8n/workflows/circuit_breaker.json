@@ -42,6 +42,7 @@
           "boolean": [
             {
               "value1": "={{ $json.isAnomalyDetected }}",
+              "operation": "equal",
               "value2": true
             }
           ]
@@ -64,6 +65,25 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 1,
       "position": [850, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Internal API Key",
+          "id": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://api:5000/api/internal/pause-escrow-onchain",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "POST",
+        "options": {}
+      },
+      "name": "Pause Escrow Contract On-Chain",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1050, 200],
       "credentials": {
         "httpHeaderAuth": {
           "name": "Truxify Internal API Key",
@@ -100,6 +120,17 @@
         [
           {
             "node": "Execute Emergency Pause",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Emergency Pause": {
+      "main": [
+        [
+          {
+            "node": "Pause Escrow Contract On-Chain",
             "type": "main",
             "index": 0
           }

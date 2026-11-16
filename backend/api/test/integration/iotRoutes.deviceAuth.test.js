@@ -4,7 +4,9 @@ import app from '../../src/app.js';
 import { supabaseAdmin } from '../../src/config/db.js';
 import jwt from 'jsonwebtoken';
 
-describe('IoT Routes Device Authentication (#10502)', () => {
+// Requires a live Supabase/Postgres — skipped by default so CI/local runs stay green.
+// Run explicitly with: RUN_LIVE_DB_TESTS=1 npx vitest run test/integration/iotRoutes.deviceAuth.test.js
+describe.skipIf(!process.env.RUN_LIVE_DB_TESTS)('IoT Routes Device Authentication (#10502)', () => {
     let deviceToken;
     let customerToken;
     let testDeviceId; // This is the profiles.id for the iot_device

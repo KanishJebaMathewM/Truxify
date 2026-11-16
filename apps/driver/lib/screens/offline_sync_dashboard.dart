@@ -50,7 +50,7 @@ class _OfflineSyncDashboardState extends State<OfflineSyncDashboard> {
               Text(_isOnline ? 'ONLINE' : 'OFFLINE', style: const TextStyle(fontWeight: FontWeight.bold)),
               Switch(
                 value: _isOnline,
-                activeColor: Colors.greenAccent,
+                activeThumbColor: Colors.greenAccent,
                 inactiveThumbColor: Colors.redAccent,
                 onChanged: (val) => _syncService.toggleNetwork(val),
               ),

@@ -1,4 +1,7 @@
 import heapq
+import copy
+import threading
+from functools import wraps
 from datetime import datetime
 import logging
 import networkx as nx
@@ -16,13 +19,172 @@ logger = logging.getLogger(__name__)
 GNN_NODE_FEATURE_DIM = 9
 GNN_EDGE_FEATURE_DIM = 5
 
+# Continuous node features are lat, lng, traffic, and speed_limit.
+# The five road-type one-hot features remain categorical and are not scaled.
+GNN_NODE_CONTINUOUS_FEATURE_INDICES = (0, 1, 2, 8)
+GNN_EDGE_CONTINUOUS_FEATURE_INDICES = (0, 1, 2, 3, 4)
+
+
+class GNNFeatureScaler:
+    """Standardize continuous GNN features and persist exact training statistics."""
+
+    def __init__(
+        self,
+        node_mean=None,
+        node_scale=None,
+        edge_mean=None,
+        edge_scale=None,
+        fitted=False,
+    ):
+        # Deterministic fallback is used only before training (for development
+        # mode). Trained models replace these values with training statistics.
+        self.node_mean = torch.tensor(
+            node_mean if node_mean is not None else [0.0, 0.0, 50.0, 50.0],
+            dtype=torch.float,
+        )
+        self.node_scale = torch.tensor(
+            node_scale if node_scale is not None else [90.0, 180.0, 50.0, 50.0],
+            dtype=torch.float,
+        )
+        self.edge_mean = torch.tensor(
+            edge_mean if edge_mean is not None else [100.0, 100.0, 1000.0, 100.0, 0.5],
+            dtype=torch.float,
+        )
+        self.edge_scale = torch.tensor(
+            edge_scale if edge_scale is not None else [100.0, 100.0, 1000.0, 100.0, 0.5],
+            dtype=torch.float,
+        )
+        self.fitted = fitted
+
+    @classmethod
+    def default(cls):
+        """Return deterministic scaling for untrained development mode."""
+        return cls()
+
+    def fit(self, train_data):
+        """Fit mean/std on training tensors while preserving categorical features."""
+        node_values = []
+        edge_values = []
+
+        for data in train_data:
+            x = getattr(data, "x", None)
+            if x is None or x.dim() != 2 or x.size(1) < GNN_NODE_FEATURE_DIM:
+                raise ValueError(
+                    "Training samples must provide node features with 9 columns"
+                )
+            node_values.append(
+                x.detach().float().cpu()[:, list(GNN_NODE_CONTINUOUS_FEATURE_INDICES)]
+            )
+
+            edge_attr = getattr(data, "edge_attr", None)
+            if edge_attr is not None and edge_attr.numel():
+                if edge_attr.dim() != 2 or edge_attr.size(1) < GNN_EDGE_FEATURE_DIM:
+                    raise ValueError(
+                        "Training samples must provide edge features with 5 columns"
+                    )
+                edge_values.append(
+                    edge_attr.detach()
+                    .float()
+                    .cpu()[:, list(GNN_EDGE_CONTINUOUS_FEATURE_INDICES)]
+                )
+
+        if not node_values:
+            raise ValueError("Training data must contain at least one node feature tensor")
+
+        node_matrix = torch.cat(node_values, dim=0)
+        node_mean = node_matrix.mean(dim=0)
+        node_scale = node_matrix.std(dim=0, unbiased=False)
+        node_scale = torch.where(node_scale > 1e-8, node_scale, torch.ones_like(node_scale))
+        self.node_mean = node_mean
+        self.node_scale = node_scale
+
+        if edge_values:
+            edge_matrix = torch.cat(edge_values, dim=0)
+            edge_mean = edge_matrix.mean(dim=0)
+            edge_scale = edge_matrix.std(dim=0, unbiased=False)
+            edge_scale = torch.where(
+                edge_scale > 1e-8, edge_scale, torch.ones_like(edge_scale)
+            )
+            self.edge_mean = edge_mean
+            self.edge_scale = edge_scale
+
+        self.fitted = True
+        return self
+
+    @staticmethod
+    def _transform_columns(tensor, indices, mean, scale):
+        """Standardize selected columns and return a float tensor."""
+        result = tensor.clone().float()
+        if result.numel() == 0:
+            return result
+
+        index_list = list(indices)
+        device = result.device
+        dtype = result.dtype
+        mean = mean.to(device=device, dtype=dtype)
+        scale = scale.to(device=device, dtype=dtype)
+        result[:, index_list] = (result[:, index_list] - mean) / scale
+        return result
+
+    def transform_node_features(self, x):
+        """Scale continuous node features while preserving road-type one-hot values."""
+        return self._transform_columns(
+            x,
+            GNN_NODE_CONTINUOUS_FEATURE_INDICES,
+            self.node_mean,
+            self.node_scale,
+        )
+
+    def transform_edge_features(self, edge_attr):
+        """Scale all continuous edge features."""
+        return self._transform_columns(
+            edge_attr,
+            GNN_EDGE_CONTINUOUS_FEATURE_INDICES,
+            self.edge_mean,
+            self.edge_scale,
+        )
+
+    def transform_graph(self, data):
+        """Apply the same fitted/default transform to a PyG Data object in-place."""
+        data.x = self.transform_node_features(data.x)
+        if getattr(data, "edge_attr", None) is not None:
+            data.edge_attr = self.transform_edge_features(data.edge_attr)
+        return data
+
+    def state_dict(self):
+        """Return persisted scaling parameters for a model checkpoint."""
+        return {
+            "node_mean": self.node_mean.tolist(),
+            "node_scale": self.node_scale.tolist(),
+            "edge_mean": self.edge_mean.tolist(),
+            "edge_scale": self.edge_scale.tolist(),
+            "fitted": self.fitted,
+        }
+
+    @classmethod
+    def from_state_dict(cls, state):
+        """Restore an exact scaler from a saved model checkpoint."""
+        required = {"node_mean", "node_scale", "edge_mean", "edge_scale", "fitted"}
+        missing = required.difference(state)
+        if missing:
+            raise ValueError(
+                f"Saved GNN feature scaler is missing fields: {', '.join(sorted(missing))}"
+            )
+        return cls(
+            node_mean=state["node_mean"],
+            node_scale=state["node_scale"],
+            edge_mean=state["edge_mean"],
+            edge_scale=state["edge_scale"],
+            fitted=bool(state["fitted"]),
+        )
+
 class GNNRouteModel(nn.Module):
     """Graph Neural Network for Route Optimization."""
     
     def __init__(self, input_dim=GNN_NODE_FEATURE_DIM, hidden_dim=128, output_dim=32, edge_dim=GNN_EDGE_FEATURE_DIM,
                  in_channels=None, hidden_channels=None, out_channels=None):
         """Initialize GNN route model layers, dimensions, and attention."""
-        super(GNNRouteModel, self).__init__()
+        super().__init__()
         if in_channels is not None:
             input_dim = in_channels
         if hidden_channels is not None:
@@ -45,7 +207,6 @@ class GNNRouteModel(nn.Module):
         
         
         # Attention mechanism
-        self.attention = nn.MultiheadAttention(hidden_dim, num_heads=8)
         
         # Output layers
         self.lin1 = nn.Linear(hidden_dim, output_dim)
@@ -184,9 +345,9 @@ class GraphNetworkBuilder:
             features = [
                 data.get('lat', 0),
                 data.get('lng', 0),
-                data.get('traffic', 0) / 100,
+                data.get('traffic', 0),
                 *self._road_type_encoding(data.get('road_type', 'local')),
-                data.get('speed_limit', 50) / 100
+                data.get('speed_limit', 50)
             ]
             node_features.append(features)
 
@@ -194,10 +355,10 @@ class GraphNetworkBuilder:
         for u, v, data in target_graph.edges(data=True):
             edge_indices.append([node_map[u], node_map[v]])
             edge_features.append([
-                data.get('distance', 0) / 100,
-                data.get('time', 0) / 100,
-                data.get('cost', 0) / 1000,
-                data.get('fuel', 0) / 100,
+                data.get('distance', 0),
+                data.get('time', 0),
+                data.get('cost', 0),
+                data.get('fuel', 0),
                 data.get('congestion', 0)
             ])
 
@@ -240,15 +401,26 @@ class GraphNetworkBuilder:
         data.node_map = features.get('node_map', self.node_map)
         return data
 
+def _serialize_model_mutation(method):
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self._mutation_lock:
+            return method(self, *args, **kwargs)
+    return wrapped
+
+
 class RouteOptimizer:
     """GNN-based Route Optimizer"""
     
     def __init__(self, model_path=None, allow_untrained=False):
         """Initialize RouteOptimizer with GNNRouteModel and hardware acceleration device."""
+        self._mutation_lock = threading.RLock()
+        self._generation_lock = threading.Lock()
         self.model = None
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.is_trained = False
         self.allow_untrained = allow_untrained
+        self.feature_scaler = GNNFeatureScaler.default()
         
         if model_path:
             self.load_model(model_path)
@@ -261,9 +433,19 @@ class RouteOptimizer:
         
         logger.info(f"✅ Route Optimizer initialized on {self.device}")
     
+    def _serving_snapshot(self):
+        with self._generation_lock:
+            return self.model, self.feature_scaler, self.is_trained
+
+    def _publish_model(self, model, scaler):
+        model.eval()
+        with self._generation_lock:
+            self.model, self.feature_scaler, self.is_trained = model, scaler, True
+
     def optimize_route(self, start_node, end_node, graph_data, objectives=['time', 'cost', 'fuel'], constraints=None):
         """Optimize route using GNN and constrained Dijkstra pathfinding."""
-        if not self.is_trained and not self.allow_untrained:
+        model, scaler, is_trained = self._serving_snapshot()
+        if not is_trained and not self.allow_untrained:
             logger.error("Attempted route optimization on untrained model")
             raise RuntimeError("GNN model is untrained. Load a trained checkpoint or enable dev mode.")
 
@@ -274,22 +456,25 @@ class RouteOptimizer:
                 return None
 
             # Convert to PyTorch Geometric
-            data = graph_data.to(self.device)
+            data = graph_data.to(self.device).clone()
 
             # Validate the node-feature dimension matches the model before the
             # GCN conv layers run (otherwise Linear raises a cryptic size mismatch).
-            if hasattr(self.model, 'input_dim') and data.x.shape[1] != self.model.input_dim:
+            if hasattr(model, 'input_dim') and data.x.shape[1] != model.input_dim:
                 raise ValueError(
-                    f"Node feature dim mismatch: model expects {self.model.input_dim}, got {data.x.shape[1]}"
+                    f"Node feature dim mismatch: model expects {model.input_dim}, got {data.x.shape[1]}"
                 )
 
+            # Apply the same scaler learned during training.
+            scaler.transform_graph(data)
+
             # Ensure model is in eval mode so BatchNorm layers do not update running stats during inference
-            if self.model is not None:
-                self.model.eval()
+            if model is not None:
+                model.eval()
 
             # Get node embeddings
             with torch.no_grad():
-                embeddings = self.model(data.x, data.edge_index, data.edge_attr)
+                embeddings = model(data.x, data.edge_index, data.edge_attr)
             
             # Find optimal route using embeddings and constraints
             route = self._find_optimal_route(
@@ -460,56 +645,104 @@ class RouteOptimizer:
         # Non-negative weight guard for Dijkstra
         return max(score, 1e-6)
     
-    def train(self, train_data, val_data=None, epochs=100):
-        """Train GNN model"""
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
+    @_serialize_model_mutation
+    def train(self, train_data, val_data=None, epochs=100, learning_rate=0.001):
+        """Train GNN model with training-derived feature scaling."""
+        if not train_data:
+            raise ValueError("Training dataset cannot be empty")
+
+        # Fit once on the complete training set so training and inference
+        # use identical feature statistics.
+        serving_model, _, _ = self._serving_snapshot()
+        model = copy.deepcopy(serving_model)
+        scaler = GNNFeatureScaler.default().fit(train_data)
+
+        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
         criterion = nn.MSELoss()
-        
+
         avg_loss = 0.0
         for epoch in range(epochs):
-            self.model.train()
+            model.train()
             total_loss = 0.0
-            
+
             for data in train_data:
-                data = data.to(self.device)
+                data = data.to(self.device).clone()
+                scaler.transform_graph(data)
                 optimizer.zero_grad()
-                
-                # Forward pass
+
                 batch = getattr(data, 'batch', None)
                 edge_attr = getattr(data, 'edge_attr', None)
-                out = self.model(data.x, data.edge_index, edge_attr, batch)
+                out = model(data.x, data.edge_index, edge_attr, batch)
                 target = getattr(data, 'y', None)
                 if target is None:
                     target = torch.zeros_like(out)
                 loss = criterion(out, target)
-                
-                # Backward pass
+
                 loss.backward()
                 optimizer.step()
-                
+
                 total_loss += loss.item()
-            
+
             avg_loss = total_loss / len(train_data)
-            
+
             if epoch % 10 == 0:
                 logger.info(f"Epoch {epoch}: Loss = {avg_loss:.4f}")
-        
-        self.is_trained = True
-        self.model.eval()
+
+        self._publish_model(model, scaler)
         return avg_loss
-    
+
     def save_model(self, path='models/gnn_route.pth'):
-        """Save GNN model"""
-        torch.save(self.model.state_dict(), path)
-        logger.info(f"✅ Model saved to {path}")
-    
+        """Save GNN weights together with the exact feature scaling parameters."""
+        model, scaler, _ = self._serving_snapshot()
+        if not scaler.fitted:
+            raise ValueError(
+                "Cannot save a GNN model before fitting feature scaler during training"
+            )
+
+        checkpoint = {
+            "state_dict": model.state_dict(),
+            "feature_scaler": scaler.state_dict(),
+        }
+        torch.save(checkpoint, path)
+        logger.info(f"✅ Model and feature scaler saved to {path}")
+
+    @_serialize_model_mutation
     def load_model(self, path='models/gnn_route.pth'):
-        """Load GNN model"""
-        self.model = GNNRouteModel().to(self.device)
-        self.model.load_state_dict(torch.load(path, map_location=self.device))
-        self.model.eval()
-        self.is_trained = True
-        logger.info(f"✅ Model loaded from {path}")
+        """Load GNN weights and the exact persisted feature scaling parameters."""
+        checkpoint = torch.load(path, map_location=self.device)
+
+        if not isinstance(checkpoint, dict) or "state_dict" not in checkpoint:
+            raise ValueError(
+                "GNN model checkpoint does not contain persisted feature scaling parameters; "
+                "retrain and save the model before loading it"
+            )
+
+        scaler_state = checkpoint.get("feature_scaler")
+        if scaler_state is None:
+            raise ValueError(
+                "GNN model checkpoint does not contain persisted feature scaling parameters; "
+                "retrain and save the model before loading it"
+            )
+
+        scaler = GNNFeatureScaler.from_state_dict(scaler_state)
+        if scaler_state['fitted'] is not True:
+            raise ValueError("Saved GNN feature scaler was not fitted on training data")
+        for name, width in [('node_mean', 4), ('node_scale', 4),
+                            ('edge_mean', 5), ('edge_scale', 5)]:
+            values = getattr(scaler, name)
+            if values.shape != (width,) or not torch.isfinite(values).all():
+                raise ValueError(f"Saved GNN feature scaler has invalid {name}")
+            if name.endswith('scale') and not (values > 0).all():
+                raise ValueError(f"Saved GNN feature scaler has nonpositive {name}")
+        model = GNNRouteModel().to(self.device)
+        state_dict = {
+            key: value
+            for key, value in checkpoint["state_dict"].items()
+            if not key.startswith("attention.")
+        }
+        model.load_state_dict(state_dict)
+        self._publish_model(model, scaler)
+        logger.info(f"✅ Model and feature scaler loaded from {path}")
 
     def _edge_is_feasible(self, edge_data, constraints):
         """Return whether an edge satisfies the active hard route constraints."""
@@ -591,7 +824,16 @@ class RouteOptimizer:
                     if neighbor in current_path:
                         continue
 
-                    edge_data = graph_data.graph[current_node][neighbor]
+                    edge_container = graph_data.graph[current_node][neighbor]
+                    if graph_data.graph.is_multigraph():
+                        # Parallel segments between the same nodes: evaluate the
+                        # fastest one for label expansion.
+                        edge_data = min(
+                            edge_container.values(),
+                            key=lambda data: float(data.get('time', 0)),
+                        )
+                    else:
+                        edge_data = edge_container
                     if not self._edge_is_feasible(edge_data, constraints):
                         continue
 
@@ -639,6 +881,10 @@ class RouteOptimizer:
     
     def multi_objective_optimization(self, start, end, graph_data, constraints=None):
         """Return a representative route together with the exact Pareto frontier."""
+        _, _, is_trained = self._serving_snapshot()
+        if not is_trained and not self.allow_untrained:
+            logger.error("Attempted route optimization on untrained model")
+            raise RuntimeError("GNN model is untrained. Load a trained checkpoint or enable dev mode.")
         objectives = ['time', 'cost', 'fuel']
         frontier = self._find_pareto_routes(start, end, graph_data, objectives, constraints)
         if not frontier:
@@ -664,7 +910,8 @@ class RouteOptimizer:
             return updated_route
         graph = graph_data.graph.copy()
         edge_lookup = {}
-        for u, v in graph.edges:
+        edge_iter = graph.edges(keys=False) if graph.is_multigraph() else graph.edges
+        for u, v in edge_iter:
             edge_lookup[f"{u}-{v}"] = (u, v)
             edge_lookup[f"{v}-{u}"] = (u, v)
         changed = False
@@ -676,13 +923,17 @@ class RouteOptimizer:
             if endpoints is None:
                 continue
             u, v = endpoints
-            edge_attrs = graph[u][v]
-            for field in ('time', 'cost', 'fuel', 'congestion'):
-                if field in update and update[field] is not None:
-                    value = float(update[field])
-                    if edge_attrs.get(field) != value:
-                        edge_attrs[field] = value
-                        changed = True
+            edge_container = graph[u][v]
+            edge_attrs_list = (
+                list(edge_container.values()) if graph.is_multigraph() else [edge_container]
+            )
+            for edge_attrs in edge_attrs_list:
+                for field in ('time', 'cost', 'fuel', 'congestion'):
+                    if field in update and update[field] is not None:
+                        value = float(update[field])
+                        if edge_attrs.get(field) != value:
+                            edge_attrs[field] = value
+                            changed = True
         self._apply_traffic_to_route(updated_route, new_traffic_data)
         if not changed:
             return updated_route

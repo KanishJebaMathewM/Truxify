@@ -1,0 +1,40 @@
+-- Create encrypted_wallet_keys table for secure wallet key management and rotation
+CREATE TABLE IF NOT EXISTS public.encrypted_wallet_keys (
+    key_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    wallet_address TEXT NOT NULL,
+    encrypted_key TEXT NOT NULL,
+    device_id TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    last_used_at TIMESTAMPTZ,
+    archived_at TIMESTAMPTZ,
+    archive_reason TEXT
+);
+
+-- Enable Row Level Security (RLS)
+ALTER TABLE public.encrypted_wallet_keys ENABLE ROW LEVEL SECURITY;
+
+-- Policy: Allow users to view only their own encrypted wallet keys
+CREATE POLICY "Users can view their own encrypted wallet keys"
+    ON public.encrypted_wallet_keys
+    FOR SELECT
+    USING (auth.uid() = user_id);
+
+-- Policy: Allow users to insert their own encrypted wallet keys
+CREATE POLICY "Users can insert their own encrypted wallet keys"
+    ON public.encrypted_wallet_keys
+    FOR INSERT
+    WITH CHECK (auth.uid() = user_id);
+
+-- Policy: Allow users to update their own encrypted wallet keys (for rotation/deactivation)
+CREATE POLICY "Users can update their own encrypted wallet keys"
+    ON public.encrypted_wallet_keys
+    FOR UPDATE
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+
+-- Create performance and security indexes
+CREATE INDEX IF NOT EXISTS idx_encrypted_wallet_keys_user_id ON public.encrypted_wallet_keys(user_id);
+CREATE INDEX IF NOT EXISTS idx_encrypted_wallet_keys_active ON public.encrypted_wallet_keys(user_id, active);

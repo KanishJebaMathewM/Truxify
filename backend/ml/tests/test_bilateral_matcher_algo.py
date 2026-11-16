@@ -2,6 +2,7 @@
 
 Run with: python3 -m pytest tests/test_bilateral_matcher_algo.py -v --no-header
 """
+import json
 import math
 
 import pytest
@@ -128,6 +129,14 @@ class TestMatchBilateral:
 
     def test_road_eta_is_used_for_deadline_feasibility(self, monkeypatch):
         class FakeResponse:
+            headers = {}
+
+            def close(self):
+                pass
+
+            def iter_content(self, chunk_size):
+                yield json.dumps(self.json()).encode()
+
             def raise_for_status(self):
                 return None
 
@@ -152,6 +161,14 @@ class TestMatchBilateral:
 
     def test_unreachable_road_route_is_not_replaced_by_haversine_fallback(self, monkeypatch):
         class FakeResponse:
+            headers = {}
+
+            def close(self):
+                pass
+
+            def iter_content(self, chunk_size):
+                yield json.dumps(self.json()).encode()
+
             def raise_for_status(self):
                 return None
 

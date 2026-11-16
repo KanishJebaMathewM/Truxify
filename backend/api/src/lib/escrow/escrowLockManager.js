@@ -250,14 +250,33 @@ export class EscrowLockManager {
             return { success: false, newVersion: expectedVersion, error: 'INVALID_TRANSITION' };
         }
 
-        // Atomic state + version update with optimistic lock
+        // Atomic check-and-set: the lock must still be ours and the stored
+        // version must still equal expectedVersion, verified and written in
+        // one Lua script so concurrent writers cannot interleave.
         const newVersion = expectedVersion + 1;
-        const pipeline = this.redis.pipeline();
-        pipeline.set(stateKey, nextState);
-        pipeline.set(versionKey, newVersion.toString());
-        // Extend lock TTL during state transition to cover RPC work
-        pipeline.expire(lockKey, DEFAULT_LOCK_TTL_SECONDS);
-        await pipeline.exec();
+        const updated = await this.redis.eval(
+          "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end " +
+          "if redis.call('GET', KEYS[2]) ~= ARGV[2] then return 0 end " +
+          "redis.call('SET', KEYS[3], ARGV[3]) " +
+          "redis.call('SET', KEYS[4], ARGV[4]) " +
+          "redis.call('EXPIRE', KEYS[1], ARGV[5]) " +
+          "return 1",
+          4,
+          lockKey,
+          versionKey,
+          stateKey,
+          versionKey,
+          token,
+          String(expectedVersion),
+          nextState,
+          String(newVersion),
+          String(DEFAULT_LOCK_TTL_SECONDS),
+        );
+
+        if (updated !== 1) {
+          logger.warn({ orderId }, 'State transition lost optimistic-lock race');
+          return { success: false, newVersion: expectedVersion, error: 'VERSION_CONFLICT' };
+        }
 
         logger.info({
             orderId,

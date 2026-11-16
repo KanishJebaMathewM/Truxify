@@ -126,7 +126,7 @@ class SyncEngine {
       // The backend batch sync endpoint is POST /api/v1/trips/events/batch
       // (see tripRoutes.js). The base URL is injected via --dart-define.
       final response = await http.post(
-        Uri.parse('${apiBaseUrl}/api/v1/trips/events/batch'),
+        Uri.parse('$apiBaseUrl/api/v1/trips/events/batch'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',

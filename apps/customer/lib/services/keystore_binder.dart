@@ -3,6 +3,9 @@ import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:pointycastle/export.dart';
+import 'package:pointycastle/asn1/asn1_parser.dart';
+import 'package:pointycastle/asn1/primitives/asn1_sequence.dart';
+import 'package:pointycastle/asn1/primitives/asn1_integer.dart';
 
 /// Hardware KeyStore Signature Binder Service.
 ///
@@ -104,8 +107,8 @@ class HardwareKeyStoreBinder {
         : signatureHex;
     final der = _hexToBytes(hex);
     final sequence = ASN1Parser(der).nextObject() as ASN1Sequence;
-    final r = (sequence.elements[0] as ASN1Integer).integer!;
-    final s = (sequence.elements[1] as ASN1Integer).integer!;
+    final r = (sequence.elements![0] as ASN1Integer).integer!;
+    final s = (sequence.elements![1] as ASN1Integer).integer!;
     return ECSignature(r, s);
   }
 

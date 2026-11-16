@@ -162,7 +162,7 @@ class _FatigueMonitoringDashboardState extends State<FatigueMonitoringDashboard>
         padding: const EdgeInsets.all(16.0),
         child: Row(
           children: [
-            CircleAvatar(backgroundColor: iconColor.withOpacity(0.1), child: Icon(icon, color: iconColor)),
+            CircleAvatar(backgroundColor: iconColor.withValues(alpha: 0.1), child: Icon(icon, color: iconColor)),
             const SizedBox(width: 16),
             Expanded(child: Text(title, style: const TextStyle(fontSize: 16))),
             Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),

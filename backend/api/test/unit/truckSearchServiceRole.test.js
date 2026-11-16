@@ -18,7 +18,29 @@ const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js
 const m = createSupabaseMock();
 
 let mockTelemetryResults = [];
+// backend/api/test/unit/truckSearchServiceRole.test.js (Excerpt)
 
+// ✅ BEFORE (Missing .limit() method in mock chain):
+// mongoDb: {
+//   collection: () => ({
+//     find: () => ({ toArray: () => Promise.resolve(mockTelemetryResults) }),
+//   }),
+// }
+
+// ✅ AFTER (Added chainable .limit() method supporting argument assertion):
+mongoDb: {
+  collection: vi.fn().mockReturnValue({
+    find: vi.fn().mockImplementation((query) => ({
+      limit: vi.fn().mockImplementation((limitVal) => {
+        // Optional: assert expected limit parameter if desired
+        expect(limitVal).toEqual(200);
+        return {
+          toArray: () => Promise.resolve(mockTelemetryResults),
+        };
+      }),
+    })),
+  }),
+}
 const { anonFrom } = vi.hoisted(() => ({
   anonFrom: vi.fn(() => {
     throw new Error('anon supabase must never be used by the truck search path');
@@ -28,6 +50,11 @@ const { anonFrom } = vi.hoisted(() => ({
 vi.mock('../../src/config/db.js', () => ({
   supabase: { from: anonFrom, rpc: vi.fn() },
   supabaseAdmin: m.supabase,
+  createUserClient: () => m.supabase,
+  upstashRedisClient: {
+    get: async () => null,
+    set: async () => 'OK',
+  },
   firebaseAdmin: null,
   redisClient: null,
   mongoDb: {

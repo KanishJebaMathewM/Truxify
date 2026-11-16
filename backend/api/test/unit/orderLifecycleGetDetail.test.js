@@ -27,6 +27,9 @@ vi.mock('../../src/core/performanceMetrics.js', () => ({
   measureExecution: vi.fn((_name, operation) => operation()),
 }));
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabaseAdmin: {},
 }));
 vi.mock('../../src/services/escrow.js', () => ({

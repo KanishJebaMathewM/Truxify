@@ -1,7 +1,43 @@
 import { DomainError } from './domainError.js';
 import { policy } from '../../security/policyEngine.js';
 import { orderRepository } from '../../core/container.js';
+// backend/api/src/services/order/validationService.js
 
+import logger from '../../middleware/logger.js';
+
+/**
+ * Calculates the great-circle distance between two points using the Haversine formula (in km).
+ */
+function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371; // Earth radius in km
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+const MAX_DROP_CHANGE_KM = 50.0;
+
+export function assertOrderNotInProgress(order) {
+  if (order.status === 'in_progress' || order.status === 'completed' || order.status === 'cancelled') {
+    throw new Error(`Cannot change drop location for order in status: ${order.status}`);
+  }
+}
+
+export function assertValidDropDistance(oldDrop, newDrop) {
+  const distance = calculateHaversineDistance(
+    oldDrop.lat, oldDrop.lng,
+    newDrop.lat, newDrop.lng
+  );
+
+  if (distance > MAX_DROP_CHANGE_KM) {
+    throw new Error(`Drop change distance delta (${distance.toFixed(1)} km) exceeds maximum allowed limit (${MAX_DROP_CHANGE_KM} km). Please create a new order.`);
+  }
+}
 export class OrderValidationService {
   constructor({ supabase, orderRepository, logger } = {}) {
     this.supabase = supabase || null;
@@ -22,16 +58,22 @@ export class OrderValidationService {
     const targetId = typeof identifier === 'string' && identifier.startsWith('TX-')
       ? identifier.slice(3)
       : identifier;
+    // Display IDs cannot be compared to the UUID-typed orders.id column.
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId);
 
     if (this.orderRepository) {
-      const byId = await this._unwrapOrderResult(this.orderRepository.findOrderById(targetId, select));
-      if (byId) return byId;
+      if (isUuid) {
+        const byId = await this._unwrapOrderResult(this.orderRepository.findOrderById(targetId, select));
+        if (byId) return byId;
+      }
       return (await this._unwrapOrderResult(this.orderRepository.findOrderByDisplayId(targetId, select))) || null;
     }
 
-    const { data: byId, error: errId } = await this.supabase.from('orders').select(select).eq('id', targetId).maybeSingle();
-    if (errId) throw new DomainError(500, { error: 'Query failed.', details: errId.message });
-    if (byId) return byId;
+    if (isUuid) {
+      const { data: byId, error: errId } = await this.supabase.from('orders').select(select).eq('id', targetId).maybeSingle();
+      if (errId) throw new DomainError(500, { error: 'Query failed.', details: errId.message });
+      if (byId) return byId;
+    }
     const { data: byDisplay, error: errDisplay } = await this.supabase.from('orders').select(select).eq('order_display_id', targetId).maybeSingle();
     if (errDisplay) throw new DomainError(500, { error: 'Query failed.', details: errDisplay.message });
     return byDisplay || null;
@@ -225,23 +267,3 @@ export class OrderValidationService {
     }
   }
 }
-
-let defaultValidationService = null;
-
-function getDefaultValidationService() {
-  if (!defaultValidationService) {
-    defaultValidationService = new OrderValidationService({ orderRepository });
-  }
-  return defaultValidationService;
-}
-
-export default new Proxy({}, {
-  get(_target, prop) {
-    if (prop === 'then') return undefined;
-    return getDefaultValidationService()[prop];
-  },
-  set(_target, prop, value) {
-    getDefaultValidationService()[prop] = value;
-    return true;
-  },
-});

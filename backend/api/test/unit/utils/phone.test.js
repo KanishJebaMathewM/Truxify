@@ -56,11 +56,11 @@ describe('normalizePhone', () => {
     expect(normalizePhone('987654321012')).toBeNull();
   });
 
-  it('returns null for 11-digit bare number (leading 0 kept, exceeds 10 digits)', () => {
-    // A bare number starting with 0 has 11 digits after stripping non-digits,
-    // which exceeds the required 10-digit validation. This is intentional -
-    // the function does not silently corrupt a bare 0-prefixed local number.
-    expect(normalizePhone('09876543210')).toBeNull();
+  it('normalizes an 11-digit national trunk-prefix number', () => {
+    // 09876543210 is the national trunk form of 9876543210 - what an Indian
+    // dialer hands over. A single leading 0 is a trunk prefix, not a digit of
+    // the subscriber number, so it must normalize the same as the bare form.
+    expect(normalizePhone('09876543210')).toBe('+919876543210');
   });
 
   it('returns null for letters in phone number', () => {

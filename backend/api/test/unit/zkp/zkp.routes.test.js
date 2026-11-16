@@ -4,6 +4,12 @@ import request from 'supertest';
 
 vi.mock('../../../src/middleware/auth.js', () => ({
   authenticate: (req, _res, next) => { req.user = { id: 'user-123' }; next(); },
+  requireRole: (allowedRoles) => (req, res, next) => {
+    if (allowedRoles.includes(req.user?.role)) {
+      return next();
+    }
+    return res.status(403).json({ error: 'Forbidden: Insufficient privileges.' });
+  },
 }));
 
 vi.mock('../../../src/middleware/redisRateLimiter.js', () => ({

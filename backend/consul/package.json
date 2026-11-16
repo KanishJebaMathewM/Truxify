@@ -1,0 +1,11 @@
+{
+  "name": "truxify-consul",
+  "version": "1.0.0",
+  "description": "Consul service discovery integration for Truxify",
+  "type": "module",
+  "dependencies": {
+    "axios": "^1.7.0",
+    "consul": "^1.2.0",
+    "express": "^4.21.0"
+  }
+}

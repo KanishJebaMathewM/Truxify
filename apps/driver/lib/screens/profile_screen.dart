@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../controllers/app_controller.dart';
 import '../providers/text_scale_provider.dart';
@@ -438,7 +437,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       final langCode = _langCodeForName(selectedLang);
                       languageProvider.changeLocale(langCode);
                       await controller.setLocale(langCode);
-                      if (mounted) {
+                      if (context.mounted) {
                         setState(() {
                           _currentLanguage = selectedLang;
                         });
@@ -450,6 +449,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           backgroundColor: TruxifyColors.success,
                         ),
                       );
+                        }
                     },
                   ),
                 ],
@@ -1092,7 +1092,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                       value: scaleProvider.isLargeText,
                       onChanged: (val) => scaleProvider.toggleScale(val),
-                      activeColor: TruxifyColors.accent,
+                      activeThumbColor: TruxifyColors.accent,
                     );
                   },
                 ),

@@ -4,8 +4,8 @@ Welcome to the Truxify Backend API documentation. This directory contains detail
 
 ## Services
 - [Weigh Station Service](./weigh-station-service.md) - Documentation for WIM bypass and weight sync mocking.
-- [Audio Validation](./audio-validation.md) - Magic-byte inspection for Voice AI uploads.
-- [Escrow Webhooks](./escrow-webhooks.md) - Payment release and refund webhook processing.
+- [Audio Validation](../AUDIO_VALIDATION.md) - Magic-byte inspection for Voice AI uploads.
+- [Escrow Webhooks](../WEBHOOKS_DLQ.md) - Payment release and refund webhook processing.
 
 ## Examples
 Executable examples for service integrations can be found in the [`examples/`](./examples/) directory.

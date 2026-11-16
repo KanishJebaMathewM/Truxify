@@ -34,12 +34,13 @@ describe('Distributed Redis Locking (#6726)', () => {
       expect(result.acquired).toBe(false);
     });
 
-    it('should fail gracefully if Redis is disconnected', async () => {
+    it('should fall back to the local mutex when Redis is disconnected', async () => {
       redisClient.status = 'connecting';
       const result = await acquireDistributedLock('lock:test:123', 5);
-      
-      expect(result.acquired).toBe(false);
+
+      expect(result.acquired).toBe(true);
       expect(redisClient.set).not.toHaveBeenCalled();
+      await result.release();
     });
 
     it('should release the lock by deleting the key', async () => {

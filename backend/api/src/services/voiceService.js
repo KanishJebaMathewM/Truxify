@@ -1,7 +1,9 @@
 import axios from 'axios';
 import crypto from 'crypto';
 import { supabase, supabaseAdmin } from '../config/db.js';
-const voiceDb = (supabaseAdmin && typeof supabaseAdmin.from === 'function') ? supabaseAdmin : supabase;
+function getVoiceDb() {
+  return (supabaseAdmin && typeof supabaseAdmin.from === 'function') ? supabaseAdmin : supabase;
+}
 import logger from '../middleware/logger.js';
 
 const MAX_CACHE_SIZE = 100;
@@ -53,27 +55,30 @@ async function getBookingContext(bookingId, userId) {
 
   // Orders table is the real order model (there is no bookings table).
   try {
-    let orderQuery = voiceDb.from('orders').select('*');
+    const db = getVoiceDb();
+    if (!db || typeof db.from !== 'function') {
+      return null;
+    }
+    let orderQuery = db.from('orders').select('*');
     if (isUuid) {
       orderQuery = orderQuery
         .eq('id', bookingId)
         .or(`customer_id.eq.${userId},driver_id.eq.${userId}`);
     } else {
       orderQuery = orderQuery
-        .or(`customer_id.eq.${userId},driver_id.eq.${userId}`)
-        .order('created_at', { ascending: false })
-        .limit(1);
+        .eq('order_display_id', bookingId)
+        .or(`customer_id.eq.${userId},driver_id.eq.${userId}`);
     }
 
     const { data: order, error } = await orderQuery.maybeSingle();
     if (error) {
-      logger.warn('Orders table check failed in voiceService:', error?.message ?? String(error));
+      logger.warn({ event: 'VOICE_ORDER_LOOKUP_ERROR', error: error.message }, 'Orders table check failed in voiceService');
       return null;
     }
 
     return order;
   } catch (err) {
-    logger.warn('Orders table check failed in voiceService:', err?.message ?? String(err));
+    logger.warn({ event: 'VOICE_ORDER_LOOKUP_ERROR', error: err.message }, 'Orders table check failed in voiceService');
   }
   return null;
 }
@@ -109,12 +114,16 @@ function detectQueryIntent(transcript) {
 
 function buildResponseForIntent(intent, bookingData, transcript) {
   const orderRef = bookingData?.order_display_id || bookingData?.id || 'your order';
-  const status = bookingData?.status || bookingData?.current_status || 'in transit';
+  // Humanize DB enum values ('in_transit') for the spoken/TTS response.
+  const status = (bookingData?.status || bookingData?.current_status || 'in transit').replace(/_/g, ' ');
+  const eta = bookingData?.eta;
   switch (intent) {
-    case 'payment_status':
-      return `Your payment for ${orderRef} is ${bookingData?.escrow_status || 'processing'}.`;
-    case 'eta':
-      return `Your shipment for ${orderRef} is ${status} and is on schedule.`;
+    case LOGISTICS_VOICE_INTENTS.PAYMENT_STATUS:
+      return `Your payment for ${orderRef} is ${bookingData?.escrow_status || 'processing'}. Your shipment is currently ${status}.`;
+    case LOGISTICS_VOICE_INTENTS.ETA:
+      return eta
+        ? `Your shipment for ${orderRef} is ${status} with an estimated arrival of ${eta}.`
+        : `Your shipment for ${orderRef} is ${status} and is on schedule.`;
     default:
       return `Your shipment ${orderRef} is currently ${status}.`;
   }
@@ -174,7 +183,7 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     });
     transcript = whisperResponse.data.text;
   } catch (err) {
-    logger.error('Whisper transcription failed:', err?.message ?? String(err));
+    logger.error({ event: 'WHISPER_TRANSCRIPTION_FAILED', error: err.message }, 'Whisper transcription failed');
     throw new Error('Transcription failed: ' + (err?.message ?? String(err)), { cause: err });
   }
 
@@ -200,7 +209,7 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     });
     responseText = llmResponse.data.choices[0].message.content;
   } catch (err) {
-    logger.error('LLM completion failed:', err?.message ?? String(err));
+    logger.error({ event: 'LLM_COMPLETION_FAILED', error: err.message }, 'LLM completion failed');
     throw new Error('LLM failed: ' + (err?.message ?? String(err)), { cause: err });
   }
 
@@ -228,7 +237,7 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     cacheAudio(audioId, Buffer.from(ttsResponse.data), userId);
     audioUrl = `/api/voice/audio/${audioId}`;
   } catch (err) {
-    logger.error('ElevenLabs TTS failed:', err?.message ?? String(err));
+    logger.error({ event: 'ELEVENLABS_TTS_FAILED', error: err.message }, 'ElevenLabs TTS failed');
     throw new Error('TTS failed: ' + (err?.message ?? String(err)), { cause: err });
   }
 
@@ -252,8 +261,9 @@ export async function dispatchVoiceAction({ userId, audioBuffer, filename, textQ
   const targetLang = langNames[language] || 'English';
 
   try {
+    const db = getVoiceDb();
     if (intent === LOGISTICS_VOICE_INTENTS.CHECK_EARNINGS) {
-      const { data: profile } = await voiceDb
+      const { data: profile } = await db
         .from('profiles')
         .select('wallet_balance, total_earnings')
         .eq('id', userId)
@@ -268,7 +278,7 @@ export async function dispatchVoiceAction({ userId, audioBuffer, filename, textQ
       voiceResult.response_text = `Your available wallet balance is ₹${balance.toFixed(2)}.`;
     } else if (intent === LOGISTICS_VOICE_INTENTS.REPORT_DELAY) {
       // Find driver's active in-transit order
-      const { data: activeOrder } = await voiceDb
+      const { data: activeOrder } = await db
         .from('orders')
         .select('id, order_display_id')
         .eq('driver_id', userId)
@@ -278,7 +288,7 @@ export async function dispatchVoiceAction({ userId, audioBuffer, filename, textQ
         .maybeSingle();
 
       if (activeOrder) {
-        await voiceDb.from('orders').update({
+        await db.from('orders').update({
           delay_reported: true,
           delay_reported_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),

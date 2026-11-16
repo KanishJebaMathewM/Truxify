@@ -160,7 +160,7 @@ class _PlatoonDraftingScreenState extends State<PlatoonDraftingScreen> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(
-            color: linkColor.withOpacity(0.1),
+            color: linkColor.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: linkColor),
           ),

@@ -1,4 +1,5 @@
 import logger from '../../middleware/logger.js';
+import crypto from 'crypto';
 import * as Sentry from '@sentry/node';
 import { supabase, supabaseAdmin } from '../../config/db.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
@@ -52,16 +53,26 @@ class EscalationHandler {
   }
 
   setupEscalationTimers(alertId, record) {
+    const runEscalation = (level) => {
+      // Timer callbacks are not awaited by Node. A rejected route/store call
+      // would become an unhandled rejection and can terminate the process,
+      // leaving every other tracked alert without further escalation.
+      this.performEscalation(alertId, level).catch((err) => {
+        logger.error({ err, alertId, level }, '[EscalationHandler] Escalation step failed');
+        Sentry.captureException(err);
+      });
+    };
+
     const firstTimer = setTimeout(() => {
-      this.performEscalation(alertId, ESCALATION_LEVELS.ON_CALL);
+      runEscalation(ESCALATION_LEVELS.ON_CALL);
     }, ESCALATION_THRESHOLDS.FIRST_ESCALATION);
 
     const secondTimer = setTimeout(() => {
-      this.performEscalation(alertId, ESCALATION_LEVELS.SENIOR_ENGINEER);
+      runEscalation(ESCALATION_LEVELS.SENIOR_ENGINEER);
     }, ESCALATION_THRESHOLDS.SECOND_ESCALATION);
 
     const finalTimer = setTimeout(() => {
-      this.performEscalation(alertId, ESCALATION_LEVELS.OPERATIONS);
+      runEscalation(ESCALATION_LEVELS.OPERATIONS);
     }, ESCALATION_THRESHOLDS.FINAL_ESCALATION);
 
     this.escalationTimers.set(alertId, [firstTimer, secondTimer, finalTimer]);
@@ -179,8 +190,11 @@ class EscalationHandler {
   }
 
   generateAlertId(alert) {
+    // Hash the full key: truncating the raw encoding kept only the alert
+    // type prefix, so different drivers' alerts collided and the second was
+    // dropped as already tracked.
     const key = [alert.type, alert.driver || alert.wallet || alert.shipmentId || 'unknown'].join('_');
-    return Buffer.from(key).toString('hex').slice(0, 16);
+    return crypto.createHash('sha256').update(key).digest('hex').slice(0, 16);
   }
 
   async storeEscalation(record) {

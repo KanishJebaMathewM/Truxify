@@ -9,6 +9,85 @@ import { safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 import { validateParams } from '../middleware/validate.js';
 import { z } from 'zod';
 
+
+/**
+ * @openapi
+ * components:
+ *   securitySchemes:
+ *     BearerAuth:
+ *       type: http
+ *       scheme: bearer
+ *       bearerFormat: JWT
+ *   schemas:
+ *     IotTelemetryInput:
+ *       type: object
+ *       required: [temperature]
+ *       properties:
+ *         temperature:
+ *           type: number
+ *           format: double
+ *           minimum: -100
+ *           maximum: 200
+ *           description: Temperature reading in degrees Celsius.
+ *     IotTelemetryAnalysis:
+ *       type: object
+ *       additionalProperties: true
+ *     IotTelemetryResponse:
+ *       type: object
+ *       required: [success, message]
+ *       properties:
+ *         success: { type: boolean, example: true }
+ *         message: { type: string, example: Telemetry recorded }
+ *         analysis: { $ref: '#/components/schemas/IotTelemetryAnalysis' }
+ *     IotTelemetryRecord:
+ *       type: object
+ *       properties:
+ *         load_id: { type: string, format: uuid }
+ *         temperature: { type: number, format: double }
+ *         recorded_at: { type: string, format: date-time }
+ *       additionalProperties: true
+ *     IotError:
+ *       type: object
+ *       properties:
+ *         error: { type: string }
+ * /api/iot/telemetry/{id}:
+ *   post:
+ *     summary: Record cold-chain telemetry
+ *     description: Records a temperature reading for a refrigerated load. Access is limited to authorized customers, assigned drivers, provisioned IoT devices, or administrators.
+ *     tags: [IoT Telemetry]
+ *     security: [{ BearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, description: Load UUID, schema: { type: string, format: uuid } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { $ref: '#/components/schemas/IotTelemetryInput' }
+ *     responses:
+ *       '201':
+ *         description: Telemetry recorded
+ *         content: { application/json: { schema: { $ref: '#/components/schemas/IotTelemetryResponse' } } }
+ *       '400': { description: Invalid payload or load is not refrigerated, content: { application/json: { schema: { $ref: '#/components/schemas/IotError' } } } }
+ *       '403': { description: Caller is not authorized for the load, content: { application/json: { schema: { $ref: '#/components/schemas/IotError' } } } }
+ *       '404': { description: Load not found, content: { application/json: { schema: { $ref: '#/components/schemas/IotError' } } } }
+ *       '500': { description: Database or internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/IotError' } } } }
+ *   get:
+ *     summary: Get cold-chain telemetry history
+ *     description: Returns the latest 20 temperature readings for an authorized load.
+ *     tags: [IoT Telemetry]
+ *     security: [{ BearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, description: Load UUID, schema: { type: string, format: uuid } }
+ *     responses:
+ *       '200':
+ *         description: Latest telemetry readings
+ *         content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/IotTelemetryRecord' } } } }
+ *       '400': { description: Invalid load ID }
+ *       '403': { description: Caller is not authorized for the load, content: { application/json: { schema: { $ref: '#/components/schemas/IotError' } } } }
+ *       '404': { description: Load not found, content: { application/json: { schema: { $ref: '#/components/schemas/IotError' } } } }
+ *       '500': { description: Database or internal server error, content: { application/json: { schema: { $ref: '#/components/schemas/IotError' } } } }
+ */
+
 const router = express.Router();
 
 const telemetrySchema = z.object({
@@ -24,6 +103,24 @@ const telemetryHistoryLimiter = rateLimit({
   message: { error: 'Rate limit exceeded', retryAfter: 900 },
 });
 
+
+// backend/api/src/routes/iotRoutes.js (Excerpt)
+
+// BEFORE:
+// await supabase.from('notifications').insert({
+//   user_id: driverId,
+//   notif_type: 'cold_chain_alert',
+//   title: 'Cold Chain Temperature Violation',
+//   body: 'Temperature threshold exceeded in cargo compartment.'
+// });
+
+// FIXED: Use valid 'system' notif_type per issue #6963
+await supabase.from('notifications').insert({
+  user_id: driverId,
+  notif_type: 'system',
+  title: 'Cold Chain Temperature Violation',
+  body: 'Temperature threshold exceeded in cargo compartment.',
+});
 // ============================================================================
 // 1. POST TELEMETRY DATA (IoT)
 // POST /api/iot/telemetry/:id
@@ -125,7 +222,7 @@ router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePar
     let prevOutOfRange = false;
     let prevErr = null;
     if (isOutOfRange) {
-      logger.warn(`Cold chain violation on load ${loadId}: temp ${temperature}°C out of range [${load.target_temperature_min}, ${load.target_temperature_max}]`);
+      logger.warn({ event: 'COLD_CHAIN_VIOLATION', requestId: req.requestId || req.id, loadId, temperature, targetMin: load.target_temperature_min, targetMax: load.target_temperature_max }, 'Cold chain violation detected');
 
       const { data: prevTelemetry, error: pErr } = await supabaseAdmin
         .from('temperature_telemetry')

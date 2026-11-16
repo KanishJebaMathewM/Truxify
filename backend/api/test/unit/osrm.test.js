@@ -1,5 +1,54 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// backend/api/test/unit/osrm.test.js
 
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { getRouteEstimate } from '../../src/services/osrm.js';
+import logger from '../../src/middleware/logger.js';
+
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: {
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn()
+  }
+}));
+
+describe('OSRM Service Unit Tests', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('getRouteEstimate edge cases', () => {
+    // FIX: Stub global fetch before each test in the edge cases block
+    beforeEach(() => {
+      vi.stubGlobal('fetch', vi.fn());
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('should handle invalid JSON responses from OSRM gracefully and log structured error', async () => {
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => {
+          throw new Error('Invalid JSON payload');
+        }
+      });
+
+      const result = await getRouteEstimate({ lat: 13.0827, lng: 80.2707 }, { lat: 12.9716, lng: 77.5946 });
+
+      expect(result).toBeDefined();
+      // FIX: Assert against object-first signature matching the updated logger contract
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: expect.any(String),
+          message: expect.stringContaining('Invalid JSON')
+        })
+      );
+    });
+  });
+});
 const mockRedis = vi.hoisted(() => ({
   get: vi.fn(),
   set: vi.fn(),
@@ -455,5 +504,21 @@ describe('routeWithFailover edge cases', () => {
       expect.objectContaining({ errMessage: 'OSRM connection reset' }),
       expect.stringContaining('routeWithFailover: primary call failed')
     );
+  });
+});
+
+describe('osrm - retryDelayMs backoff clamp (#11014)', () => {
+  const { retryDelayMs, MAX_RETRY_DELAY_MS } = __testing;
+
+  it('doubles the delay per attempt', () => {
+    expect(retryDelayMs(500, 0)).toBe(500);
+    expect(retryDelayMs(500, 1)).toBe(1000);
+    expect(retryDelayMs(500, 2)).toBe(2000);
+  });
+
+  it('clamps the delay at MAX_RETRY_DELAY_MS', () => {
+    expect(MAX_RETRY_DELAY_MS).toBe(10_000);
+    expect(retryDelayMs(500, 10)).toBe(MAX_RETRY_DELAY_MS);
+    expect(retryDelayMs(10000, 3)).toBe(MAX_RETRY_DELAY_MS);
   });
 });

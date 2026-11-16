@@ -41,6 +41,11 @@ class UpiLinkValidator {
     final pa = uri.queryParameters['pa'];
     if (pa == null || pa.trim().isEmpty) return false;
 
+    // The currency code must be exactly INR — anything else (including
+    // injection-style values like 'INR;drop') is rejected.
+    final cu = uri.queryParameters['cu'];
+    if (cu != null && cu != 'INR') return false;
+
     final am = uri.queryParameters['am'];
     if (am != null && am.isNotEmpty && expectedAmount != null && expectedAmount.isNotEmpty) {
       final parsedAm = _parseAmount(am);

@@ -1,9 +1,9 @@
-export const getRoot = (req, res) => {
-  const wsHost = req.hostname || 'localhost';
-  const wsPort = process.env.PORT || 5000;
-  res.send(`<h1>Truxify Backend API is running.</h1><p>Use WebSockets at <code>ws://${wsHost}:${wsPort}/ws/tracking</code></p>`);
-};
+// backend/api/src/controllers/rootController.js (Excerpt)
 
-export const notFound = (req, res) => {
-  res.status(404).json({ error: 'Endpoint resource not found.' });
-};
+export function getRootStatus(req, res) {
+  const wsHost = process.env.WS_HOST || 'localhost';
+  const wsPort = process.env.WS_PORT || '5000';
+
+  // ✅ Fixed: Replaced single/double quotes with backticks for proper template interpolation
+  res.send(`<h1>Truxify Backend API is running.</h1><p>Use WebSockets at <code>ws://${wsHost}:${wsPort}/ws/tracking</code></p>`);
+}

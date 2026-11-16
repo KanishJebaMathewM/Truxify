@@ -1,4 +1,5 @@
 import { DomainError } from './order/domainError.js';
+import { supabaseAdmin } from '../config/db.js';
 
 /**
  * Calculates fuel efficiency (e.g. km/L) from distance and fuel consumed.
@@ -178,7 +179,7 @@ export class FuelAdvisorService {
    * @returns {Promise<Object>} Recommendation payload
    */
   async getFuelRecommendation(truckId, destinationLat, destinationLng) {
-    this.logger?.info(`[FuelAdvisorService] Computing recommendation for truck ${truckId} heading to ${destinationLat},${destinationLng}`);
+    this.logger?.info({ event: 'FUEL_RECOMMENDATION_COMPUTE', truckId, destinationLat, destinationLng }, 'Computing fuel recommendation');
 
     // 1. Get average engine load from recent telemetry
     const avgEngineLoad = await this._getAverageEngineLoad(truckId);
@@ -297,7 +298,7 @@ export class FuelAdvisorService {
 
       for (const event of events) {
         const load = event.metadata?.engineLoad;
-        if (load !== undefined && load !== null && typeof load === 'number') {
+        if (Number.isFinite(load) && load >= 0 && load <= 100) {
           totalLoad += load;
           count++;
         }
@@ -305,7 +306,7 @@ export class FuelAdvisorService {
 
       return count > 0 ? totalLoad / count : 50;
     } catch (err) {
-      this.logger?.error(`[FuelAdvisorService] Error computing engine load: ${err?.message ?? String(err)}`);
+      this.logger?.error({ event: 'FUEL_ENGINE_LOAD_ERROR', error: err?.message ?? String(err) }, 'Error computing engine load');
       return 50; // Fallback
     }
   }

@@ -1,18 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockFrom, mockRedisGet, mockRedisSetex } = vi.hoisted(() => ({
+const { mockFrom, mockRpc, mockRedisGet, mockRedisSetex } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
+  mockRpc: vi.fn(),
   mockRedisGet: vi.fn(),
   mockRedisSetex: vi.fn(),
 }));
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: { from: mockFrom },
-  supabaseAdmin: { from: mockFrom },
+  supabaseAdmin: { from: mockFrom, rpc: mockRpc },
   redisClient: {
     get: mockRedisGet,
     setex: mockRedisSetex,
   },
+}));
+
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 describe('FraudDetectionService', () => {
@@ -25,33 +30,22 @@ describe('FraudDetectionService', () => {
   });
 
   describe('getFraudStats', () => {
-    it('returns an object', async () => {
-      // getFraudStats calls supabaseAdmin.from().select().count().order().range()
-      mockFrom.mockImplementation((table) => {
-        const chain = {};
-        chain.select = vi.fn().mockReturnValue(chain);
-        chain.count = vi.fn().mockResolvedValue({ count: 0 });
-        chain.order = vi.fn().mockReturnValue(chain);
-        chain.range = vi.fn().mockResolvedValue({ data: [], error: null });
-        return chain;
-      });
-
+    it('returns the five aggregate fields from the RPC', async () => {
+      const aggregate = { total: 3, highRisk: 1, mediumRisk: 1, lowRisk: 1, avgScore: 0.5 };
+      mockRpc.mockResolvedValue({ data: aggregate, error: null });
       const stats = await FraudDetectionService.getFraudStats();
-      expect(typeof stats).toBe('object');
+      expect(stats).toEqual(aggregate);
+      expect(mockRpc).toHaveBeenCalledExactlyOnceWith('get_fraud_stats_aggregate');
+      expect(mockFrom).not.toHaveBeenCalled();
     });
 
     it('returns zero counts when no fraud records exist', async () => {
-      mockFrom.mockImplementation((table) => {
-        const chain = {};
-        chain.select = vi.fn().mockReturnValue(chain);
-        chain.count = vi.fn().mockResolvedValue({ count: 0 });
-        chain.order = vi.fn().mockReturnValue(chain);
-        chain.range = vi.fn().mockResolvedValue({ data: [], error: null });
-        return chain;
-      });
-
+      const empty = { total: 0, highRisk: 0, mediumRisk: 0, lowRisk: 0, avgScore: 0 };
+      mockRpc.mockResolvedValue({ data: empty, error: null });
       const stats = await FraudDetectionService.getFraudStats();
-      expect(stats.total).toBe(0);
+      expect(stats).toEqual(empty);
+      expect(mockRpc).toHaveBeenCalledExactlyOnceWith('get_fraud_stats_aggregate');
+      expect(mockFrom).not.toHaveBeenCalled();
     });
   });
 

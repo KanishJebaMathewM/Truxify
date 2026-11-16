@@ -4,6 +4,8 @@ import logger from '../../middleware/logger.js';
 import * as Sentry from '@sentry/node';
 import { supabase } from '../../config/db.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
+// backend/api/src/services/security/keyRotationService.js
+
 
 const ESCROW_ABI = [
   'function transferKeyOwnership(address newKeyAddress, uint256 nonce) external',

@@ -8,7 +8,10 @@ const mockOrderRepository = {
 
 const mockSupabase = { from: vi.fn() };
 
-vi.mock('../../src/config/db.js', () => ({ supabase: mockSupabase }));
+vi.mock('../../src/config/db.js', () => ({ 
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
+  supabase: mockSupabase }));
 vi.mock('../../src/middleware/logger.js', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
 describe('orderValidationService', () => {
@@ -25,15 +28,15 @@ describe('orderValidationService', () => {
 
   describe('findOrderByIdOrDisplayId', () => {
     it('finds order by UUID id', async () => {
-      const order = { id: 'order-uuid-1', order_display_id: '#FF20260808ABC', status: 'pending' };
+      const order = { id: '111111aa-222b-433c-844d-55555555555e', order_display_id: '#FF20260808ABC', status: 'pending' };
       mockOrderRepository.findOrderById.mockResolvedValue({ data: order, error: null });
 
-      const result = await orderValidationService.findOrderByIdOrDisplayId('order-uuid-1');
+      const result = await orderValidationService.findOrderByIdOrDisplayId('111111aa-222b-433c-844d-55555555555e');
       expect(result).toEqual(order);
     });
 
     it('finds order by display id', async () => {
-      const order = { id: 'order-uuid-1', order_display_id: '#FF20260808ABC', status: 'pending' };
+      const order = { id: '111111aa-222b-433c-844d-55555555555e', order_display_id: '#FF20260808ABC', status: 'pending' };
       mockOrderRepository.findOrderById.mockResolvedValue({ data: null, error: null });
       mockOrderRepository.findOrderByDisplayId.mockResolvedValue({ data: order, error: null });
 

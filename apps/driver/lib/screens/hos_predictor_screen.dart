@@ -209,7 +209,7 @@ class _HosPredictorScreenState extends State<HosPredictorScreen> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: riskColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+              decoration: BoxDecoration(color: riskColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
               child: Text(
                 result.violationReason,
                 style: TextStyle(color: riskColor, fontWeight: FontWeight.bold, fontSize: 14),

@@ -10,19 +10,27 @@ const state = vi.hoisted(() => ({
 
 vi.mock('../../../did/did.service.js', () => ({ default: state.didService }));
 
-vi.mock('../../src/config/db.js', () => ({
-  supabase: {
-    from: vi.fn(() => ({
-      select: vi.fn(() => ({
-        eq: vi.fn(() => ({
-          maybeSingle: vi.fn(async () => ({
-            data: state.wallet ? { polygon_wallet_address: state.wallet } : null,
-            error: null,
-          })),
+const supabaseMock = vi.hoisted(() => ({
+  from: vi.fn(() => ({
+    select: vi.fn(() => ({
+      eq: vi.fn(() => ({
+        maybeSingle: vi.fn(async () => ({
+          data: state.wallet ? { polygon_wallet_address: state.wallet } : null,
+          error: null,
         })),
       })),
     })),
-  },
+  })),
+}));
+
+vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
+  supabase: supabaseMock,
+  // resolveCredentialSubject builds a caller-scoped client for the profiles
+  // lookup; a missing mock export makes vitest throw on access.
+  createUserClient: () => supabaseMock,
 }));
 
 vi.mock('../../src/middleware/logger.js', () => ({
@@ -71,7 +79,7 @@ describe('escort wallet credential issuance', () => {
       .post('/api/escorts/wallet/credential')
       .send(credentialPayload(state.wallet));
 
-    expect(res.status).toBe(201);
+        expect(res.status).toBe(201);
     expect(state.didService.issueCredential).toHaveBeenCalledWith(
       state.wallet,
       'EscortCertification',

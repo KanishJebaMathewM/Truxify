@@ -5,7 +5,7 @@ import 'package:truxify_driver/services/offline_routing.dart';
 
 void main() {
   group('OfflineRouteMatrixService.calculateOfflineRoute', () {
-    const service = OfflineRouteMatrixService();
+    final service = OfflineRouteMatrixService();
 
     test('uses realistic detour factor and truck speed, not naive 1.25/55', () {
       final result = service.calculateOfflineRoute(
@@ -21,12 +21,12 @@ void main() {
 
       // Recompute the naive formula the old code used (haversine*1.25/55).
       const double earthRadiusKm = 6371.0;
-      double _deg(double d) => d * pi / 180.0;
-      final dLat = _deg(13.0827 - 12.9716);
-      final dLng = _deg(80.2707 - 77.5946);
+      double deg(double d) => d * pi / 180.0;
+      final dLat = deg(13.0827 - 12.9716);
+      final dLng = deg(80.2707 - 77.5946);
       final a = sin(dLat / 2) * sin(dLat / 2) +
-          cos(_deg(12.9716)) *
-              cos(_deg(13.0827)) *
+          cos(deg(12.9716)) *
+              cos(deg(13.0827)) *
               sin(dLng / 2) *
               sin(dLng / 2);
       final c = 2 * atan2(sqrt(a), sqrt(1 - a));
@@ -56,12 +56,12 @@ void main() {
       );
 
       // ETA must not be the naive haversine/55 formula for either corridor.
-      double _deg(double d) => d * pi / 180.0;
+      double deg(double d) => d * pi / 180.0;
       double haversine(lat1, lng1, lat2, lng2) {
-        final dLat = _deg(lat2 - lat1);
-        final dLng = _deg(lng2 - lng1);
+        final dLat = deg(lat2 - lat1);
+        final dLng = deg(lng2 - lng1);
         final a = sin(dLat / 2) * sin(dLat / 2) +
-            cos(_deg(lat1)) * cos(_deg(lat2)) * sin(dLng / 2) * sin(dLng / 2);
+            cos(deg(lat1)) * cos(deg(lat2)) * sin(dLng / 2) * sin(dLng / 2);
         return 6371.0 * (2 * atan2(sqrt(a), sqrt(1 - a)));
       }
 
@@ -94,10 +94,10 @@ void main() {
       final durationMins = result['estimated_duration_mins'] as int;
       final fuelLiters = result['estimated_fuel_liters'] as double;
 
-      expect(distanceKm, isFinite);
+      expect(distanceKm.isFinite, isTrue);
       expect(distanceKm, greaterThan(0));
       expect(durationMins, greaterThan(0));
-      expect(fuelLiters, isFinite);
+      expect(fuelLiters.isFinite, isTrue);
       expect(fuelLiters, greaterThan(0));
       expect(result['is_offline_estimate'], isTrue);
     });

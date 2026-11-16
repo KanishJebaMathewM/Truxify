@@ -17,6 +17,9 @@ const { loadOffersFrom, createUserClientMock } = vi.hoisted(() => ({
 }))
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: { from: vi.fn(() => {
     throw new Error('shared anon client must not be used by /api/demand-heatmap')
   }) },

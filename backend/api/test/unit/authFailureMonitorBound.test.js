@@ -14,13 +14,19 @@ vi.mock('../../src/middleware/logger.js', () => ({
 const { default: authFailureMonitor } = await import('../../src/middleware/authFailureMonitor.js');
 
 function makeReq(ip) {
-  return { ip, method: 'POST', originalUrl: '/api/auth/login' };
+  return { headers: {}, ip, method: 'POST', originalUrl: '/api/auth/login' };
 }
 
 function makeRes() {
   let finishHandler = null;
   return {
     statusCode: 401,
+    setHeader: vi.fn(),
+    status: vi.fn(function status(code) {
+      this.statusCode = code;
+      return this;
+    }),
+    json: vi.fn(),
     on: vi.fn((event, handler) => {
       if (event === 'finish') finishHandler = handler;
     }),
@@ -59,13 +65,13 @@ describe('authFailureMonitor bounded tracking', () => {
   it('tracks distinct IPs independently without cross-contamination', () => {
     const res1 = makeRes();
     authFailureMonitor(makeReq('172.16.0.1'), res1, vi.fn());
-    for (let i = 0; i < 4; i += 1) res1._finish();
+    for (let i = 0; i < 2; i += 1) res1._finish();
 
     const res2 = makeRes();
     authFailureMonitor(makeReq('172.16.0.2'), res2, vi.fn());
-    for (let i = 0; i < 4; i += 1) res2._finish();
+    for (let i = 0; i < 2; i += 1) res2._finish();
 
-    // Neither IP reached the threshold of 5 alone, so no warning yet.
+    // Neither IP reached the login threshold of 3 alone, so no warning yet.
     expect(mockLogger.warn).not.toHaveBeenCalled();
 
     res1._finish();
@@ -75,7 +81,7 @@ describe('authFailureMonitor bounded tracking', () => {
 
   it('calls next() to continue the chain', () => {
     const next = vi.fn();
-    authFailureMonitor(makeReq('10.0.0.1'), makeRes(), next);
+    authFailureMonitor(makeReq('10.0.0.7'), makeRes(), next);
     expect(next).toHaveBeenCalled();
   });
 });

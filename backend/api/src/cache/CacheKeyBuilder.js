@@ -172,15 +172,41 @@ export const CacheKeyBuilder = {
    * @returns {{ namespace: string, version: string|null, entityId: string, subKey: string|null }}
    */
   parse(key) {
-    const parts = key.split(SEP);
-    return {
-      namespace: parts[0] || null,
-      version: parts[1]?.startsWith('v') ? parts[1] : null,
-      entityId: parts[1]?.startsWith('v') ? parts[2] : parts[1] || null,
-      subKey: parts[1]?.startsWith('v')
-        ? (parts.length > 3 ? parts.slice(3).join(SEP) : null)
-        : (parts.length > 2 ? parts.slice(2).join(SEP) : null),
-    };
+    if (!key) {
+      return { namespace: null, version: null, entityId: null, subKey: null };
+    }
+    // Namespaces can be multi-segment ('user:profile') — match the longest
+    // registered prefix so build() output round-trips; fall back to the
+    // first segment for unknown namespaces.
+    // CacheNamespace.all() returns a Map — spread its values first.
+    const prefixes = [...CacheNamespace.all().values()]
+      .map((ns) => ns.prefix)
+      .sort((a, b) => b.length - a.length);
+    const nsPrefix = prefixes.find((p) => key === p || key.startsWith(p + SEP)) || null;
+    const rest = nsPrefix ? key.slice(nsPrefix.length + 1) : key;
+    const parts = rest.split(SEP);
+
+    let namespace;
+    let body;
+    let version = null;
+    if (nsPrefix) {
+      namespace = nsPrefix;
+      if (parts[0]?.startsWith('v')) { version = parts[0]; body = parts.slice(1); }
+      else body = parts;
+    } else {
+      namespace = parts[0] || null;
+      if (parts[1]?.startsWith('v')) { version = parts[1]; body = parts.slice(2); }
+      else body = parts.slice(1);
+    }
+
+    // Entity ids have a namespace-specific width: profile entities are
+    // 'sb:<id>' pairs (2 segments); everything else is a single segment.
+    // Anything beyond the entity is the subKey.
+    const entityWidth = nsPrefix === 'user:profile' ? 2 : 1;
+    const entityId = body.slice(0, entityWidth).join(SEP) || null;
+    const subKey = body.length > entityWidth ? body.slice(entityWidth).join(SEP) : null;
+
+    return { namespace, version, entityId, subKey };
   },
 
   /**

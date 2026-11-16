@@ -63,13 +63,9 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
           .eq('user_id', userId)
           .order('updated_at', ascending: false);
 
-      if (response is! List) {
-        throw StateError('Unexpected document response type');
-      }
-
       final documents = response.map((item) {
-        if (item is Map<String, dynamic>) return item;
-        if (item is Map) return Map<String, dynamic>.from(item);
+        return item;
+        return Map<String, dynamic>.from(item);
         throw StateError('Unexpected document item type');
       }).toList(growable: false);
           

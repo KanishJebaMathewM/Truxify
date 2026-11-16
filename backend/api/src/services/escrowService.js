@@ -119,25 +119,63 @@ const releaseEscrowFunds = async (userId, bookingId) => {
             throw new Error('Escrow can only be released for completed bookings');
         }
 
+        if (booking.escrow_status === 'released') {
+            throw new Error('Escrow has already been released for this booking');
+        }
+
+        if (booking.escrow_status === 'releasing') {
+            throw new Error('Escrow release is already in progress for this booking');
+        }
+
         if (booking.escrow_status !== 'deposited') {
             throw new Error('No escrow deposit found for this booking');
+        }
+
+        // Atomic lock transition: prevents concurrent calls from double-releasing funds
+        const { data: lockedBooking, error: lockError } = await supabase
+            .from('bookings')
+            .update({
+                escrow_status: 'releasing',
+                updated_at: new Date().toISOString(),
+            })
+            .eq('id', validBookingId)
+            .eq('escrow_status', 'deposited')
+            .select()
+            .maybeSingle();
+
+        if (lockError || !lockedBooking) {
+            throw new Error('Escrow release is already in progress or has already been processed');
         }
 
         const bookingIdBytes32 = ethers.id(validBookingId);
 
         let receipt;
-        if (process.env.NODE_ENV === 'test') {
-            const provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com');
-            const contract = getEscrowContract(provider);
-            const tx = await contract.releaseEscrow(bookingIdBytes32);
-            receipt = await tx.wait();
-        } else {
-            const { defaultRpcManager } = await import('./blockchain/rpcProviderManager.js');
-            receipt = await defaultRpcManager.executeWithRetry(async (provider) => {
+        try {
+            if (process.env.NODE_ENV === 'test') {
+                const provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com');
                 const contract = getEscrowContract(provider);
                 const tx = await contract.releaseEscrow(bookingIdBytes32);
-                return await tx.wait();
-            });
+                receipt = await tx.wait();
+            } else {
+                const { defaultRpcManager } = await import('./blockchain/rpcProviderManager.js');
+                receipt = await defaultRpcManager.executeWithRetry(async (provider) => {
+                    const contract = getEscrowContract(provider);
+                    const tx = await contract.releaseEscrow(bookingIdBytes32);
+                    return await tx.wait();
+                });
+            }
+        } catch (chainError) {
+            // Roll back status from 'releasing' to 'deposited' so a retry is possible
+            await supabase
+                .from('bookings')
+                .update({
+                    escrow_status: 'deposited',
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', validBookingId)
+                .eq('escrow_status', 'releasing');
+
+            throw chainError;
         }
 
         const { error: updateError } = await supabase
@@ -145,6 +183,7 @@ const releaseEscrowFunds = async (userId, bookingId) => {
             .update({
                 escrow_status: 'released',
                 escrow_released_at: new Date().toISOString(),
+                escrow_release_tx_hash: receipt?.hash,
                 updated_at: new Date().toISOString(),
             })
             .eq('id', validBookingId);
@@ -155,7 +194,7 @@ const releaseEscrowFunds = async (userId, bookingId) => {
 
         return {
             success: true,
-            transactionHash: receipt.hash,
+            transactionHash: receipt?.hash,
             bookingId: validBookingId,
         };
     } catch (error) {

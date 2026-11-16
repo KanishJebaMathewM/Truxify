@@ -5,7 +5,10 @@ import { supabase } from '../api/src/config/db.js';
 
 class ConsulService {
     constructor() {
-        this.consul = consul({
+        // The consul package exports the Consul class (both 1.x and 2.x) —
+        // it must be constructed with `new`; calling it as a factory throws
+        // "Class constructor Consul cannot be invoked without 'new'".
+        this.consul = new consul({
             host: process.env.CONSUL_HOST || 'consul-server',
             port: process.env.CONSUL_PORT || 8500,
             promisify: true

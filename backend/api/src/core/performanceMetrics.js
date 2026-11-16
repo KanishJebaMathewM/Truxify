@@ -1,6 +1,7 @@
 import logger from '../middleware/logger.js';
 
-const SLOW_THRESHOLD_MS = parseInt(process.env.SLOW_OPERATION_THRESHOLD_MS || '100', 10);
+const parsedSlowThresholdMs = parseInt(process.env.SLOW_OPERATION_THRESHOLD_MS, 10);
+const SLOW_THRESHOLD_MS = Number.isFinite(parsedSlowThresholdMs) ? parsedSlowThresholdMs : 100;
 
 export function measureExecution(name, asyncFn) {
   const start = Date.now();

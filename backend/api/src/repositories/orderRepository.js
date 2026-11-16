@@ -591,11 +591,27 @@ export class OrderRepository {
     // escrow transition (e.g. the stale-order worker moving a funded order
     // into 'refund_pending'). Only states this method legitimately reverts
     // are 'funding'/'funded'.
+    //
+    // This releases the WHOLE bid reservation, not just the escrow flag.
+    // Two-phase bid acceptance (#5724) stores the reserved bid in
+    // pending_bid_acceptance, and acceptBid only re-reserves an order whose
+    // pending_bid_acceptance IS NULL (see ESCROW_RESET_GUARD_FILTERS). If it
+    // were left set here, the order would be back in 'pending' but could never
+    // accept another bid (permanent 409 "already has an active escrow flow"),
+    // and escrowFundingReconciliation could not rescue it because it only
+    // scans escrow_status = 'funding'. Clearing it in the same UPDATE keeps the
+    // release atomic for every caller and matches the reset the funding
+    // reconciler performs when it expires a reservation.
     return this._retryableQuery(() => this.supabase
       .from('orders')
       .update({
         escrow_status: 'pending',
         escrow_booking_id: null,
+        pending_bid_acceptance: null,
+        escrow_funding_started_at: null,
+        escrow_funding_attempts: 0,
+        escrow_funding_last_attempt_at: null,
+        escrow_funding_error: null,
       })
       .eq('id', orderId)
       .in('escrow_status', ['funding', 'funded']), 'revertEscrowStatus');

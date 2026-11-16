@@ -27,7 +27,9 @@ class _TruxifyShellScreenState extends State<TruxifyShellScreen> {
     // Guard against double listener registration during shell warm-up
     try {
       // Single pipeline initialization logic
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[ShellScreen] Notification pipeline initialization failed: $e');
+    }
   }
 
   @override

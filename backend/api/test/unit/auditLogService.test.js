@@ -5,7 +5,88 @@ const mockAppendFile = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 vi.mock('fs/promises', () => ({
   appendFile: mockAppendFile,
 }))
+// backend/api/test/unit/auditLogService.test.js
 
+import { insertLog, queryLogs } from '../../src/services/auditLogService.js';
+import { supabase } from '../../src/config/supabase.js';
+
+// Mock Supabase client
+jest.mock('../../src/config/supabase.js', () => ({
+  supabase: {
+    from: jest.fn(),
+  },
+}));
+
+describe('auditLogService Unit Tests', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe('insertLog', () => {
+    it('successfully inserts an audit log entry', async () => {
+      const mockInsert = jest.fn().mockResolvedValue({ data: [{ id: 1 }], error: null });
+      supabase.from.mockReturnValue({ insert: mockInsert });
+
+      const logData = { userId: 'user-123', action: 'UPDATE_ROLE', details: { role: 'admin' } };
+      const result = await insertLog(logData);
+
+      expect(supabase.from).toHaveBeenCalledWith('audit_logs');
+      expect(mockInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          user_id: 'user-123',
+          action: 'UPDATE_ROLE',
+        })
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it('handles database errors during log insertion', async () => {
+      const mockInsert = jest.fn().mockResolvedValue({ data: null, error: { message: 'DB constraint violation' } });
+      supabase.from.mockReturnValue({ insert: mockInsert });
+
+      const result = await insertLog({ action: 'TEST_ACTION' });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('DB constraint violation');
+    });
+  });
+
+  describe('queryLogs', () => {
+    it('queries logs with filters and pagination successfully', async () => {
+      const mockRange = jest.fn().mockResolvedValue({
+        data: [{ id: 1, action: 'LOGIN' }],
+        error: null,
+        count: 1,
+      });
+      const mockOrder = jest.fn().mockReturnValue({ range: mockRange });
+      const mockEq = jest.fn().mockReturnValue({ order: mockOrder });
+      const mockSelect = jest.fn().mockReturnValue({ eq: mockEq });
+      
+      supabase.from.mockReturnValue({ select: mockSelect });
+
+      const filters = { userId: 'user-123', limit: 10, offset: 0 };
+      const result = await queryLogs(filters);
+
+      expect(supabase.from).toHaveBeenCalledWith('audit_logs');
+      expect(mockEq).toHaveBeenCalledWith('user_id', 'user-123');
+      expect(mockRange).toHaveBeenCalledWith(0, 9);
+      expect(result.success).toBe(true);
+      expect(result.data).toHaveLength(1);
+    });
+
+    it('handles database errors during log querying', async () => {
+      const mockOrder = jest.fn().mockRejectedValue(new Error('Connection timeout'));
+      const mockSelect = jest.fn().mockReturnValue({ order: mockOrder });
+      
+      supabase.from.mockReturnValue({ select: mockSelect });
+
+      const result = await queryLogs({});
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Connection timeout');
+    });
+  });
+});
 const mockLogger = vi.hoisted(() => ({
   error: vi.fn(),
   info: vi.fn(),
@@ -29,6 +110,9 @@ const { mockDbState } = vi.hoisted(() => {
 })
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   get supabaseAdmin() {
     return mockDbState.supabaseAdmin
   },
@@ -115,13 +199,39 @@ describe('AuditLogService', () => {
     })
 
     it('returns inserted data on valid entry and successful DB insert', async () => {
-      const insertedRecord = { id: 'audit-log-1', ...validEntry, created_at: '2026-09-14T00:00:00Z' }
+      // The service returns the inserted DB row (snake_case columns).
+      const insertedRecord = {
+        id: 'audit-log-1',
+        actor_id: 'actor-123',
+        actor_role: 'admin',
+        actor_name: 'Admin Operator',
+        action: 'admin:view-dashboard',
+        resource_type: 'order',
+        resource_id: 'order-999',
+        method: 'GET',
+        path: '/api/admin/orders/999',
+        ip_address: '127.0.0.1',
+        user_agent: 'VitestTestAgent/1.0',
+        correlation_id: 'corr-xyz',
+        request_id: 'req-abc',
+        status_code: 200,
+        before_state: { status: 'pending' },
+        after_state: { status: 'confirmed' },
+        metadata: { reason: 'manual review' },
+        created_at: '2026-09-14T00:00:00Z',
+      }
       const insertChain = makeInsertChain(insertedRecord, null)
       defaultAdmin.from.mockReturnValue(insertChain)
 
       const result = await auditLogService.log(validEntry)
 
-      expect(result).toEqual(insertedRecord)
+      // The service resolves with the record it built and attempted to insert:
+      // snake_case columns, a server-set created_at, and no client round-trip id.
+      expect(result).toEqual({
+        ...insertedRecord,
+        id: undefined,
+        created_at: expect.any(String),
+      })
       expect(defaultAdmin.from).toHaveBeenCalledWith('application_audit_logs')
       expect(insertChain.insert).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -145,7 +255,7 @@ describe('AuditLogService', () => {
       expect(result).toBeNull()
       expect(mockLogger.error).toHaveBeenCalledWith(
         { err: { message: 'Database connection failed' } },
-        '[AuditLog] Failed to insert audit entry'
+        '[AuditLog] Failed to insert audit entry to Supabase'
       )
       expect(mockAppendFile).toHaveBeenCalledTimes(1)
       const [filePath, fileContent] = mockAppendFile.mock.calls[0]
@@ -169,7 +279,7 @@ describe('AuditLogService', () => {
       expect(result).toBeNull()
       expect(mockLogger.error).toHaveBeenCalledWith(
         { err: expect.any(Error) },
-        '[AuditLog] Exception inserting audit entry'
+        '[AuditLog] Exception inserting audit entry to Supabase'
       )
       expect(mockAppendFile).toHaveBeenCalledTimes(1)
       const [filePath, fileContent] = mockAppendFile.mock.calls[0]
@@ -263,6 +373,8 @@ describe('AuditLogService', () => {
           limit: 10,
           total: 2,
           totalPages: 1,
+          hasNextPage: false,
+          hasPreviousPage: false,
         },
       })
     })
@@ -275,7 +387,7 @@ describe('AuditLogService', () => {
 
       expect(result).toEqual({
         data: [],
-        pagination: { page: 2, limit: 10, total: 0, totalPages: 0 },
+        pagination: { page: 2, limit: 10, total: 0, totalPages: 0, hasNextPage: false, hasPreviousPage: false },
       })
       expect(mockLogger.error).toHaveBeenCalledWith(
         { err: { message: 'Query execution error' } },

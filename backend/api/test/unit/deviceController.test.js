@@ -4,6 +4,9 @@ import { createSupabaseMock } from '../helpers/supabaseMock.js';
 const supabaseMock = createSupabaseMock();
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: supabaseMock.supabase,
   supabaseAdmin: supabaseMock.supabase,
 }));
@@ -420,7 +423,7 @@ describe('deviceController', () => {
     });
 
     it('handles database upsert error', async () => {
-      supabaseMock.programErrorFor('user_locations', 'upsert', 'Database write error');
+      supabaseMock.programErrorFor('driver_locations', 'upsert', 'Database write error');
 
       const req = {
         user: { id: 'u-1' },
@@ -458,10 +461,10 @@ describe('deviceController', () => {
         success: true,
         message: 'Location updated',
       });
-      const locationRow = supabaseMock.store.user_locations?.find((l) => l.user_id === 'u-1');
+      const locationRow = supabaseMock.store.driver_locations?.find((l) => l.driver_id === 'u-1');
       expect(locationRow).toBeDefined();
       expect(locationRow).toMatchObject({
-        user_id: 'u-1',
+        driver_id: 'u-1',
         latitude: 12.9716,
         longitude: 77.5946,
         heading: 180.5,
@@ -488,7 +491,7 @@ describe('deviceController', () => {
         success: true,
         message: 'Location updated',
       });
-      const locationRow = supabaseMock.store.user_locations?.find((l) => l.user_id === 'u-1');
+      const locationRow = supabaseMock.store.driver_locations?.find((l) => l.driver_id === 'u-1');
       expect(locationRow.heading).toBeNull();
       expect(locationRow.speed).toBeNull();
     });

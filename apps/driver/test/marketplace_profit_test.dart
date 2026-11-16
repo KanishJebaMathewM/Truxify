@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:driver/models/app_models.dart';
+import 'package:truxify_driver/models/app_models.dart';
 
 void main() {
   group('LoadOffer data for profit prediction', () {

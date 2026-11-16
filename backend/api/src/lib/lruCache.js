@@ -14,29 +14,38 @@ export const MAX_KEYS = 100000;
 export function clampMaxKeys(maxKeys, fallback = 1000) {
   const safeFallback = Number.isFinite(fallback) ? fallback : 1000;
 
-  if (Number.isNaN(maxKeys)) {
+  let val = maxKeys;
+  if (typeof val !== 'number') {
+    try {
+      val = Number(val);
+    } catch {
+      return safeFallback;
+    }
+  }
+
+  if (Number.isNaN(val)) {
     return safeFallback;
   }
 
-  if (Object.is(maxKeys, Number.POSITIVE_INFINITY)) {
+  if (Object.is(val, Number.POSITIVE_INFINITY)) {
     return MAX_KEYS;
   }
 
-  if (Object.is(maxKeys, Number.NEGATIVE_INFINITY)) {
+  if (Object.is(val, Number.NEGATIVE_INFINITY)) {
     return MIN_KEYS;
   }
 
-  if (!Number.isFinite(maxKeys)) {
+  if (!Number.isFinite(val)) {
     return safeFallback;
   }
 
-  if (maxKeys < MIN_KEYS) {
+  if (val < MIN_KEYS) {
     return MIN_KEYS;
   }
 
-  if (maxKeys > MAX_KEYS) {
+  if (val > MAX_KEYS) {
     return MAX_KEYS;
   }
 
-  return maxKeys;
+  return val;
 }

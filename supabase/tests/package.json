@@ -1,0 +1,6 @@
+{
+  "name": "truxify-supabase-protocol-tests",
+  "private": true,
+  "scripts": { "test": "node --test *.test.cjs" },
+  "devDependencies": { "@electric-sql/pglite": "0.5.8" }
+}

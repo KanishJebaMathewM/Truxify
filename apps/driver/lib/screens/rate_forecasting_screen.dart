@@ -61,7 +61,7 @@ class _RateForecastingScreenState extends State<RateForecastingScreen> {
                   const SizedBox(height: 16),
                   const Text('7-Day Rate Forecast', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
-                  ..._currentForecast!.sevenDayForecast.map((daily) => _buildDailyForecastCard(daily)).toList(),
+                  ..._currentForecast!.sevenDayForecast.map((daily) => _buildDailyForecastCard(daily)),
                 ],
               ),
             )

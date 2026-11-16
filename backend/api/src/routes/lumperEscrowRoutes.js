@@ -29,6 +29,15 @@ export const isValidReceiptUrl = (url) => {
 };
 
 /**
+ * Validation failures are client errors (400), not server faults (500).
+ * Without this, a malformed amount was reported as "Failed to deposit lumper
+ * fee into escrow" and monitoring could not distinguish the two.
+ */
+function statusForError(err) {
+  return Number.isInteger(err?.statusCode) ? err.statusCode : 500;
+}
+
+/**
  * POST /api/lumper-escrow/deposit
  * Broker pre-deposits estimated lumper fee into smart contract escrow
  */
@@ -39,10 +48,16 @@ router.post('/deposit', authenticate, userLimiter, async (req, res) => {
       return res.status(403).json({ error: 'Access Denied: Only brokers or admins can deposit lumper escrow funds' });
     }
 
-    const { booking_id, broker_address, estimated_fee } = req.body;
+    const { booking_id, broker_address, estimated_fee, driver_id } = req.body;
 
-    if (!booking_id || !broker_address || estimated_fee === undefined) {
-      return res.status(400).json({ error: 'Missing required parameters: booking_id, broker_address, estimated_fee' });
+    if (!booking_id || !broker_address || estimated_fee === undefined || estimated_fee === null || !driver_id) {
+      return res.status(400).json({
+        error: 'Missing required parameters: booking_id, broker_address, estimated_fee, driver_id'
+      });
+    }
+
+    if (typeof driver_id !== 'string' || driver_id.trim().length === 0 || driver_id.trim().length > 64) {
+      return res.status(400).json({ error: 'driver_id must be a non-empty string of at most 64 characters' });
     }
 
     if (!isValidEvmAddress(broker_address)) {
@@ -61,7 +76,9 @@ router.post('/deposit', authenticate, userLimiter, async (req, res) => {
     const escrow = await lumperEscrowService.depositLumperFee({
       bookingId: booking_id,
       brokerAddress: broker_address,
-      estimatedFeeAmount: feeAmount
+      estimatedFeeAmount: feeAmount,
+      brokerUserId: req.user.id,
+      driverId: driver_id.trim()
     });
 
     return res.status(201).json({
@@ -69,7 +86,9 @@ router.post('/deposit', authenticate, userLimiter, async (req, res) => {
       escrow
     });
   } catch (err) {
-    return res.status(500).json({ error: err.message || 'Failed to deposit lumper fee into escrow' });
+    return res.status(statusForError(err)).json({
+      error: err.statusCode === 400 ? err.message : 'Failed to deposit lumper fee into escrow'
+    });
   }
 });
 
@@ -106,11 +125,24 @@ router.post('/release', authenticate, userLimiter, async (req, res) => {
       }
     }
 
+    const escrow = await lumperEscrowService.getEscrowStatus(escrow_id);
+    if (!escrow) {
+      return res.status(404).json({ error: 'Lumper escrow contract not found' });
+    }
+
+    if (req.user.role !== 'admin' && (!escrow.driverId || escrow.driverId !== req.user.id)) {
+      return res.status(403).json({
+        error: 'Access Denied: Only the assigned driver or an admin can release this escrow'
+      });
+    }
+
     const releasedEscrow = await lumperEscrowService.processReceiptAndRelease({
       escrowId: escrow_id,
       driverWallet: driver_wallet,
       receiptImageUrl: receipt_url,
-      claimedAmount: parsedClaimed
+      claimedAmount: claimed_amount,
+      callerId: req.user.id,
+      callerRole: req.user.role
     });
 
     return res.json({
@@ -118,8 +150,9 @@ router.post('/release', authenticate, userLimiter, async (req, res) => {
       escrow: releasedEscrow
     });
   } catch (err) {
-    const status = err.message?.includes('not found') ? 404 : 500;
-    return res.status(status).json({ error: err.message || 'Failed to process lumper receipt release' });
+    return res.status(statusForError(err)).json({
+      error: err.statusCode === 400 ? err.message : 'Failed to process lumper receipt release'
+    });
   }
 });
 
@@ -133,6 +166,16 @@ router.get('/:escrowId', authenticate, userLimiter, async (req, res) => {
     const escrow = await lumperEscrowService.getEscrowStatus(escrowId);
 
     if (!escrow) {
+      return res.status(404).json({ error: 'Lumper escrow contract not found' });
+    }
+
+    if (
+      req.user.role !== 'admin' &&
+      escrow.brokerUserId !== req.user.id &&
+      escrow.driverId !== req.user.id
+    ) {
+      // Return 404 rather than 403 so unrelated callers cannot confirm that an
+      // escrow ID exists.
       return res.status(404).json({ error: 'Lumper escrow contract not found' });
     }
 

@@ -1,12 +1,14 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
-import torch
-import numpy as np
-from datetime import datetime
 import logging
-from mtl.model import MultiTaskModel, MTLLoss, MultiTaskTrainer
+import math
 import os
+from datetime import datetime
+from typing import List
+
+import torch
+from fastapi import APIRouter, HTTPException
+from mtl.model import MTLLoss, MultiTaskModel, MultiTaskTrainer
+from mtl.training_transition import TrainingAdmissionError
+from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/mtl", tags=["Multi-Task Learning"])
@@ -37,9 +39,15 @@ mtl_loss = MTLLoss(task_losses)
 trainer = MultiTaskTrainer(model, mtl_loss)
 
 class TrainRequest(BaseModel):
-    epochs: int = 50
-    batch_size: int = 32
-    data_size: int = 1000
+    epochs: int = Field(default=50, strict=True, ge=1, le=100)
+    batch_size: int = Field(default=32, strict=True, ge=1, le=8192)
+    data_size: int = Field(default=1000, strict=True, ge=1, le=50000)
+
+    @model_validator(mode="after")
+    def bounded_work(self):
+        if self.epochs * self.data_size > 1_000_000:
+            raise ValueError("MTL synthetic training work exceeds one million sample epochs")
+        return self
 
 @router.post("/train")
 async def train_mtl(request: TrainRequest):
@@ -76,16 +84,42 @@ async def train_mtl(request: TrainRequest):
             'data': results,
             'timestamp': datetime.now().isoformat()
         }
+    except TrainingAdmissionError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     except Exception as e:
         logger.error(f"Training failed: {e}")
         logger.error(f"Internal error: {e}")
 
         raise HTTPException(status_code=500, detail="Internal server error")
 
+MAX_MTL_ROWS = 64
+MAX_MTL_COLS = 128
+
+
+def _validate_mtl_matrix(data):
+    if not isinstance(data, list) or not data or len(data) > MAX_MTL_ROWS:
+        raise HTTPException(status_code=422, detail='data must be a non-empty matrix of at most 64 rows')
+    width = None
+    for row in data:
+        if not isinstance(row, list) or not row or len(row) > MAX_MTL_COLS:
+            raise HTTPException(status_code=422, detail='each row must be a non-empty list of at most 128 numbers')
+        if width is None:
+            width = len(row)
+        elif len(row) != width:
+            raise HTTPException(status_code=422, detail='all rows must have equal length')
+        for value in row:
+            if not isinstance(value, (int, float)):
+                raise HTTPException(status_code=422, detail='matrix values must be numbers')
+            if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+                raise HTTPException(status_code=422, detail='matrix values must be finite')
+    return data
+
+
 @router.post("/predict")
 async def predict_mtl(data: List[List[float]]):
     """Make multi-task predictions"""
     try:
+        _validate_mtl_matrix(data)
         X = torch.tensor(data, dtype=torch.float32)
         predictions = trainer.predict(X)
         
@@ -108,8 +142,9 @@ async def predict_mtl(data: List[List[float]]):
 async def predict_single_task(data: List[List[float]], task_name: str):
     """Make prediction for single task"""
     try:
+        _validate_mtl_matrix(data)
         X = torch.tensor(data, dtype=torch.float32)
-        prediction = trainer.model.forward_single_task(X, task_name)
+        prediction = trainer.predict(X, task_name=task_name)
         
         return {
             'success': True,

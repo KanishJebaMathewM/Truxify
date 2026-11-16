@@ -88,8 +88,14 @@ contract StateChannel is ReentrancyGuard {
         channel.sequence = sequence;
         channel.balanceA = balanceA;
         channel.balanceB = balanceB;
-        channel.isDisputed = true;
-        channel.challengeExpiry = block.timestamp + CHALLENGE_PERIOD;
+        // Start the challenge only once. A later newer state may update the
+        // balances but must NOT reset the already-running expiry, so
+        // finalizeExit is always reachable within one CHALLENGE_PERIOD of the
+        // first valid challenge (issue #10792 / #11255).
+        if (!channel.isDisputed) {
+            channel.isDisputed = true;
+            channel.challengeExpiry = block.timestamp + CHALLENGE_PERIOD;
+        }
 
         emit DisputeInitiated(channelId, sequence, channel.challengeExpiry);
     }
@@ -114,7 +120,7 @@ contract StateChannel is ReentrancyGuard {
         require(sequence > channel.sequence, "Sequence must be higher");
         require(balanceA + balanceB == channel.balanceA + channel.balanceB, "Invalid balance sum");
 
-        bytes32 stateHash = keccak256(abi.encodePacked(channelId, sequence, balanceA, balanceB)).toEthSignedMessageHash();
+        bytes32 stateHash = keccak256(abi.encodePacked(block.chainid, address(this), channelId, sequence, balanceA, balanceB)).toEthSignedMessageHash();
         
         if (msg.sender == channel.userA) {
             require(stateHash.recover(sig) == channel.userB, "Invalid signature from userB");

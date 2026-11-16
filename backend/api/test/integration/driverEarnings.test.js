@@ -42,8 +42,7 @@ const mockTrips = [
 ];
 
 vi.mock('../../src/config/db.js', () => {
-  return {
-    supabase: {
+  const supabaseMock = {
       from: (table) => {
         if (table === 'trips') {
           return {
@@ -62,9 +61,9 @@ vi.mock('../../src/config/db.js', () => {
           }),
         };
       },
-    },
-    mongoDb: null,
-    redisClient: {
+  };
+  const mongoDb = null;
+  const redisClient = {
       get: () => Promise.resolve(null),
       set: () => Promise.resolve('OK'),
       del: () => Promise.resolve(1),
@@ -74,9 +73,16 @@ vi.mock('../../src/config/db.js', () => {
         return Promise.resolve(1);
       },
       status: 'ready',
-    },
+  };
+  return {
+    supabase: supabaseMock,
+    // The driver routes build caller-scoped clients via createUserClient;
+    // service-role reads go through supabaseAdmin.
+    createUserClient: () => supabaseMock,
+    supabaseAdmin: supabaseMock,
+    mongoDb,
+    redisClient,
     upstashRedisClient: null,
-    supabaseAdmin: null,
     firebaseAdmin: null,
   };
 });
@@ -148,5 +154,41 @@ describe('Driver Earnings API Endpoint Suite', () => {
     expect(Array.isArray(res.body.pending_payments)).toBe(true);
     expect(res.body.pending_payments.length).toBe(1);
     expect(res.body.pending_payments[0].status).toBe('locked');
+  });
+
+  it('should forbid a driver from viewing another driver earnings via the parameterized route', async () => {
+    const res = await request(app)
+      .get('/api/driver/other-driver-999/earnings')
+      .set('x-dev-access-token', 'test-access-token')
+      .set('x-user-id', 'test-driver-1')
+      .set('x-user-role', 'driver')
+      .query({ period: 'week' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toContain('You can only view your own earnings');
+  });
+
+  it('should allow a driver to view their own earnings via the parameterized route', async () => {
+    const res = await request(app)
+      .get('/api/driver/test-driver-1/earnings')
+      .set('x-dev-access-token', 'test-access-token')
+      .set('x-user-id', 'test-driver-1')
+      .set('x-user-role', 'driver')
+      .query({ period: 'week' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.period).toBe('week');
+    expect(Array.isArray(res.body.completed_trips)).toBe(true);
+  });
+
+  it('should allow an admin to view any driver earnings', async () => {
+    const res = await request(app)
+      .get('/api/driver/other-driver-999/earnings')
+      .set('x-dev-access-token', 'test-access-token')
+      .set('x-user-id', 'test-admin-1')
+      .set('x-user-role', 'admin')
+      .query({ period: 'week' });
+
+    expect(res.status).toBe(200);
   });
 });

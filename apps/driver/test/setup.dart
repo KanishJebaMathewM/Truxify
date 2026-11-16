@@ -1,5 +1,6 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_core_platform_interface/test.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -22,7 +23,9 @@ Future<void> setupTests() async {
           projectId: 'mock-project-id',
         ),
       );
-    } on FirebaseException catch (_) {}
+    } on FirebaseException catch (e) {
+      debugPrint('Firebase initialization failed: $e');
+    }
   }
 
   try {
@@ -30,7 +33,7 @@ Future<void> setupTests() async {
   } on AssertionError {
     await Supabase.initialize(
       url: 'http://localhost:54321',
-      anonKey: 'mock-anon-key',
+      publishableKey: 'mock-anon-key',
     );
   }
 }

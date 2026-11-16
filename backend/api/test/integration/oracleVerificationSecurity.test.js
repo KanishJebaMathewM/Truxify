@@ -27,6 +27,15 @@ const mockOracleService = {
     blockchainHash: '0xabc123',
     verificationUrl: 'https://polygonscan.com/tx/0xabc123',
   }),
+  // GET /status calls oracleService.getStatus(); mirror the real service's
+  // result shape (env-derived provider/threshold report).
+  getStatus: vi.fn().mockReturnValue({
+    providers: 3,
+    threshold: 2,
+    chainlinkEnabled: false,
+    backupOracleEnabled: false,
+    timestamp: new Date().toISOString(),
+  }),
 };
 
 const mockVerificationService = {
@@ -92,6 +101,10 @@ const mockSupabase = {
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: mockSupabase,
+  // verificationRoutes probes the service-role client and oracleRoutes builds
+  // caller-scoped clients; missing mock exports make vitest throw on access.
+  supabaseAdmin: mockSupabase,
+  createUserClient: () => mockSupabase,
   firebaseAdmin: null,
   redisClient: null,
   mongoDb: null,
@@ -132,7 +145,7 @@ const validConfirmBody = {
 
 const validCrosschainBody = {
   orderId: VALID_ORDER_ID,
-  blockchainHash: '0xabc123def456',
+  blockchainHash: '0x' + 'ab'.repeat(32), // 32-byte tx hash per the route's bytes32 guard
 };
 
 describe('Oracle Routes — Authentication', () => {

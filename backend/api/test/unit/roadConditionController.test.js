@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
-vi.mock('../../../../src/config/db.js', () => ({
+vi.mock('../../src/config/db.js', () => ({
   supabaseAdmin: {
     from: vi.fn(() => ({
       insert: vi.fn(() => Promise.resolve({ error: null })),
@@ -11,11 +11,11 @@ vi.mock('../../../../src/config/db.js', () => ({
   },
 }));
 
-vi.mock('../../../../src/middleware/logger.js', () => ({
+vi.mock('../../src/middleware/logger.js', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
 }));
 
-import { reportGripData, getNearbyGripData } from '../../../../src/controllers/roadConditionController.js';
+import { reportGripData, getNearbyGripData } from '../../src/controllers/roadConditionController.js';
 
 function makeApp() {
   const app = express();

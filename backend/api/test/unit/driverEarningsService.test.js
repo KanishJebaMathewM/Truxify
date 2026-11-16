@@ -6,7 +6,56 @@ import driverEarningsService, {
   aggregateTripEarnings,
   calculateEarningsAggregation,
 } from '../../src/services/driverEarningsService.js';
+// backend/api/test/unit/driverEarningsService.test.js
 
+import { describe, it, expect } from 'vitest';
+import { calculateEarningsAggregation } from '../../src/services/driverEarningsService.js';
+
+describe('DriverEarningsService Unit Tests (Issue #11308)', () => {
+  it('should correctly calculate gross and net earnings with real API response shape', () => {
+    const mockTrips = [
+      { id: 'trip_1', fareAmount: 500, commission: 50, completedAt: '2026-08-01T10:00:00Z' },
+      { id: 'trip_2', fareAmount: 1000, commission: 100, completedAt: '2026-08-02T14:30:00Z' }
+    ];
+
+    const allCompletedTrips = mockTrips;
+    const lifetimeTrips = 25;
+
+    const result = calculateEarningsAggregation(mockTrips, allCompletedTrips, lifetimeTrips);
+
+    // Assert real API contract keys
+    expect(result).toHaveProperty('gross_earnings');
+    expect(result).toHaveProperty('net_earnings');
+    expect(result).toHaveProperty('trips_completed');
+    expect(result).toHaveProperty('weekly_chart');
+
+    // Assert calculated values
+    expect(result.gross_earnings).toBe(1500);
+    expect(result.net_earnings).toBe(1350); // 1500 - 150 commission
+    expect(result.trips_completed).toBe(2);
+    expect(Array.isArray(result.weekly_chart)).toBe(true);
+  });
+
+  it('should handle empty trip lists gracefully without returning NaN', () => {
+    const result = calculateEarningsAggregation([], [], 0);
+
+    expect(result.gross_earnings).toBe(0);
+    expect(result.net_earnings).toBe(0);
+    expect(result.trips_completed).toBe(0);
+  });
+
+  it('should correctly process commission deductions and net payouts', () => {
+    const trips = [
+      { id: 'trip_3', fareAmount: 2000, commission: 200, completedAt: '2026-08-03T09:00:00Z' }
+    ];
+
+    const result = calculateEarningsAggregation(trips, trips, 10);
+
+    expect(result.gross_earnings).toBe(2000);
+    expect(result.net_earnings).toBe(1800);
+    expect(result.trips_completed).toBe(1);
+  });
+});
 describe('driverEarningsService', () => {
   describe('toAmount', () => {
     it('coerces valid numbers and numeric strings to finite numbers', () => {

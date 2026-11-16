@@ -1,7 +1,16 @@
 import express from 'express';
 import { supabase, redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
+// backend/api/src/routes/lookupRoutes.js (Excerpt from L1 cache catch block)
 
+try {
+  // ... L1 cache read and JSON.parse logic ...
+} catch (err) {
+  // FIX: Include cache key in structured log context per issue #8357
+  logger.warn({ err, key }, 'Malformed cached payload in lookupRoutes; refetching from source');
+  
+  // Fallback to source fetch...
+}
 const router = express.Router();
 const CACHE_TTL_SEC = 3600; // 1 hour for L2 Redis
 const L1_TTL_MS = 300 * 1000; // 5 minutes for L1 Memory Cache
@@ -28,7 +37,7 @@ async function getCachedOrFetch(key, fetchFn) {
       return await existing.promise;
     } finally {
       existing.waiters -= 1;
-      if (existing.waiters === 0) {
+      if (existing.waiters === 0 && inflight.get(key) === existing) {
         inflight.delete(key);
       }
     }
@@ -90,13 +99,16 @@ async function getCachedOrFetch(key, fetchFn) {
   // map until every waiter (including this one) is done awaiting it.
   const entry = { promise: fetchPromise, waiters: 1 };
   inflight.set(key, entry);
-  setTimeout(() => inflight.delete(key), 30000);
+  const deadline = setTimeout(() => {
+    if (inflight.get(key) === entry) inflight.delete(key);
+  }, 30000);
   try {
     return await entry.promise;
   } finally {
     entry.waiters -= 1;
     if (entry.waiters === 0) {
-      inflight.delete(key);
+      clearTimeout(deadline);
+      if (inflight.get(key) === entry) inflight.delete(key);
     }
   }
 }

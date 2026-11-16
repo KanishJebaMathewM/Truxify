@@ -128,7 +128,7 @@ class _CollaborativeDispatchScreenState extends State<CollaborativeDispatchScree
         child: ListTile(
           contentPadding: const EdgeInsets.all(16),
           leading: CircleAvatar(
-            backgroundColor: isLocked ? lockColor.withOpacity(0.2) : Colors.blueGrey[50],
+            backgroundColor: isLocked ? lockColor.withValues(alpha: 0.2) : Colors.blueGrey[50],
             child: Icon(isLocked ? Icons.lock : Icons.local_shipping, color: isLocked ? lockColor : Colors.blueGrey),
           ),
           title: Text('${load.origin} ➔ ${load.destination}', style: TextStyle(fontWeight: FontWeight.bold, color: isLocked ? lockColor : Colors.black87)),
@@ -141,7 +141,7 @@ class _CollaborativeDispatchScreenState extends State<CollaborativeDispatchScree
                 const SizedBox(height: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(color: lockColor.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
+                  decoration: BoxDecoration(color: lockColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)),
                   child: Text('Editing: ${load.lockedByUserName}', style: TextStyle(color: lockColor, fontSize: 12, fontWeight: FontWeight.bold)),
                 )
               ]

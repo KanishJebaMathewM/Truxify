@@ -8,11 +8,11 @@ class Cargo3DVisualizer extends StatefulWidget {
   final double heightMeters;
 
   const Cargo3DVisualizer({
-    Key? key,
+    super.key,
     required this.lengthMeters,
     required this.widthMeters,
     required this.heightMeters,
-  }) : super(key: key);
+  });
 
   @override
   State<Cargo3DVisualizer> createState() => _Cargo3DVisualizerState();
@@ -21,7 +21,7 @@ class Cargo3DVisualizer extends StatefulWidget {
 class _Cargo3DVisualizerState extends State<Cargo3DVisualizer> {
   double _rotationX = 0.4;
   double _rotationY = 0.6;
-  double _scale = 1.0;
+  final double _scale = 1.0;
 
   @override
   Widget build(BuildContext context) {

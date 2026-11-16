@@ -3,10 +3,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 describe('middleware/responseSanitizer', () => {
   const mockRes = () => {
     const headers = {};
+    const sentJson = vi.fn(function (body) { return body; });
     return {
       headers,
       statusCode: 200,
-      json: vi.fn(function (body) { return body; }),
+      json: sentJson,
+      sentJson,
       getHeader: (name) => headers[name],
       setHeader: (name, value) => { headers[name] = value; },
     };
@@ -23,7 +25,7 @@ describe('middleware/responseSanitizer', () => {
     const res = mockRes();
     sanitizer(req, res, mockNext);
     res.json({ name: 'Alice', age: undefined, city: 'NYC' });
-    expect(res.json).toHaveBeenCalledWith({ name: 'Alice', city: 'NYC' });
+    expect(res.sentJson).toHaveBeenCalledWith({ name: 'Alice', city: 'NYC' });
     expect(mockNext).toHaveBeenCalled();
   });
 
@@ -33,7 +35,7 @@ describe('middleware/responseSanitizer', () => {
     const res = mockRes();
     sanitizer(req, res, mockNext);
     res.json({ name: 'Bob', _internal: 'secret', __v: 1, _debug: 'debug', password: 'hunter2' });
-    expect(res.json).toHaveBeenCalledWith({ name: 'Bob', password: 'hunter2' });
+    expect(res.sentJson).toHaveBeenCalledWith({ name: 'Bob', password: 'hunter2' });
   });
 
   it('handles null body', async () => {
@@ -42,7 +44,7 @@ describe('middleware/responseSanitizer', () => {
     const res = mockRes();
     sanitizer(req, res, mockNext);
     res.json(null);
-    expect(res.json).toHaveBeenCalledWith(null);
+    expect(res.sentJson).toHaveBeenCalledWith(null);
   });
 
   it('handles arrays in response body', async () => {
@@ -54,7 +56,7 @@ describe('middleware/responseSanitizer', () => {
       { name: 'Alice', _private: 'secret' },
       { name: 'Bob', __v: 2 },
     ]);
-    expect(res.json).toHaveBeenCalledWith([
+    expect(res.sentJson).toHaveBeenCalledWith([
       { name: 'Alice' },
       { name: 'Bob' },
     ]);
@@ -70,7 +72,7 @@ describe('middleware/responseSanitizer', () => {
       token: 'abc123',
       _metadata: { version: '1.0' },
     });
-    expect(res.json).toHaveBeenCalledWith({
+    expect(res.sentJson).toHaveBeenCalledWith({
       user: { name: 'Alice' },
       token: 'abc123',
     });
@@ -82,7 +84,7 @@ describe('middleware/responseSanitizer', () => {
     const res = mockRes();
     sanitizer(req, res, mockNext);
     res.json('just a string');
-    expect(res.json).toHaveBeenCalledWith('just a string');
+    expect(res.sentJson).toHaveBeenCalledWith('just a string');
   });
 
   it('calls next()', async () => {

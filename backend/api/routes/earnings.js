@@ -18,7 +18,8 @@ const router = express.Router();
  * @openapi
  * /api/earnings/summary:
  *   get:
- *     tags: [Driver]
+ *     tags:
+ *       - Driver
  *     summary: Driver earnings summary
  *     description: >
  *       Aggregated gross, deductions and net earnings for the authenticated
@@ -28,21 +29,27 @@ const router = express.Router();
  *     parameters:
  *       - in: query
  *         name: period
+ *         required: false
  *         schema:
  *           type: string
- *           enum: [weekly, monthly]
+ *           enum:
+ *             - weekly
+ *             - monthly
  *           default: monthly
+ *         description: Reporting period for the earnings summary.
  *     responses:
  *       200:
- *         description: Earnings summary for the authenticated driver
+ *         description: Earnings summary for the authenticated driver.
  *       400:
- *         description: Invalid period
+ *         description: Invalid period.
  *       401:
- *         description: Missing or invalid authentication token
+ *         description: Missing or invalid authentication token.
  *       403:
- *         description: Caller is not a driver
+ *         description: Caller is not authorized to view driver earnings.
+ *       429:
+ *         description: Too many requests.
  *       500:
- *         description: Internal Server Error
+ *         description: Internal Server Error.
  */
 router.get(
   '/summary',
@@ -57,14 +64,21 @@ router.get(
     try {
       const periodStart = getPeriodStart(period);
 
-      // Query trips through the caller's user-scoped client so the trips RLS
-      // policy (driver_id = get_profile_id()) sees the authenticated driver's
-      // identity. The shared anon client has no identity and can never return
-      // the driver's rows.
+      /*
+       * Use a Supabase client authenticated with the caller's JWT.
+       *
+       * This is important because the trips table is protected by RLS.
+       * The authenticated user's identity must reach Supabase so that
+       * the RLS policy can verify that the requested trips belong to
+       * the current driver.
+       */
       const userClient = createUserClient(req.token);
+
       const { data: trips, error } = await userClient
         .from('trips')
-        .select('trip_display_id, trip_date, distance, total_earnings, fuel_deducted')
+        .select(
+          'trip_display_id, trip_date, distance, total_earnings, fuel_deducted'
+        )
         .eq('driver_id', driverId)
         .eq('status', 'completed')
         .gte('trip_date', periodStart.toISOString().split('T')[0])
@@ -73,22 +87,44 @@ router.get(
 
       if (error) {
         logger.error(
-          { err: error, driverId, period },
+          {
+            err: error,
+            driverId,
+            period,
+          },
           '[earnings] Failed to fetch trips for summary'
         );
+
         return res.status(500).json({
           success: false,
           error: 'Failed to fetch earnings summary.',
         });
       }
 
-      return res.json({
+      const summary = buildEarningsSummary(
+        trips || [],
+        period,
+        driverId
+      );
+
+      return res.status(200).json({
         success: true,
-        data: buildEarningsSummary(trips, period, driverId),
+        data: summary,
       });
     } catch (err) {
-      logger.error({ err, driverId, period }, '[earnings] Earnings summary error');
-      return res.status(500).json({ success: false, error: 'Internal server error' });
+      logger.error(
+        {
+          err,
+          driverId,
+          period,
+        },
+        '[earnings] Earnings summary error'
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: 'Internal server error',
+      });
     }
   }
 );

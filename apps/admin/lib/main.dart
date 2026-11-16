@@ -1,7 +1,8 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'utils/support_ticket_parser.dart';
+import 'screens/analytics_dashboard_screen.dart';
 
 /// Backend connection settings, injected at build time via --dart-define.
 class AdminApiConfig {
@@ -55,6 +56,7 @@ class _DashboardShellState extends State<DashboardShell> {
   int _selectedIndex = 0;
 
   final List<Widget> _pages = const [
+    AnalyticsDashboardScreen(),
     UsersView(),
     TrucksView(),
     SupportTicketsView(),
@@ -78,6 +80,11 @@ class _DashboardShellState extends State<DashboardShell> {
             },
             labelType: NavigationRailLabelType.all,
             destinations: const [
+              NavigationRailDestination(
+                icon: Icon(Icons.analytics_outlined),
+                selectedIcon: Icon(Icons.analytics),
+                label: Text('Analytics'),
+              ),
               NavigationRailDestination(
                 icon: Icon(Icons.people_outline),
                 selectedIcon: Icon(Icons.people),

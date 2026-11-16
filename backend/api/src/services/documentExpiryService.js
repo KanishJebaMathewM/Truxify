@@ -2,68 +2,12 @@ import { supabaseAdmin, redisClient } from '../config/db.js';
 import { sendPushNotification } from './notificationService.js';
 import logger from '../middleware/logger.js';
 import crypto from 'crypto';
-// backend/api/src/services/documentExpiryService.js (Excerpt)
 
-import { v4 as uuidv4 } from 'uuid';
-
-// Lua script for atomic compare-and-delete (ensures we only delete our own lock)
-const RELEASE_LOCK_LUA = `
-  if redis.call("get", KEYS[1]) == ARGV[1] then
-      return redis.call("del", KEYS[1])
-  else
-      return 0
-  end
-`;
-
-export async function runDocumentExpiryWorker() {
-  const lockKey = 'lock:document_expiry_worker';
-  const lockToken = uuidv4();
-  const lockTtlSeconds = 300; // 5 minutes
-
-  // 1. Acquire lock atomically with unique token
-  const acquired = await redisClient.set(lockKey, lockToken, 'EX', lockTtlSeconds, 'NX');
-  if (!acquired) {
-    logger.info('Document expiry worker skipped: lock already held by another instance.');
-    return;
-  }
-
-  try {
-    logger.info({ lockToken }, 'Document expiry worker acquired lock. Processing batch...');
-    // ... document expiry query and notification logic ...
-  } catch (err) {
-    logger.error({ err }, 'Error occurred during document expiry processing');
-  } finally {
-    // 2. Safely release lock using atomic Lua script (prevents deleting another worker's lock)
-    try {
-      await redisClient.eval(RELEASE_LOCK_LUA, 1, lockKey, lockToken);
-      logger.info('Document expiry worker released lock safely.');
-    } catch (releaseErr) {
-      logger.error({ err: releaseErr }, 'Failed to release document expiry lock safely');
-    }
-  }
-}
 const REMINDER_WINDOWS = [
   { days: 30, label: '30 days' },
   { days: 14, label: '14 days' },
   { days: 7, label: '7 days' },
 ];
-// backend/api/src/services/documentExpiryService.js (Excerpt)
-
-// BEFORE:
-// await sendPushNotification({
-//   userId,
-//   notif_type: 'document_expiry',
-//   title: 'Document Expiring Soon',
-//   body: 'Your uploaded document is about to expire.'
-// });
-
-// FIXED: Use valid 'document' notif_type per issue #6964
-await sendPushNotification({
-  userId,
-  notif_type: 'document',
-  title: 'Document Expiring Soon',
-  body: 'Your uploaded document is about to expire.',
-});
 const DEFAULT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const DOCS_PAGE_SIZE = 1000;
 const LOCK_KEY = 'document:expiry:worker:lock';

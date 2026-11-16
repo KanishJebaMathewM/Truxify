@@ -1,4 +1,3 @@
-
 import base64
 import binascii
 import json
@@ -15,10 +14,6 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from policy_builder import CpAbePolicyBuilder
 
 
-# ==================================================
-# CRYPTOGRAPHIC CONFIGURATION
-# ==================================================
-
 NONCE_SIZE = 12
 TAG_SIZE = 16
 KEY_SIZE = 32
@@ -33,22 +28,6 @@ DEFAULT_KEY_ID = "default"
 
 
 class CpAbeCipherEngine:
-    """
-    Policy-gated document encryption engine.
-
-    AES-256-GCM:
-        Authenticated document encryption.
-
-    HKDF-SHA256:
-        Derives independent document encryption keys.
-
-    PolicyBuilder:
-        Evaluates user attribute authorization.
-
-    Note:
-        This is a policy-gated encryption system,
-        not a standalone CP-ABE cryptographic scheme.
-    """
 
     def __init__(self, policy_builder=None):
         self.policy_builder = (
@@ -56,13 +35,8 @@ class CpAbeCipherEngine:
             else CpAbePolicyBuilder()
         )
 
-    # ==================================================
-    # VALIDATION
-    # ==================================================
-
     @staticmethod
     def _validate_policy(policy: str) -> str:
-
         if not isinstance(policy, str):
             raise TypeError("Policy must be a string.")
 
@@ -80,21 +54,19 @@ class CpAbeCipherEngine:
     def _validate_document_id(
         document_id: Optional[str]
     ) -> Optional[str]:
-
         if document_id is None:
             return None
 
         if not isinstance(document_id, str):
             raise TypeError("Document ID must be a string.")
 
-        if not document_id or len(document_id) > 256:
+        if not document_id.strip() or len(document_id) > 256:
             raise ValueError("Invalid document ID.")
 
         return document_id
 
     @staticmethod
     def _validate_key_id(key_id: str) -> str:
-
         if not isinstance(key_id, str):
             raise TypeError("Key ID must be a string.")
 
@@ -105,7 +77,6 @@ class CpAbeCipherEngine:
 
     @staticmethod
     def _validate_attributes(attributes: Set[str]) -> Set[str]:
-
         if not isinstance(attributes, set):
             raise TypeError("Attributes must be a set.")
 
@@ -117,12 +88,7 @@ class CpAbeCipherEngine:
 
         return attributes
 
-    # ==================================================
-    # MASTER KEY MANAGEMENT
-    # ==================================================
-
     def _get_master_secret(self, key_id: str) -> bytes:
-
         env_name = f"ABE_MASTER_SECRET_{key_id.upper()}"
 
         master_secret = os.environ.get(env_name)
@@ -144,17 +110,12 @@ class CpAbeCipherEngine:
 
         return secret_bytes
 
-    # ==================================================
-    # AUTHENTICATED METADATA
-    # ==================================================
-
     @staticmethod
     def _build_aad(
         policy: str,
         key_id: str,
         document_id: Optional[str]
     ) -> bytes:
-
         metadata = {
             "version": ENVELOPE_VERSION,
             "algorithm": ALGORITHM,
@@ -170,17 +131,12 @@ class CpAbeCipherEngine:
             ensure_ascii=False
         ).encode("utf-8")
 
-    # ==================================================
-    # KEY DERIVATION
-    # ==================================================
-
     def _derive_key(
         self,
         policy: str,
         nonce: bytes,
         key_id: str
     ) -> bytes:
-
         if len(nonce) != NONCE_SIZE:
             raise ValueError("Invalid nonce length.")
 
@@ -195,10 +151,6 @@ class CpAbeCipherEngine:
                 f"{key_id}:{policy}"
             ).encode("utf-8")
         ).derive(master_secret)
-
-    # ==================================================
-    # ENCRYPTION
-    # ==================================================
 
     def encrypt_document(
         self,
@@ -218,31 +170,26 @@ class CpAbeCipherEngine:
         document_id = self._validate_document_id(document_id)
         key_id = self._validate_key_id(key_id)
 
-        # Generate a fresh random nonce.
         nonce = os.urandom(NONCE_SIZE)
 
-        # Derive document encryption key.
         key = self._derive_key(
             policy,
             nonce,
             key_id
         )
 
-        # Authenticate metadata.
         aad = self._build_aad(
             policy,
             key_id,
             document_id
         )
 
-        # Encrypt using AES-256-GCM.
         encrypted_data = AESGCM(key).encrypt(
             nonce,
             plaintext_bytes,
             aad
         )
 
-        # Combine nonce and encrypted data.
         encrypted = nonce + encrypted_data
 
         return {
@@ -255,10 +202,6 @@ class CpAbeCipherEngine:
                 encrypted
             ).decode("ascii")
         }
-
-    # ==================================================
-    # DECRYPTION
-    # ==================================================
 
     def decrypt_document(
         self,
@@ -312,13 +255,11 @@ class CpAbeCipherEngine:
         if len(ciphertext_b64) > max_encoded_size:
             raise ValueError("Ciphertext is too large.")
 
-        # Decode Base64.
         try:
             encrypted = base64.b64decode(
                 ciphertext_b64,
                 validate=True
             )
-
         except (ValueError, TypeError, binascii.Error):
             raise ValueError(
                 "Invalid Base64 ciphertext."
@@ -332,18 +273,11 @@ class CpAbeCipherEngine:
         ):
             raise ValueError("Ciphertext exceeds maximum size.")
 
-        # --------------------------------------------------
-        # ATTRIBUTE AUTHORIZATION
-        # --------------------------------------------------
-
         try:
-            authorized = (
-                self.policy_builder.evaluate_user_attributes(
-                    user_attributes,
-                    policy
-                )
+            authorized = self.policy_builder.evaluate_user_attributes(
+                user_attributes,
+                policy
             )
-
         except Exception:
             raise ValueError(
                 "Unable to evaluate access policy."
@@ -353,10 +287,6 @@ class CpAbeCipherEngine:
             raise PermissionError(
                 "User attributes do not satisfy access policy."
             )
-
-        # --------------------------------------------------
-        # CRYPTOGRAPHIC DECRYPTION
-        # --------------------------------------------------
 
         nonce = encrypted[:NONCE_SIZE]
         ciphertext = encrypted[NONCE_SIZE:]
@@ -374,22 +304,15 @@ class CpAbeCipherEngine:
         )
 
         try:
-            plaintext = AESGCM(key).decrypt(
+            return AESGCM(key).decrypt(
                 nonce,
                 ciphertext,
                 aad
             )
-
-            return plaintext
-
         except InvalidTag:
             raise ValueError(
                 "Decryption failed: authentication verification failed."
             ) from None
 
-
-# ==================================================
-# SHARED ENGINE INSTANCE
-# ==================================================
 
 abe_cipher = CpAbeCipherEngine()

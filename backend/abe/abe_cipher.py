@@ -31,23 +31,30 @@ MAX_CIPHERTEXT_SIZE = 100 * 1024 * 1024
 
 DEFAULT_KEY_ID = "default"
 
+KEY_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
 
 class CpAbeCipherEngine:
     """
     Policy-gated document encryption engine.
 
-    Uses:
-        AES-256-GCM for authenticated encryption.
-        HKDF-SHA256 for per-document key derivation.
-        PolicyBuilder for attribute authorization.
+    AES-256-GCM:
+        Authenticated document encryption.
+
+    HKDF-SHA256:
+        Per-document key derivation.
+
+    CpAbePolicyBuilder:
+        Attribute-based authorization.
 
     IMPORTANT:
-        This implementation is not a standalone CP-ABE
-        cryptographic construction. Attribute-based access
-        is enforced by the policy authorization layer.
+        This is not a standalone cryptographic CP-ABE
+        implementation. Authorization is enforced by
+        the application policy layer.
     """
 
     def __init__(self, policy_builder=None):
+
         self.policy_builder = (
             policy_builder or CpAbePolicyBuilder()
         )
@@ -94,7 +101,7 @@ class CpAbeCipherEngine:
         if not isinstance(key_id, str):
             raise TypeError("Key ID must be a string.")
 
-        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", key_id):
+        if not KEY_ID_PATTERN.fullmatch(key_id):
             raise ValueError("Invalid key ID.")
 
         return key_id
@@ -105,36 +112,38 @@ class CpAbeCipherEngine:
     ) -> Set[str]:
 
         if not isinstance(user_attributes, set):
-            raise TypeError(
-                "User attributes must be a set."
-            )
+            raise TypeError("User attributes must be a set.")
 
-        if not all(
-            isinstance(attr, str) and attr.strip()
+        if any(
+            not isinstance(attr, str)
+            or not attr.strip()
             for attr in user_attributes
         ):
-            raise TypeError(
-                "User attributes must contain non-empty strings."
+            raise ValueError(
+                "Attributes must contain non-empty strings."
             )
 
-        return user_attributes
+        return {
+            attr.strip()
+            for attr in user_attributes
+        }
+
+    @staticmethod
+    def _validate_plaintext(plaintext_bytes: bytes):
+
+        if not isinstance(plaintext_bytes, bytes):
+            raise TypeError("Plaintext must be bytes.")
+
+        if len(plaintext_bytes) > MAX_CIPHERTEXT_SIZE:
+            raise ValueError(
+                "Document exceeds maximum encryption size."
+            )
 
     # --------------------------------------------------
     # MASTER KEY MANAGEMENT
     # --------------------------------------------------
 
     def _get_master_secret(self, key_id: str) -> bytes:
-        """
-        Retrieves a master secret using a key identifier.
-
-        Environment variables:
-            ABE_MASTER_SECRET_DEFAULT
-            ABE_MASTER_SECRET_PRODUCTION
-            ABE_MASTER_SECRET_BACKUP
-
-        Falls back to ABE_MASTER_SECRET for the default
-        key ID to preserve existing deployments.
-        """
 
         env_name = f"ABE_MASTER_SECRET_{key_id.upper()}"
 
@@ -153,8 +162,6 @@ class CpAbeCipherEngine:
 
         secret_bytes = master_secret.encode("utf-8")
 
-        # Minimum input length. Use a randomly generated
-        # secret with at least 32 bytes of entropy.
         if len(secret_bytes) < KEY_SIZE:
             raise RuntimeError(
                 "Master secret must contain at least "
@@ -173,12 +180,6 @@ class CpAbeCipherEngine:
         key_id: str,
         document_id: Optional[str],
     ) -> bytes:
-        """
-        Binds encryption metadata to the ciphertext.
-
-        Changing the policy, key ID, document ID, or
-        envelope version invalidates authentication.
-        """
 
         metadata = {
             "version": ENVELOPE_VERSION,
@@ -201,9 +202,8 @@ class CpAbeCipherEngine:
 
     def _derive_key(
         self,
-        policy_str: str,
         nonce: bytes,
-        key_id: str = DEFAULT_KEY_ID,
+        key_id: str,
     ) -> bytes:
 
         if len(nonce) != NONCE_SIZE:
@@ -216,8 +216,8 @@ class CpAbeCipherEngine:
             length=KEY_SIZE,
             salt=nonce,
             info=(
-                f"truxify-cpabe:v{ENVELOPE_VERSION}:"
-                f"{key_id}:{policy_str}"
+                f"truxify-document-encryption:"
+                f"v{ENVELOPE_VERSION}:{key_id}"
             ).encode("utf-8"),
         ).derive(master_secret)
 
@@ -233,10 +233,7 @@ class CpAbeCipherEngine:
         key_id: str = DEFAULT_KEY_ID,
     ) -> Dict:
 
-        if not isinstance(plaintext_bytes, bytes):
-            raise TypeError(
-                "Plaintext must be bytes."
-            )
+        self._validate_plaintext(plaintext_bytes)
 
         policy_str = self._validate_policy(policy_str)
 
@@ -246,22 +243,13 @@ class CpAbeCipherEngine:
 
         key_id = self._validate_key_id(key_id)
 
-        if len(plaintext_bytes) > MAX_CIPHERTEXT_SIZE:
-            raise ValueError(
-                "Document exceeds maximum encryption size."
-            )
-
-        # Fresh cryptographically secure nonce.
         nonce = os.urandom(NONCE_SIZE)
 
-        # Derive an independent document encryption key.
         key = self._derive_key(
-            policy_str,
             nonce,
             key_id,
         )
 
-        # Authenticate all security-relevant metadata.
         aad = self._build_aad(
             policy_str,
             key_id,
@@ -274,8 +262,6 @@ class CpAbeCipherEngine:
             aad,
         )
 
-        # Envelope:
-        # nonce (12 bytes) + ciphertext + authentication tag
         encrypted = nonce + ciphertext
 
         return {
@@ -295,39 +281,60 @@ class CpAbeCipherEngine:
 
     def decrypt_document(
         self,
-        ciphertext_b64: str,
-        policy_str: str,
+        envelope: Dict,
         user_attributes: Set[str],
-        document_id: Optional[str] = None,
-        key_id: str = DEFAULT_KEY_ID,
-        version: int = ENVELOPE_VERSION,
     ) -> bytes:
 
-        if not isinstance(ciphertext_b64, str):
-            raise TypeError(
-                "Ciphertext must be a string."
-            )
+        if not isinstance(envelope, dict):
+            raise TypeError("Envelope must be a dictionary.")
 
-        policy_str = self._validate_policy(policy_str)
+        required_fields = {
+            "version",
+            "algorithm",
+            "key_id",
+            "policy",
+            "document_id",
+            "ciphertext_b64",
+        }
+
+        if not required_fields.issubset(envelope):
+            raise ValueError("Incomplete encryption envelope.")
+
+        version = envelope["version"]
+
+        if (
+            isinstance(version, bool)
+            or version != ENVELOPE_VERSION
+        ):
+            raise ValueError("Unsupported envelope version.")
+
+        if envelope["algorithm"] != ALGORITHM:
+            raise ValueError("Unsupported encryption algorithm.")
+
+        policy_str = self._validate_policy(
+            envelope["policy"]
+        )
+
+        key_id = self._validate_key_id(
+            envelope["key_id"]
+        )
+
+        document_id = self._validate_document_id(
+            envelope["document_id"]
+        )
+
+        ciphertext_b64 = envelope["ciphertext_b64"]
+
+        if not isinstance(ciphertext_b64, str):
+            raise TypeError("Ciphertext must be a string.")
 
         user_attributes = self._validate_attributes(
             user_attributes
         )
 
-        document_id = self._validate_document_id(
-            document_id
-        )
-
-        key_id = self._validate_key_id(key_id)
-
-        if version != ENVELOPE_VERSION:
-            raise ValueError(
-                "Unsupported encryption envelope version."
-            )
-
-        # Reject oversized encoded input before decoding.
         max_encoded_size = 4 * (
-            (NONCE_SIZE + TAG_SIZE + MAX_CIPHERTEXT_SIZE + 2) // 3
+            (NONCE_SIZE + TAG_SIZE + MAX_CIPHERTEXT_SIZE + 2)
+            // 3
         )
 
         if len(ciphertext_b64) > max_encoded_size:
@@ -344,9 +351,7 @@ class CpAbeCipherEngine:
             ) from None
 
         if len(encrypted) < NONCE_SIZE + TAG_SIZE:
-            raise ValueError(
-                "Ciphertext is too short."
-            )
+            raise ValueError("Ciphertext is too short.")
 
         if len(encrypted) > (
             NONCE_SIZE + TAG_SIZE + MAX_CIPHERTEXT_SIZE
@@ -354,7 +359,7 @@ class CpAbeCipherEngine:
             raise ValueError("Ciphertext is too large.")
 
         # --------------------------------------------------
-        # ATTRIBUTE-BASED AUTHORIZATION
+        # ATTRIBUTE AUTHORIZATION
         # --------------------------------------------------
 
         try:
@@ -365,7 +370,6 @@ class CpAbeCipherEngine:
                 )
             )
         except Exception:
-            # Log the original exception internally.
             raise ValueError(
                 "Unable to evaluate access policy."
             ) from None
@@ -376,14 +380,14 @@ class CpAbeCipherEngine:
             )
 
         # --------------------------------------------------
-        # CRYPTOGRAPHIC DECRYPTION
+        # AUTHENTICATED DECRYPTION
         # --------------------------------------------------
 
         nonce = encrypted[:NONCE_SIZE]
+
         ciphertext = encrypted[NONCE_SIZE:]
 
         key = self._derive_key(
-            policy_str,
             nonce,
             key_id,
         )
@@ -395,11 +399,13 @@ class CpAbeCipherEngine:
         )
 
         try:
-            return AESGCM(key).decrypt(
+            plaintext = AESGCM(key).decrypt(
                 nonce,
                 ciphertext,
                 aad,
             )
+
+            return plaintext
 
         except InvalidTag:
             raise ValueError(

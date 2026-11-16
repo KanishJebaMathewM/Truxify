@@ -1,15 +1,20 @@
+
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../models/app_models.dart';
 import '../core/offline/cache/cache_manager.dart';
 
 class TruxifyController extends ChangeNotifier {
   static const String _themeModeKey = 'theme_mode';
+
   int currentTab = 0;
   int ordersTabIndex = 0;
+
   RouteDraft? pendingRouteDraft;
+
   ThemeMode _themeMode = ThemeMode.system;
   String? _globalError;
   bool _isInitialized = false;
@@ -21,11 +26,15 @@ class TruxifyController extends ChangeNotifier {
   Locale get locale => _locale;
 
   void setGlobalError(String? error) {
+    if (_globalError == error) return;
+
     _globalError = error;
     notifyListeners();
   }
 
   void clearGlobalError() {
+    if (_globalError == null) return;
+
     _globalError = null;
     notifyListeners();
   }
@@ -38,14 +47,19 @@ class TruxifyController extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       final savedTheme = prefs.getString(_themeModeKey);
+
       _themeMode = ThemeMode.values.firstWhere(
         (mode) => mode.name == savedTheme,
         orElse: () => ThemeMode.system,
       );
-      _isInitialized = true;
-      notifyListeners();
-    } catch (e) {
+    } catch (e, stackTrace) {
       _globalError = 'Failed to load theme: $e';
+      developer.log(
+        'Failed to load theme preference',
+        error: e,
+        stackTrace: stackTrace,
+      );
+    } finally {
       _isInitialized = true;
       notifyListeners();
     }
@@ -53,13 +67,22 @@ class TruxifyController extends ChangeNotifier {
 
   Future<void> setThemeMode(ThemeMode mode) async {
     if (_themeMode == mode) return;
+
     _themeMode = mode;
     notifyListeners();
+
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_themeModeKey, mode.name);
-    } catch (e) {
+    } catch (e, stackTrace) {
       _globalError = 'Failed to save theme: $e';
+
+      developer.log(
+        'Failed to save theme preference',
+        error: e,
+        stackTrace: stackTrace,
+      );
+
       notifyListeners();
     }
   }
@@ -67,6 +90,7 @@ class TruxifyController extends ChangeNotifier {
   void setTab(int index) {
     if (!_validateTabIndex(index)) return;
     if (currentTab == index) return;
+
     currentTab = index;
     notifyListeners();
   }
@@ -84,13 +108,17 @@ class TruxifyController extends ChangeNotifier {
   }
 
   void openOrders({int tabIndex = 0}) {
+    if (!_validateTabIndex(tabIndex)) return;
+
     ordersTabIndex = tabIndex;
     currentTab = 2;
     notifyListeners();
   }
 
   void setOrdersTab(int index) {
+    if (!_validateTabIndex(index)) return;
     if (ordersTabIndex == index) return;
+
     ordersTabIndex = index;
     notifyListeners();
   }
@@ -99,42 +127,61 @@ class TruxifyController extends ChangeNotifier {
     try {
       final cacheManager = CacheManager();
       await cacheManager.open();
+
       final settings = await cacheManager.getSettings();
-      final selectedCode = settings['language']?['code']?.toString() ?? 'en';
+      final selectedCode =
+          settings['language']?['code']?.toString() ?? 'en';
+
       _locale = Locale(selectedCode);
       notifyListeners();
-    } catch (e) {
-      developer.log('Failed to load language preference, falling back to English: $e');
+    } catch (e, stackTrace) {
+      developer.log(
+        'Failed to load language preference. Falling back to English.',
+        error: e,
+        stackTrace: stackTrace,
+      );
     }
   }
 
   Future<void> setLocale(String languageCode) async {
     if (_locale.languageCode == languageCode) return;
+
     _locale = Locale(languageCode);
     notifyListeners();
 
     try {
       final cacheManager = CacheManager();
       await cacheManager.open();
+
       await cacheManager.cacheSettings({
         'language': {
           'code': languageCode,
           'name': _nameForLanguageCode(languageCode),
         },
       });
-    } catch (e) {
-      developer.log('Failed to save language preference: $e');
+    } catch (e, stackTrace) {
+      developer.log(
+        'Failed to save language preference',
+        error: e,
+        stackTrace: stackTrace,
+      );
     }
   }
 
   String _nameForLanguageCode(String code) {
     switch (code) {
-      case 'en': return 'English';
-      case 'hi': return 'Hindi';
-      case 'ta': return 'Tamil';
-      case 'kn': return 'Kannada';
-      case 'mr': return 'Marathi';
-      default: return 'English';
+      case 'en':
+        return 'English';
+      case 'hi':
+        return 'Hindi';
+      case 'ta':
+        return 'Tamil';
+      case 'kn':
+        return 'Kannada';
+      case 'mr':
+        return 'Marathi';
+      default:
+        return 'English';
     }
   }
 }
@@ -147,8 +194,15 @@ class TruxifyScope extends InheritedNotifier<TruxifyController> {
   }) : super(notifier: controller);
 
   static TruxifyController of(BuildContext context) {
-    final scope = context.dependOnInheritedWidgetOfExactType<TruxifyScope>();
-    assert(scope != null, 'TruxifyScope not found in widget tree.');
+    final scope =
+        context.dependOnInheritedWidgetOfExactType<TruxifyScope>();
+
+    assert(
+      scope != null,
+      'TruxifyScope not found in widget tree.',
+    );
+
     return scope!.notifier!;
   }
 }
+

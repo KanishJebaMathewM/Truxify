@@ -3,15 +3,18 @@
 import axios from 'axios';
 import CircuitBreaker from 'opossum';
 import logger from '../middleware/logger.js';
+import { getCorrelationId } from '../middleware/correlationId.js';
 
 const ML_BASE_URL = process.env.ML_ENGINE_URL || 'http://localhost:8000';
 
 async function callMLEndpoint(endpoint, payload) {
+  const correlationId = getCorrelationId();
   const response = await axios.post(`${ML_BASE_URL}/${endpoint}`, payload, {
     timeout: 3000, // 3s hard timeout
     headers: {
       'Authorization': `Bearer ${process.env.ML_API_KEY || ''}`,
       'Content-Type': 'application/json',
+      ...(correlationId ? { 'X-Correlation-ID': correlationId } : {}),
     },
   });
   return response.data;

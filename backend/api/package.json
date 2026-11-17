@@ -65,6 +65,7 @@
     "swagger-jsdoc": "^6.3.0",
     "swagger-ui-express": "^5.0.1",
     "twilio": "^5.13.1",
+    "winston": "^3.19.0",
     "ws": "^8.21.3",
     "zod": "^4.6.7"
   },

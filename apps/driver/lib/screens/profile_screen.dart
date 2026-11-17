@@ -72,6 +72,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       case 'ta': return 'Tamil';
       case 'kn': return 'Kannada';
       case 'mr': return 'Marathi';
+      case 'es': return 'Español';
       default: return 'English';
     }
   }
@@ -83,6 +84,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       case 'Tamil': return 'ta';
       case 'Kannada': return 'kn';
       case 'Marathi': return 'mr';
+      case 'Español': return 'es';
       default: return 'en';
     }
   }
@@ -386,7 +388,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  ...['English', 'Hindi (हिंदी)', 'Tamil (தமிழ்)', 'Kannada (ಕನ್ನಡ)', 'Marathi (मराठी)']
+                  ...['English', 'Hindi (हिंदी)', 'Tamil (தமிழ்)', 'Kannada (ಕನ್ನಡ)', 'Marathi (मराठी)', 'Español']
                       .map((lang) {
                     final isSelected = lang.startsWith(selectedLang);
                     return GestureDetector(
@@ -1179,7 +1181,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                   trailing: DropdownButton<String>(
-                    value: ['en', 'hi', 'ta'].contains(_langCodeForName(_currentLanguage))
+                    value: ['en', 'hi', 'ta', 'es'].contains(_langCodeForName(_currentLanguage))
                         ? _langCodeForName(_currentLanguage)
                         : 'en',
                     underline: const SizedBox(),
@@ -1195,6 +1197,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       DropdownMenuItem(
                         value: 'ta',
                         child: Text(AppLocalizations.of(context)!.tamil),
+                      ),
+                      const DropdownMenuItem(
+                        value: 'es',
+                        child: Text('Español'),
                       ),
                     ],
                     onChanged: (newCode) async {
@@ -1437,3 +1443,4 @@ class _MetricColumn extends StatelessWidget {
     );
   }
 }
+

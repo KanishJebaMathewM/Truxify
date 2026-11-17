@@ -1,3 +1,4 @@
+
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
@@ -15,75 +16,42 @@ contract Escrow {
         uint256 amount;
         EscrowStatus status;
     }
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
-contract Escrow {
-    struct EscrowDetails {
-        address customer;
-        address driver;
-        uint256 amount;
-        bool isDisputed;
-        uint256 disputeTimestamp;
-        bool isResolved;
-    }
-
-    // 7-day timeout window for admin/relayer dispute resolution
-    uint256 public constant DISPUTE_TIMELOCK = 7 days;
-
-    mapping(bytes32 => EscrowDetails) public escrows;
-
-    event DisputeRaised(bytes32 indexed bookingId, address indexed raisedBy, uint256 timestamp);
-    event DisputeTimeoutRefunded(bytes32 indexed bookingId, address indexed customer, uint256 amount);
-    event DisputeResolved(bytes32 indexed bookingId, address indexed winner, uint256 amount);
-
-    /**
-     * @notice Raises a dispute on an active escrow booking
-     */
-    function raiseDispute(bytes32 bookingId) external {
-        EscrowDetails storage escrow = escrows[bookingId];
-        require(msg.sender == escrow.customer || msg.sender == escrow.driver, "Unauthorized");
-        require(!escrow.isResolved, "Escrow already resolved");
-        require(!escrow.isDisputed, "Dispute already active");
-
-        escrow.isDisputed = true;
-        escrow.disputeTimestamp = block.timestamp;
-
-        emit DisputeRaised(bookingId, msg.sender, block.timestamp);
-    }
-
-    /**
-     * @notice Allows customer to claim a refund if the relayer fails to resolve the dispute within the timelock window
-     */
-    function refundAfterDisputeTimeout(bytes32 bookingId) external {
-        EscrowDetails storage escrow = escrows[bookingId];
-        require(escrow.isDisputed, "Escrow is not in dispute");
-        require(!escrow.isResolved, "Escrow already resolved");
-        require(block.timestamp > escrow.disputeTimestamp + DISPUTE_TIMELOCK, "Dispute timelock has not expired");
-        require(msg.sender == escrow.customer, "Only customer can claim timeout refund");
-
-        escrow.isResolved = true;
-        escrow.isDisputed = false;
-
-        uint256 refundAmount = escrow.amount;
-        escrow.amount = 0;
-
-        (bool success, ) = payable(escrow.customer).call{value: refundAmount}("");
-        require(success, "ETH transfer failed");
-
-        emit DisputeTimeoutRefunded(bookingId, escrow.customer, refundAmount);
-    }
-}
 
     address public owner;
+
     mapping(address => bool) public authorizedRelayers;
     mapping(bytes32 => BookingEscrow) public escrows;
+
     bool private locked;
 
-    event RelayerUpdated(address indexed relayer, bool authorized);
-    event Deposited(bytes32 indexed bookingId, address indexed customer, address indexed driver, uint256 amount);
-    event Released(bytes32 indexed bookingId, address indexed driver, uint256 amount);
-    event Refunded(bytes32 indexed bookingId, address indexed customer, uint256 amount);
+    event OwnershipTransferred(
+        address indexed previousOwner,
+        address indexed newOwner
+    );
+
+    event RelayerUpdated(
+        address indexed relayer,
+        bool authorized
+    );
+
+    event Deposited(
+        bytes32 indexed bookingId,
+        address indexed customer,
+        address indexed driver,
+        uint256 amount
+    );
+
+    event Released(
+        bytes32 indexed bookingId,
+        address indexed driver,
+        uint256 amount
+    );
+
+    event Refunded(
+        bytes32 indexed bookingId,
+        address indexed customer,
+        uint256 amount
+    );
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner");
@@ -91,7 +59,10 @@ contract Escrow {
     }
 
     modifier onlyRelayer() {
-        require(authorizedRelayers[msg.sender], "Not authorized relayer");
+        require(
+            authorizedRelayers[msg.sender],
+            "Not authorized relayer"
+        );
         _;
     }
 
@@ -104,28 +75,67 @@ contract Escrow {
 
     constructor(address initialRelayer) {
         owner = msg.sender;
+
+        emit OwnershipTransferred(address(0), msg.sender);
+
         if (initialRelayer != address(0)) {
             authorizedRelayers[initialRelayer] = true;
             emit RelayerUpdated(initialRelayer, true);
         }
     }
 
-    function setRelayer(address relayer, bool authorized) external onlyOwner {
+    // Transfer contract ownership
+    function transferOwnership(address newOwner)
+        external
+        onlyOwner
+    {
+        require(newOwner != address(0), "Invalid owner");
+        require(newOwner != owner, "Already owner");
+
+        address previousOwner = owner;
+        owner = newOwner;
+
+        emit OwnershipTransferred(previousOwner, newOwner);
+    }
+
+    // Authorize or revoke relayers
+    function setRelayer(
+        address relayer,
+        bool authorized
+    ) external onlyOwner {
         require(relayer != address(0), "Invalid relayer");
+        require(
+            authorizedRelayers[relayer] != authorized,
+            "No change"
+        );
+
         authorizedRelayers[relayer] = authorized;
+
         emit RelayerUpdated(relayer, authorized);
     }
 
-    function deposit(bytes32 bookingId, address payable customer, address payable driver) external payable {
-        require(
-            msg.sender == customer || authorizedRelayers[msg.sender] || msg.sender == owner,
-            "Not authorized to deposit"
-        );
+    // Deposit funds into escrow
+    function deposit(
+        bytes32 bookingId,
+        address payable customer,
+        address payable driver
+    ) external payable {
         require(bookingId != bytes32(0), "Invalid booking");
         require(customer != address(0), "Invalid customer");
         require(driver != address(0), "Invalid driver");
         require(msg.value > 0, "Deposit required");
-        require(escrows[bookingId].status == EscrowStatus.None, "Escrow exists");
+
+        require(
+            msg.sender == customer ||
+            authorizedRelayers[msg.sender] ||
+            msg.sender == owner,
+            "Not authorized to deposit"
+        );
+
+        require(
+            escrows[bookingId].status == EscrowStatus.None,
+            "Escrow exists"
+        );
 
         escrows[bookingId] = BookingEscrow({
             customer: customer,
@@ -134,34 +144,69 @@ contract Escrow {
             status: EscrowStatus.Funded
         });
 
-        emit Deposited(bookingId, customer, driver, msg.value);
+        emit Deposited(
+            bookingId,
+            customer,
+            driver,
+            msg.value
+        );
     }
 
-    function releaseFunds(bytes32 bookingId) external onlyRelayer nonReentrant {
+    // Release payment to driver
+    function releaseFunds(bytes32 bookingId)
+        external
+        onlyRelayer
+        nonReentrant
+    {
         BookingEscrow storage booking = escrows[bookingId];
-        require(booking.status == EscrowStatus.Funded, "Escrow not funded");
+
+        require(
+            booking.status == EscrowStatus.Funded,
+            "Escrow not funded"
+        );
+
+        uint256 amount = booking.amount;
+        address payable driver = booking.driver;
+
+        require(amount > 0, "Invalid amount");
+        require(driver != address(0), "Invalid driver");
 
         booking.status = EscrowStatus.Released;
-        uint256 amount = booking.amount;
         booking.amount = 0;
 
-        (bool sent, ) = booking.driver.call{value: amount}("");
+        (bool sent, ) = driver.call{value: amount}("");
+
         require(sent, "Driver payout failed");
 
-        emit Released(bookingId, booking.driver, amount);
+        emit Released(bookingId, driver, amount);
     }
 
-    function refundFunds(bytes32 bookingId) external onlyRelayer nonReentrant {
+    // Refund payment to customer
+    function refundFunds(bytes32 bookingId)
+        external
+        onlyRelayer
+        nonReentrant
+    {
         BookingEscrow storage booking = escrows[bookingId];
-        require(booking.status == EscrowStatus.Funded, "Escrow not funded");
+
+        require(
+            booking.status == EscrowStatus.Funded,
+            "Escrow not funded"
+        );
+
+        uint256 amount = booking.amount;
+        address payable customer = booking.customer;
+
+        require(amount > 0, "Invalid amount");
+        require(customer != address(0), "Invalid customer");
 
         booking.status = EscrowStatus.Refunded;
-        uint256 amount = booking.amount;
         booking.amount = 0;
 
-        (bool sent, ) = booking.customer.call{value: amount}("");
+        (bool sent, ) = customer.call{value: amount}("");
+
         require(sent, "Customer refund failed");
 
-        emit Refunded(bookingId, booking.customer, amount);
+        emit Refunded(bookingId, customer, amount);
     }
 }

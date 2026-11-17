@@ -19,7 +19,14 @@ async def correlation_id_middleware(request: Request, call_next):
     return response
 
 # Mock or actual loaded models dictionary/list
-loaded_models = {"pricing": True, "eta": True, "demand": True, "matching": True}
+loaded_models = {
+    "pricing": True,
+    "eta": True,
+    "demand": True,
+    "matching": True,
+    "load_optimiser": True,
+}
+
 
 @app.get("/health")
 def health():

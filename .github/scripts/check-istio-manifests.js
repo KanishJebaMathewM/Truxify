@@ -1,53 +1,122 @@
+
 const fs = require('fs');
 const path = require('path');
 
-const dir = 'k8s/istio';
-const files = fs.readdirSync(dir).filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'));
+// Resolve the manifest directory relative to this script,
+// so the check works regardless of the current working directory.
+const dir = path.resolve(__dirname, '..', '..', 'k8s', 'istio');
 
 let failed = false;
 
-for (const file of files) {
-  const full = path.join(dir, file);
-  const content = fs.readFileSync(full, 'utf8');
+function reportError(message) {
+  console.error(`ERROR: ${message}`);
+  failed = true;
+}
 
-  if (content.charCodeAt(0) === 0xfeff) {
-    console.error(`UTF-8 BOM detected at the start of ${full}`);
-    failed = true;
+// Check whether the manifest directory exists.
+if (!fs.existsSync(dir)) {
+  reportError(`Manifest directory does not exist: ${dir}`);
+} else {
+  let files = [];
+
+  try {
+    files = fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter(
+        (entry) =>
+          entry.isFile() && /\.(yaml|yml)$/i.test(entry.name)
+      )
+      .map((entry) => entry.name)
+      .sort();
+  } catch (error) {
+    reportError(`Unable to read manifest directory: ${error.message}`);
   }
 
-  // A separator glued to the previous value (`minHealthPercent: 50---`) is not
-  // a separator at all: YAML reads the dashes as part of the scalar and the
-  // whole file collapses into one document, silently dropping every resource
-  // after the first. Report it directly — the duplicate-key check below would
-  // otherwise fire instead and point at the wrong cause.
-  content.split(/\r?\n/).forEach((line, idx) => {
-    if (/[^\s]---\s*$/.test(line)) {
-      console.error(
-        `Document separator "---" is not on its own line at ${full}:${idx + 1} — ` +
-          `"${line.trim()}". Every resource after this point is lost.`
-      );
-      failed = true;
+  if (!failed && files.length === 0) {
+    reportError(`No YAML manifests found in ${dir}`);
+  }
+
+  for (const file of files) {
+    const full = path.join(dir, file);
+    let content;
+
+    try {
+      content = fs.readFileSync(full, 'utf8');
+    } catch (error) {
+      reportError(`Unable to read ${full}: ${error.message}`);
+      continue;
     }
-  });
 
-  const documents = content.split(/^---\s*$/m).filter((doc) => doc.trim().length > 0);
+    // Check for UTF-8 BOM.
+    if (content.charCodeAt(0) === 0xfeff) {
+      reportError(`UTF-8 BOM detected at the start of ${full}`);
+    }
 
-  documents.forEach((doc, i) => {
-    const seen = new Set();
-    for (const line of doc.split(/\r?\n/)) {
-      const m = line.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*:/);
-      if (m) {
-        if (seen.has(m[1])) {
-          console.error(`Duplicate top-level mapping key "${m[1]}" in document ${i + 1} of ${full}`);
-          failed = true;
-        }
-        seen.add(m[1]);
+    const lines = content.split(/\r?\n/);
+
+    // Detect document separators incorrectly attached to values.
+    lines.forEach((line, index) => {
+      if (/\S---[ \t]*(?:#.*)?$/.test(line)) {
+        reportError(
+          `Document separator "---" is not on its own line ` +
+          `at ${full}:${index + 1} — "${line.trim()}". ` +
+          'Every resource after this point may be lost.'
+        );
       }
-    }
-  });
+    });
+
+    // Split documents using valid YAML document separator lines.
+    const documents = content
+      .split(/^---[ \t]*(?:#.*)?$/m)
+      .filter((doc) => doc.trim().length > 0);
+
+    documents.forEach((doc, documentIndex) => {
+      const seen = new Set();
+
+      for (const line of doc.split(/\r?\n/)) {
+        // Only inspect top-level mapping keys.
+        // Supports plain, single-quoted and double-quoted keys.
+        const match = line.match(
+          /^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[A-Za-z_][A-Za-z0-9_-]*)[ \t]*:/
+        );
+
+        if (!match) {
+          continue;
+        }
+
+        let key = match[1];
+
+        // Normalize quoted keys before checking for duplicates.
+        if (key.startsWith('"')) {
+          try {
+            key = JSON.parse(key);
+          } catch {
+            // Leave malformed quoted keys unchanged.
+          }
+        } else if (key.startsWith("'")) {
+          key = key.slice(1, -1).replace(/''/g, "'");
+        }
+
+        if (seen.has(key)) {
+          reportError(
+            `Duplicate top-level mapping key "${key}" ` +
+            `in document ${documentIndex + 1} of ${full}`
+          );
+        } else {
+          seen.add(key);
+        }
+      }
+    });
+  }
 }
 
 if (failed) {
-  process.exit(1);
+  console.error('\nIstio manifest validation failed.');
+  process.exitCode = 1;
+} else {
+  console.log(
+    'All k8s/istio manifests look clean: ' +
+    'no BOM, no misplaced document separators, ' +
+    'and no duplicate top-level mapping keys.'
+  );
 }
-console.log('All k8s/istio manifests look clean: no BOM, no duplicate top-level mapping keys.');

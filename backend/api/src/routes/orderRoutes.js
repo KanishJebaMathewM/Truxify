@@ -724,6 +724,26 @@ router.get('/load-offers', authenticate, userLimiter, getLoadOffers);
  *       400:
  *         description: Invalid input or bad bid amount
  */
+// backend/api/src/routes/orderRoutes.js (Excerpt around rate limiter definition)
+
+import rateLimit from 'express-rate-limit';
+
+// ✅ Configured verifyDeliveryLimiter to key on authenticated user ID with IP fallback
+export const verifyDeliveryLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 30,                  // limit each user to 30 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    // Key primarily by authenticated driver/user ID to prevent shared NAT blocking
+    return req.user?.id || req.ip;
+  },
+  message: {
+    success: false,
+    error: 'Too many delivery verification requests from this account, please try again later.',
+  },
+});
+router.put('/:id/milestones', authenticate, userLimiter, requirePolicy('milestone:update'), milestoneLimiter, requireIdempotency(3600), validateParams(paramIdSchema), validateBody(updateMilestoneSchema), async (req, res) => {
 router.post('/:id/bids', authenticate, userLimiter, requireRole(['driver']), bidLimiter, requireIdempotency(3600), validateParams(paramIdSchema), validateBody(submitBidSchema), async (req, res) => {
   const orderId = req.params.id;
   const { milestone } = req.body;
@@ -1081,21 +1101,21 @@ router.get('/:id/bids', authenticate, userLimiter, requireRole(['customer']), va
       return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
     }
 
-    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance, total_amount, version');
-    orderValidationService.assertOrderFound(order);
-    orderValidationService.assertCustomerOwnership(order, req.user.id);
-    orderValidationService.assertEscrowState(order, ['funding'], 'Order is not in funding state');
-    if (order.status === 'cancelled') return res.status(409).json({ error: 'Order is already cancelled. Cannot confirm deposit.' });
+    const confirmedOrder = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance, total_amount, version');
+    orderValidationService.assertOrderFound(confirmedOrder);
+    orderValidationService.assertCustomerOwnership(confirmedOrder, req.user.id);
+    orderValidationService.assertEscrowState(confirmedOrder, ['funding'], 'Order is not in funding state');
+    if (confirmedOrder.status === 'cancelled') return res.status(409).json({ error: 'Order is already cancelled. Cannot confirm deposit.' });
 
     const { data: customerProfile } = await orderRepository.findCustomerWallet(req.user.id);
     const customerWallet = customerProfile?.polygon_wallet_address ?? null;
-    const bookingId = order.escrow_booking_id || (order.order_display_id ? getEscrowBookingId(order.order_display_id) : orderId);
+    const bookingId = confirmedOrder.escrow_booking_id || (confirmedOrder.order_display_id ? getEscrowBookingId(confirmedOrder.order_display_id) : orderId);
 
     // Two-phase acceptance (#5724): once the deposit is verified on-chain we
     // finalize the driver assignment via accept_bid_tx. If that cannot be
     // completed the deposit is refunded and the order stays pending.
     const finalizeAcceptance = async () => {
-      const pending = order.pending_bid_acceptance;
+      const pending = confirmedOrder.pending_bid_acceptance;
       if (!pending) return;
       const { error: acceptErr } = await orderRepository.executeRpc('accept_bid_tx', {
         p_bid_id: pending.bid_id,
@@ -1119,7 +1139,7 @@ router.get('/:id/bids', authenticate, userLimiter, requireRole(['customer']), va
         // { txHash: null, bookingId, error } when the submit fails.
         let refundResult;
         try {
-          refundResult = await submitEscrowRefund(order.order_display_id);
+          refundResult = await submitEscrowRefund(confirmedOrder.order_display_id);
         } catch (refundErr) {
           logger.error('[confirm-deposit] Escrow refund also failed:', refundErr.message);
           refundResult = { error: refundErr.message };
@@ -1197,7 +1217,7 @@ router.get('/:id/bids', authenticate, userLimiter, requireRole(['customer']), va
       bookingId,
       txHash,
       customerWallet,
-      order.escrow_driver_wallet ?? null,
+      confirmedOrder.escrow_driver_wallet ?? null,
       expectedAmountWei
     );
 
@@ -1210,12 +1230,12 @@ router.get('/:id/bids', authenticate, userLimiter, requireRole(['customer']), va
       {
         escrow_status: 'funded',
         escrow_funding_error: null,
-        version: (order.version || 0) + 1,
+        version: (confirmedOrder.version || 0) + 1,
         updated_at: new Date().toISOString(),
       },
       [
         { op: 'eq', column: 'escrow_status', value: 'funding' },
-        { op: 'eq', column: 'version', value: order.version },
+        { op: 'eq', column: 'version', value: confirmedOrder.version },
       ],
       'id'
     );

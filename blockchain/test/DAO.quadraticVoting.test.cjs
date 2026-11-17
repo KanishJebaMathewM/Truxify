@@ -112,11 +112,13 @@ describe("DAO Quadratic Voting", function () {
 
     expect(await token.balanceOf(voter.address)).to.equal(balanceBefore - 25n);
 
+    await time.increase(3601);
     await dao.connect(voter).releaseVotes(0);
 
-    // Refund equals the full escrowed amount, so the voter is made whole.
+    // Refund equals the full escrowed amount, so the voter is made whole and
+    // the escrow ledger for the released votes is cleared.
     expect(await token.balanceOf(voter.address)).to.equal(balanceBefore);
-    expect(await dao.tokensHeld(0, voter.address)).to.equal(25n);
+    expect(await dao.tokensHeld(0, voter.address)).to.equal(0n);
   });
 
   it("reverts when releasing votes that were never cast", async function () {
@@ -125,6 +127,7 @@ describe("DAO Quadratic Voting", function () {
 
   it("reverts when releasing the same votes twice", async function () {
     await dao.connect(voter).voteQuadratic(0, 4); // cost 16
+    await time.increase(3601);
     await dao.connect(voter).releaseVotes(0);
 
     await expectRevert(dao.connect(voter).releaseVotes(0), "Already released");

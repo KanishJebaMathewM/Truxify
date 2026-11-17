@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../services/memory_reclaimer.dart';
 
 /// Virtualized Data Table Widget for Admin Analytics Dashboard
 class VirtualListTable extends StatefulWidget {
@@ -18,15 +17,6 @@ class VirtualListTable extends StatefulWidget {
 
 class _VirtualListTableState extends State<VirtualListTable> {
   final ScrollController _scrollController = ScrollController();
-  final WebGLMemoryReclaimerService _reclaimer = WebGLMemoryReclaimerService();
-
-  @override
-  void initState() {
-    super.initState();
-    _scrollController.addListener(() {
-      _reclaimer.purgeOffscreenCanvasMemory();
-    });
-  }
 
   @override
   void dispose() {

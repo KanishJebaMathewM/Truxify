@@ -1,0 +1,682 @@
+{
+  "@@locale": "es",
+  "appTitle": "Truxify",
+  "@appTitle": {
+    "description": "The title of the application"
+  },
+  "loginTitle": "Bienvenido a Truxify",
+  "@loginTitle": {
+    "description": "Greeting title on the login screen"
+  },
+  "bookLoadButton": "Reservar una carga",
+  "@bookLoadButton": {
+    "description": "Text for the book a load button"
+  },
+  "loadingText": "Cargando...",
+  "@loadingText": {
+    "description": "Generic loading indicator text"
+  },
+  "comingSoon": "{title} estará disponible pronto",
+  "@comingSoon": {
+    "description": "Coming soon message",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Feature"
+      }
+    }
+  },
+  "greetingMessage": "{greeting}, {displayName} 👋",
+  "@greetingMessage": {
+    "description": "Greeting message with name",
+    "placeholders": {
+      "greeting": {
+        "type": "String",
+        "example": "Good morning"
+      },
+      "displayName": {
+        "type": "String",
+        "example": "John"
+      }
+    }
+  },
+  "noActiveShipments": "No hay envíos activos",
+  "@noActiveShipments": {
+    "description": "Text shown when there are no active shipments"
+  },
+  "routeHistoryComingSoon": "El historial de rutas estará disponible pronto",
+  "@routeHistoryComingSoon": {
+    "description": "Text shown for route history placeholder"
+  },
+  "walletAddressUpdated": "Dirección de la cartera actualizada",
+  "@walletAddressUpdated": {
+    "description": "Success message when wallet address is updated"
+  },
+  "polygonWalletAddress": "Dirección de la cartera de Polygon",
+  "@polygonWalletAddress": {
+    "description": "Label for the Polygon wallet address field"
+  },
+  "saveWalletAddress": "Guardar dirección de la cartera",
+  "@saveWalletAddress": {
+    "description": "Button text to save wallet address"
+  },
+  "error": "Error: {errorMsg}",
+  "@error": {
+    "description": "Error message format",
+    "placeholders": {
+      "errorMsg": {
+        "type": "String",
+        "example": "Something went wrong"
+      }
+    }
+  },
+  "lightTheme": "Claro",
+  "@lightTheme": {
+    "description": "Light theme option"
+  },
+  "darkTheme": "Oscuro",
+  "@darkTheme": {
+    "description": "Dark theme option"
+  },
+  "retry": "Reintentar",
+  "@retry": {
+    "description": "Button text to retry a failed action"
+  },
+  "cancel": "Cancelar",
+  "@cancel": {
+    "description": "Button text to cancel an action"
+  },
+  "save": "Guardar",
+  "@save": {
+    "description": "Generic save button text"
+  },
+  "close": "Cerrar",
+  "@close": {
+    "description": "Button text to close a dialog or sheet"
+  },
+  "apply": "Aplicar",
+  "@apply": {
+    "description": "Button text to apply filters or settings"
+  },
+  "reset": "Restablecer",
+  "@reset": {
+    "description": "Button text to reset filters or form fields"
+  },
+  "search": "Buscar",
+  "@search": {
+    "description": "Placeholder text for search input"
+  },
+  "welcomeBack": "Bienvenido de nuevo",
+  "@welcomeBack": {
+    "description": "Subtitle greeting on login screen for returning users"
+  },
+  "signInSubtitle": "Inicia sesión para continuar",
+  "@signInSubtitle": {
+    "description": "Subtitle text below the login title"
+  },
+  "phoneNumber": "Número de teléfono",
+  "@phoneNumber": {
+    "description": "Label for phone number input field"
+  },
+  "sendOtp": "Enviar código",
+  "@sendOtp": {
+    "description": "Button text to send a one-time password"
+  },
+  "sendingOtp": "Enviando código...",
+  "@sendingOtp": {
+    "description": "Loading text while OTP is being sent"
+  },
+  "verifyingOtp": "Verificando...",
+  "@verifyingOtp": {
+    "description": "Loading text while OTP is being verified"
+  },
+  "verifyOtp": "Verificar código",
+  "@verifyOtp": {
+    "description": "Button text to verify the entered OTP"
+  },
+  "loginWithBiometrics": "Iniciar sesión con biometría",
+  "@loginWithBiometrics": {
+    "description": "Button text to login using biometric authentication"
+  },
+  "biometricsNotSupported": "Este dispositivo no admite biometría",
+  "@biometricsNotSupported": {
+    "description": "Message shown when device does not support biometric auth"
+  },
+  "biometricAuthSuccessful": "Autenticación biométrica correcta",
+  "@biometricAuthSuccessful": {
+    "description": "Success message after biometric authentication"
+  },
+  "biometricAuthRequiresSession": "No se ha encontrado ninguna sesión guardada. Inicia sesión primero con tu número de teléfono.",
+  "@biometricAuthRequiresSession": {
+    "description": "Message shown when biometric success has no cached session to re-authenticate"
+  },
+  "pleaseEnterPhone": "Introduce tu número de teléfono",
+  "@pleaseEnterPhone": {
+    "description": "Validation message when phone number field is empty"
+  },
+  "phoneDigitsOnly": "El número de teléfono solo puede contener dígitos",
+  "@phoneDigitsOnly": {
+    "description": "Validation message when phone number contains non-digit characters"
+  },
+  "phoneMustBeExactDigits": "El número de teléfono debe tener exactamente {digitCount} dígitos",
+  "@phoneMustBeExactDigits": {
+    "description": "Validation message when phone number does not have the exact required digit count",
+    "placeholders": {
+      "digitCount": {
+        "type": "int",
+        "example": "10"
+      }
+    }
+  },
+  "phoneMustBeDigits": "El número de teléfono solo puede contener dígitos",
+  "@phoneMustBeDigits": {
+    "description": "Validation message when phone number contains non-digit characters"
+  },
+  "verificationFailed": "La verificación ha fallado. Inténtalo de nuevo.",
+  "@verificationFailed": {
+    "description": "Generic verification failure message"
+  },
+  "phoneVerificationFailed": "La verificación del teléfono ha fallado. Inténtalo de nuevo.",
+  "@phoneVerificationFailed": {
+    "description": "Message shown when phone OTP verification fails"
+  },
+  "autoVerificationFailed": "La verificación automática ha fallado. Introduce el código manualmente.",
+  "@autoVerificationFailed": {
+    "description": "Message shown when automatic OTP detection fails"
+  },
+  "failedToSendOtp": "No se ha podido enviar el código. Inténtalo de nuevo.",
+  "@failedToSendOtp": {
+    "description": "Error message when OTP sending fails"
+  },
+  "enterOtp": "Introduce el código",
+  "@enterOtp": {
+    "description": "Label for OTP input field"
+  },
+  "sentTo": "Enviado a {phoneNumber}",
+  "@sentTo": {
+    "description": "Text indicating where the OTP was sent",
+    "placeholders": {
+      "phoneNumber": {
+        "type": "String",
+        "example": "+91 98765 43210"
+      }
+    }
+  },
+  "invalidOtp": "Código no válido. Compruébalo e inténtalo de nuevo.",
+  "@invalidOtp": {
+    "description": "Error message when entered OTP is invalid"
+  },
+  "verificationSessionExpired": "La sesión de verificación ha caducado. Solicita un código nuevo.",
+  "@verificationSessionExpired": {
+    "description": "Message shown when the verification session times out"
+  },
+  "invalidVerificationCode": "Código de verificación no válido.",
+  "@invalidVerificationCode": {
+    "description": "Error message for an invalid verification code"
+  },
+  "otpExpired": "El código ha caducado. Solicita uno nuevo.",
+  "@otpExpired": {
+    "description": "Message shown when the OTP has expired"
+  },
+  "home": "Inicio",
+  "@home": {
+    "description": "Bottom navigation tab label for home"
+  },
+  "findTrucks": "Buscar camiones",
+  "@findTrucks": {
+    "description": "Bottom navigation tab label and screen title for finding trucks"
+  },
+  "orders": "Pedidos",
+  "@orders": {
+    "description": "Bottom navigation tab label for orders"
+  },
+  "profile": "Perfil",
+  "@profile": {
+    "description": "Bottom navigation tab label for profile"
+  },
+  "activeShipments": "Envíos activos",
+  "@activeShipments": {
+    "description": "Section title for active shipments on home screen"
+  },
+  "seeAll": "Ver todos",
+  "@seeAll": {
+    "description": "Link text to view all items in a list"
+  },
+  "bookATruck": "Reservar un camión",
+  "@bookATruck": {
+    "description": "Button or card text to book a truck"
+  },
+  "active": "Activos",
+  "@active": {
+    "description": "Badge or status label for active items"
+  },
+  "moreStats": "Más estadísticas",
+  "@moreStats": {
+    "description": "Button text to view more statistics"
+  },
+  "savings": "Ahorro",
+  "@savings": {
+    "description": "Label for savings summary on home screen"
+  },
+  "totalShipments": "Total de envíos",
+  "@totalShipments": {
+    "description": "Label for total shipments count on home screen"
+  },
+  "yourUsualRoutes": "Tus rutas habituales",
+  "@yourUsualRoutes": {
+    "description": "Section title for frequently used routes"
+  },
+  "lastTruckLocation": "Última ubicación del camión",
+  "@lastTruckLocation": {
+    "description": "Label for the last known truck location"
+  },
+  "couldNotLoadData": "No se han podido cargar los datos",
+  "@couldNotLoadData": {
+    "description": "Error message when data loading fails"
+  },
+  "mlPoweredMatching": "Emparejamiento mediante aprendizaje automático",
+  "@mlPoweredMatching": {
+    "description": "Subtitle indicating AI-based truck matching"
+  },
+  "route": "Ruta",
+  "@route": {
+    "description": "Label for route section"
+  },
+  "pickupLocation": "Lugar de recogida",
+  "@pickupLocation": {
+    "description": "Label for pickup location input"
+  },
+  "dropLocation": "Lugar de entrega",
+  "@dropLocation": {
+    "description": "Label for drop location input"
+  },
+  "date": "Fecha",
+  "@date": {
+    "description": "Label for date picker"
+  },
+  "time": "Hora",
+  "@time": {
+    "description": "Label for time picker"
+  },
+  "goodsDetails": "Detalles de la mercancía",
+  "@goodsDetails": {
+    "description": "Section title for goods information"
+  },
+  "goodsType": "Tipo de mercancía",
+  "@goodsType": {
+    "description": "Label for goods type selector"
+  },
+  "weightTonnes": "Peso (toneladas)",
+  "@weightTonnes": {
+    "description": "Label for weight input in tonnes"
+  },
+  "lengthFt": "Longitud (pies)",
+  "@lengthFt": {
+    "description": "Label for length input in feet"
+  },
+  "widthFt": "Anchura (pies)",
+  "@widthFt": {
+    "description": "Label for width input in feet"
+  },
+  "heightFt": "Altura (pies)",
+  "@heightFt": {
+    "description": "Label for height input in feet"
+  },
+  "stackable": "Apilable",
+  "@stackable": {
+    "description": "Label for stackable goods option"
+  },
+  "fragile": "Frágil",
+  "@fragile": {
+    "description": "Label for fragile goods option"
+  },
+  "specialRequirements": "Requisitos especiales",
+  "@specialRequirements": {
+    "description": "Label for special requirements text field"
+  },
+  "estimatedPriceRange": "Rango de precios estimado",
+  "@estimatedPriceRange": {
+    "description": "Label for the estimated price display"
+  },
+  "stableThisWeek": "Estable esta semana",
+  "@stableThisWeek": {
+    "description": "Indicator that the price has been stable this week"
+  },
+  "estimatingPrice": "Calculando precio...",
+  "@estimatingPrice": {
+    "description": "Loading text while price is being estimated"
+  },
+  "estimateUnavailable": "Estimación no disponible",
+  "@estimateUnavailable": {
+    "description": "Text shown when a price estimate cannot be generated"
+  },
+  "enterRouteDetails": "Introduce los detalles de la ruta para empezar",
+  "@enterRouteDetails": {
+    "description": "Prompt text to encourage user to fill in route details"
+  },
+  "basedOnCurrentDemand": "Según la demanda actual",
+  "@basedOnCurrentDemand": {
+    "description": "Subtext indicating price estimate is based on demand"
+  },
+  "filterTrucks": "Filtrar camiones",
+  "@filterTrucks": {
+    "description": "Button text to open truck filter options"
+  },
+  "truckType": "Tipo de camión",
+  "@truckType": {
+    "description": "Label for truck type filter"
+  },
+  "capacityTonnes": "Capacidad (toneladas)",
+  "@capacityTonnes": {
+    "description": "Label for truck capacity filter in tonnes"
+  },
+  "materialType": "Tipo de material",
+  "@materialType": {
+    "description": "Label for material type filter"
+  },
+  "today": "Hoy",
+  "@today": {
+    "description": "Date selection option for today"
+  },
+  "tomorrow": "Mañana",
+  "@tomorrow": {
+    "description": "Date selection option for tomorrow"
+  },
+  "selectPickupOnMap": "Seleccionar recogida en el mapa",
+  "@selectPickupOnMap": {
+    "description": "Button text to select pickup location on map"
+  },
+  "selectDropOnMap": "Seleccionar entrega en el mapa",
+  "@selectDropOnMap": {
+    "description": "Button text to select drop location on map"
+  },
+  "temperatureControl": "Control de temperatura",
+  "@temperatureControl": {
+    "description": "Label for temperature controlled truck option"
+  },
+  "waterproofCover": "Cubierta impermeable",
+  "@waterproofCover": {
+    "description": "Label for waterproof cover truck option"
+  },
+  "loadingHelp": "Ayuda para la carga",
+  "@loadingHelp": {
+    "description": "Label for loading assistance option"
+  },
+  "loadingHelpNeeded": "Se necesita ayuda para la carga",
+  "@loadingHelpNeeded": {
+    "description": "Indicator that loading assistance is required"
+  },
+  "other": "Otros",
+  "@other": {
+    "description": "Generic option for other/miscellaneous selection"
+  },
+  "describeYourGoods": "Describe tu mercancía...",
+  "@describeYourGoods": {
+    "description": "Placeholder text for goods description input"
+  },
+  "activeTab": "Activos",
+  "@activeTab": {
+    "description": "Tab label for active orders"
+  },
+  "historyTab": "Historial",
+  "@historyTab": {
+    "description": "Tab label for order history"
+  },
+  "searchOrdersHint": "Buscar pedidos...",
+  "@searchOrdersHint": {
+    "description": "Placeholder text for order search input"
+  },
+  "noActiveOrders": "No hay pedidos activos",
+  "@noActiveOrders": {
+    "description": "Text shown when there are no active orders"
+  },
+  "noHistoryOrders": "No hay historial de pedidos",
+  "@noHistoryOrders": {
+    "description": "Text shown when there is no order history"
+  },
+  "offlineMode": "Modo sin conexión",
+  "@offlineMode": {
+    "description": "Label indicating the app is in offline mode"
+  },
+  "lastUpdated": "Última actualización: {timeAgo}",
+  "@lastUpdated": {
+    "description": "Text showing when data was last updated",
+    "placeholders": {
+      "timeAgo": {
+        "type": "String",
+        "example": "5 min ago"
+      }
+    }
+  },
+  "driverAssigned": "Conductor asignado",
+  "@driverAssigned": {
+    "description": "Order status label when a driver has been assigned"
+  },
+  "inTransit": "En tránsito",
+  "@inTransit": {
+    "description": "Order status label when shipment is in transit"
+  },
+  "paymentReleased": "Pago liberado",
+  "@paymentReleased": {
+    "description": "Order status label when payment has been released"
+  },
+  "delivered": "Entregado",
+  "@delivered": {
+    "description": "Order status label for completed delivery"
+  },
+  "cancelled": "Cancelado",
+  "@cancelled": {
+    "description": "Order status label for cancelled orders"
+  },
+  "pending": "Pendiente",
+  "@pending": {
+    "description": "Order status label for pending orders"
+  },
+  "account": "Cuenta",
+  "@account": {
+    "description": "Profile section title for account settings"
+  },
+  "preferences": "Preferencias",
+  "@preferences": {
+    "description": "Profile section title for app preferences"
+  },
+  "paymentMethods": "Métodos de pago",
+  "@paymentMethods": {
+    "description": "Profile menu item for payment methods"
+  },
+  "myDocuments": "Mis documentos",
+  "@myDocuments": {
+    "description": "Profile menu item for documents"
+  },
+  "savedAddresses": "Direcciones guardadas",
+  "@savedAddresses": {
+    "description": "Profile menu item for saved addresses"
+  },
+  "walletAddressLabel": "Dirección de la cartera",
+  "@walletAddressLabel": {
+    "description": "Label for wallet address in profile"
+  },
+  "notSet": "Sin establecer",
+  "@notSet": {
+    "description": "Text shown when a field has not been configured"
+  },
+  "language": "Idioma",
+  "@language": {
+    "description": "Profile menu item for language settings"
+  },
+  "helpSupport": "Ayuda y soporte",
+  "@helpSupport": {
+    "description": "Profile menu item for help and support"
+  },
+  "aboutTruxify": "Acerca de Truxify",
+  "@aboutTruxify": {
+    "description": "Profile menu item for about page"
+  },
+  "logout": "Cerrar sesión",
+  "@logout": {
+    "description": "Button text to log out of the app"
+  },
+  "offlineModeLabel": "Modo sin conexión (última actualización: {timeAgo})",
+  "@offlineModeLabel": {
+    "description": "Label indicating offline mode with last updated time",
+    "placeholders": {
+      "timeAgo": {
+        "type": "String",
+        "example": "5 min ago"
+      }
+    }
+  },
+  "ordersLabel": "Pedidos",
+  "@ordersLabel": {
+    "description": "Label for orders count or section in profile"
+  },
+  "savedLabel": "Guardados",
+  "@savedLabel": {
+    "description": "Label for saved items count in profile"
+  },
+  "co2Label": "CO₂ ahorrado",
+  "@co2Label": {
+    "description": "Label for CO2 emissions saved metric"
+  },
+  "editProfile": "Editar perfil",
+  "@editProfile": {
+    "description": "Button text to edit profile information"
+  },
+  "fullName": "Nombre completo",
+  "@fullName": {
+    "description": "Label for full name input field"
+  },
+  "companyName": "Nombre de la empresa",
+  "@companyName": {
+    "description": "Label for company name input field"
+  },
+  "phone": "Teléfono",
+  "@phone": {
+    "description": "Label for phone number display or input"
+  },
+  "enterFullName": "Introduce tu nombre completo",
+  "@enterFullName": {
+    "description": "Placeholder text for full name input"
+  },
+  "enterCompanyName": "Introduce el nombre de tu empresa",
+  "@enterCompanyName": {
+    "description": "Placeholder text for company name input"
+  },
+  "enterPhoneNumber": "Introduce tu número de teléfono",
+  "@enterPhoneNumber": {
+    "description": "Placeholder text for phone number input"
+  },
+  "nameIsRequired": "El nombre es obligatorio",
+  "@nameIsRequired": {
+    "description": "Validation error when name field is empty"
+  },
+  "companyNameIsRequired": "El nombre de la empresa es obligatorio",
+  "@companyNameIsRequired": {
+    "description": "Validation error when company name field is empty"
+  },
+  "phoneNumberIsRequired": "El número de teléfono es obligatorio",
+  "@phoneNumberIsRequired": {
+    "description": "Validation error when phone number field is empty"
+  },
+  "saving": "Guardando...",
+  "@saving": {
+    "description": "Loading text while profile changes are being saved"
+  },
+  "saveChanges": "Guardar cambios",
+  "@saveChanges": {
+    "description": "Button text to save profile changes"
+  },
+  "profileUpdatedSuccessfully": "Perfil actualizado correctamente",
+  "@profileUpdatedSuccessfully": {
+    "description": "Success message after profile is updated"
+  },
+  "failedToLoadProfile": "No se ha podido cargar el perfil",
+  "@failedToLoadProfile": {
+    "description": "Error message when profile data fails to load"
+  },
+  "failedToUpdateProfile": "No se ha podido actualizar el perfil",
+  "@failedToUpdateProfile": {
+    "description": "Error message when profile update fails"
+  },
+  "shareTracking": "Compartir seguimiento",
+  "@shareTracking": {
+    "description": "Button text to share order tracking link"
+  },
+  "trackingLinkGenerated": "Enlace de seguimiento generado",
+  "@trackingLinkGenerated": {
+    "description": "Success message when tracking link is generated"
+  },
+  "unableToShare": "No se puede compartir",
+  "@unableToShare": {
+    "description": "Error message when sharing fails"
+  },
+  "linkExpired": "Este enlace de seguimiento ha caducado o ya no es válido.",
+  "@linkExpired": {
+    "description": "Message shown when a tracking link has expired"
+  },
+  "trackingRevoked": "Se han revocado todos los enlaces de seguimiento.",
+  "@trackingRevoked": {
+    "description": "Message shown when tracking links are revoked"
+  },
+  "copyLink": "Copiar enlace",
+  "@copyLink": {
+    "description": "Button text to copy tracking link to clipboard"
+  },
+  "shareMessage": "Sigue tu envío en Truxify",
+  "@shareMessage": {
+    "description": "Default message included when sharing tracking link"
+  },
+  "orderNotFound": "Pedido no encontrado",
+  "@orderNotFound": {
+    "description": "Error message when an order referenced by a notification cannot be found"
+  },
+  "notification": "Notificación",
+  "@notification": {
+    "description": "Title for notification-related UI elements"
+  },
+  "unableToOpen": "No se puede abrir la notificación",
+  "@unableToOpen": {
+    "description": "Error message when a notification cannot be navigated to"
+  },
+  "downloadInvoice": "Descargar factura",
+  "@downloadInvoice": {
+    "description": "Button text to download the order invoice as PDF"
+  },
+  "generatingInvoice": "Generando factura...",
+  "@generatingInvoice": {
+    "description": "Status text while the PDF invoice is being generated"
+  },
+  "invoiceReady": "Factura lista",
+  "@invoiceReady": {
+    "description": "Success message after invoice PDF is generated"
+  },
+  "shareInvoice": "Compartir factura",
+  "@shareInvoice": {
+    "description": "Button text to share the generated invoice"
+  },
+  "printInvoice": "Imprimir factura",
+  "@printInvoice": {
+    "description": "Button text to print the generated invoice"
+  },
+  "downloadFailed": "Error de descarga",
+  "@downloadFailed": {
+    "description": "Error message when invoice download or generation fails"
+  },
+  "networkError": "Error de red. Comprueba tu conexión.",
+  "@networkError": {
+    "description": "Error message when network connection fails"
+  },
+  "english": "Inglés",
+  "@english": {
+    "description": "English language name"
+  },
+  "hindi": "Hindi",
+  "@hindi": {
+    "description": "Hindi language name"
+  },
+  "tamil": "Tamil",
+  "@tamil": {
+    "description": "Tamil language name"
+  }
+}
+

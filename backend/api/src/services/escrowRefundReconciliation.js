@@ -5,8 +5,6 @@ import { acquireLock, renewLock, releaseLock, withLockRenewal } from '../lib/red
 import os from 'os';
 // backend/api/src/services/escrowRefundReconciliation.js (Excerpt)
 
-import { redisClient } from '../config/redis.js';
-import logger from '../middleware/logger.js';
 
 export async function runRefundReconciliation() {
   const lockKey = 'lock:escrow_refund_reconciliation';

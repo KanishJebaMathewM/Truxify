@@ -15,6 +15,8 @@ export 'src/services/fcm_service.dart';
 export 'src/services/notification_router.dart';
 export 'src/services/foreground_notification_handler.dart';
 export 'src/services/resilient_websocket.dart';
+export 'src/services/connectivity_service.dart';
+export 'src/services/offline_queue.dart';
 
 // ── Theme & Providers ───────────────────────────────────────────────
 export 'src/theme/app_theme.dart';

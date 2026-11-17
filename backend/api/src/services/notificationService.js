@@ -4,84 +4,7 @@ import crypto from 'crypto';
 import { hashOtp, verifyOtpHash } from '../lib/otpHashing.js';
 import { measureExecution } from '../core/performanceMetrics.js';
 import { DomainError } from './order/domainError.js';
-// backend/api/src/services/notificationService.js
 
-import logger from '../middleware/logger.js';
-import messaging from '../config/firebase.js'; // Adjust per module structure
-
-/**
- * Sends a delivery verification OTP push notification to a driver or customer.
- * @param {string} fcmToken - Recipient FCM device token.
- * @param {string|number} otpCode - Generated verification OTP.
- */
-export async function sendDeliveryOtpNotification(fcmToken, otpCode) {
-  if (!fcmToken) {
-    throw new Error('FCM token is required for sending OTP push notification');
-  }
-
-  const message = {
-    token: fcmToken,
-    notification: {
-      title: 'Delivery Verification Code',
-      body: `Your delivery verification OTP is ${otpCode}. Valid for 10 minutes.`
-    },
-    data: {
-      type: 'DELIVERY_OTP',
-      otp: String(otpCode),
-      timestamp: new Date().toISOString()
-    }
-  };
-
-  try {
-    const response = await messaging.send(message);
-    logger.info('Delivery OTP push notification dispatched successfully', { 
-      messageId: response,
-      hasOtp: Boolean(otpCode) 
-    });
-    return response;
-  } catch (err) {
-    logger.error('Failed to send delivery OTP push notification', { 
-      error: err,
-      message: err.message,
-      stack: err.stack 
-    });
-    throw new Error('Failed to dispatch delivery verification notification', { cause: err });
-  }
-}
-// Before
-logger.error({ err: error }, 'Error inserting notification');
-
-// After
-logger.error({
-  event: 'NOTIFICATION_INSERT_ERROR',
-  error: error.message,
-  stack: error.stack,
-  requestId: req?.id || requestId,
-}, 'Failed to insert notification into database');
-/**
- * Notification Service
- * Handles FCM push notification fan-outs, device token deduplication,
- * permanent vs transient error classification, and delivery-OTP management.
- * Resolved duplicate import issues (#14874) to ensure clean module evaluation.
- */
-// Inside backend/api/src/services/notificationService.js
-
-async function sendDeliveryOtpNotification(token, otpCode, options = {}) {
-  // ... existing implementation that calls sendFcmNotification() and stores it in fcmResult ...
-
-  const fcmResult = await sendFcmNotification(token, {
-    title: 'Your Delivery OTP',
-    body: `Your verification code is ${otpCode}`,
-    data: { otp: otpCode, type: 'DELIVERY_OTP' },
-    ...options
-  });
-
-  // CHANGE FROM:
-  // return { success: true };
-
-  // CHANGE TO:
-  return fcmResult ?? { success: false, error: 'Unknown FCM error' };
-}
 // ============================================================================
 // FCM fan-out configuration
 // ============================================================================
@@ -105,64 +28,7 @@ const ALLOWED_NOTIF_TYPES = new Set([
   'payment_released',
   'delivery_otp',
 ]);
-// backend/api/src/services/notificationService.js
 
-import logger from '../middleware/logger.js';
-import redisClient from '../config/redis.js';
-
-/**
- * Publishes a notification event to the Redis pub/sub channel.
- * Updated per issue #13822 to prevent silent failures during Redis publish.
- * 
- * @param {string} channel - Redis channel name.
- * @param {Object} payload - Notification payload object.
- * @returns {Promise<boolean>} Success status of the publish operation.
- */
-export async function publishNotificationEvent(channel, payload) {
-  if (!channel || !payload) {
-    logger.warn('Publish notification skipped: Missing channel or payload', { channel });
-    return false;
-  }
-
-  try {
-    const serializedPayload = JSON.stringify(payload);
-    
-    // Ensure redis publish is properly awaited
-    const receiversCount = await redisClient.publish(channel, serializedPayload);
-    
-    logger.info('Notification event published successfully', { 
-      channel, 
-      receiversCount,
-      notificationId: payload.id || payload.orderId 
-    });
-    
-    return true;
-  } catch (err) {
-    // FIX: Log Redis publish failure explicitly for operator alerting and observability
-    logger.error('CRITICAL: Failed to publish notification event to Redis', {
-      channel,
-      error: err.message,
-      stack: err.stack,
-      payloadSummary: {
-        id: payload.id,
-        type: payload.type
-      }
-    });
-
-    // Optionally rethrow or return false depending on upstream fault tolerance requirements
-    return false;
-  }
-}
-// Before:
-// console.error('Error inserting notification:', error);
-
-// After:
-logger.error({
-  event: 'NOTIFICATION_INSERT_ERROR',
-  error: error.message || error,
-  code: error.code,
-  details: error.details
-}, '[NotificationService] Error inserting notification');
 // Tokens that can never be delivered again — the device row is deactivated so
 // future notifications stop targeting it. Exact client codes from the installed
 // firebase-admin v14 (MessagingErrorCode).
@@ -804,7 +670,14 @@ export async function sendPushNotification(userId, title, body, notifType, metad
           notif_type: notifType,
           metadata,
         });
+
+        if (error) {
+          logger.error(`[NotificationService] Database insert failed: ${error.message}`);
+        }
+      } catch (dbErr) {
+        logger.error(`[NotificationService] Database error: ${dbErr.message}`);
       }
+    }
 
       if (supabaseAdmin) {
         try {

@@ -7,7 +7,6 @@ import { CLOCK_SKEW_TOLERANCE_MS } from "./tracker.js";
 // backend/api/src/sockets/locationServer.js (Excerpt)
 import { createSocketRateLimiter } from "../lib/socketRateLimiter.js";
 
-import logger from '../middleware/logger.js';
 
 export function setupLocationSocket(io) {
   io.on('connection', (socket) => {

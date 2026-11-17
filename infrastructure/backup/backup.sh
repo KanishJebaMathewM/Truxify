@@ -1,82 +1,361 @@
-#!/usr/bin/env bash
-# Production backup script with encryption, verification, and secure handling
-set -euo pipefail
 
-# Configuration (all sensitive values via env vars)
+#!/usr/bin/env bash
+# Truxify Production Backup
+# Features: PostgreSQL + MongoDB backups, age encryption,
+# S3 upload, checksum verification, archive integrity checks.
+
+set -Eeuo pipefail
+IFS=$'\n\t'
+umask 077
+
+# --------------------------------------------------
+# 1. CONFIGURATION
+# --------------------------------------------------
+
 BACKUP_ROOT="${BACKUP_ROOT:-/var/truxify/backups}"
 S3_BUCKET="${AWS_S3_BUCKET:-truxify-backups}"
-KMS_KEY_ID="${BACKUP_KMS_KEY_ID:-}"
+S3_PREFIX="${S3_PREFIX:-truxify}"
+AWS_REGION="${AWS_REGION:-ap-south-1}"
+
 AGE_RECIPIENT_FILE="${AGE_RECIPIENT_FILE:-/etc/truxify/age/recipient.pub}"
 AGE_IDENTITY_FILE="${AGE_IDENTITY_FILE:-/etc/truxify/age/identity.key}"
 
-umask 077
-mkdir -p -m 0700 "$BACKUP_ROOT"
+DB_HOST="${DB_HOST:-db}"
+DB_USER="${DB_USER:-postgres}"
+DB_NAME="${DB_NAME:-truxify}"
 
-BACKUP_ID="$(date -u +%Y%m%dT%H%M%SZ)"
-STAGE="$(mktemp -d -p "$BACKUP_ROOT" .stage.XXXXXX)"
-trap 'rm -rf -- "$STAGE"' EXIT
+MONGO_URI="${MONGO_URI:-}"
 
-log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
+SHARDS=(north south east west)
 
-# 1) Dump databases into private staging dir (mode 0700 from umask)
-log "Dumping main database..."
-PGPASSWORD="${DB_PASSWORD}" pg_dump -h "db" -U postgres -d "truxify" > "${STAGE}/db_${BACKUP_ID}.sql"
+BACKUP_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(openssl rand -hex 4)"
+STAGE=""
 
-for SHARD in north south east west; do
-  log "Dumping shard ${SHARD}..."
-  PGPASSWORD="${SHARD_PASSWORD}" pg_dump -h "shard-${SHARD}" -U postgres -d "truxify_${SHARD}" > "${STAGE}/shard_${SHARD}_${BACKUP_ID}.sql"
+# --------------------------------------------------
+# 2. LOGGING AND ERROR HANDLING
+# --------------------------------------------------
+
+log() {
+    printf '[%s] %s\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"
+}
+
+error() {
+    log "ERROR: $*" >&2
+    exit 1
+}
+
+cleanup() {
+    if [[ -n "$STAGE" && -d "$STAGE" ]]; then
+        rm -rf -- "$STAGE"
+        log "Temporary backup files cleaned."
+    fi
+}
+
+on_error() {
+    local exit_code=$?
+    log "Backup failed at line ${BASH_LINENO[0]} (exit ${exit_code})."
+    exit "$exit_code"
+}
+
+trap cleanup EXIT
+trap on_error ERR
+
+# --------------------------------------------------
+# 3. VALIDATE CONFIGURATION
+# --------------------------------------------------
+
+log "Validating backup configuration..."
+
+for command in pg_dump mongodump age aws tar sha256sum openssl; do
+    command -v "$command" >/dev/null 2>&1 ||
+        error "Required command not found: $command"
 done
 
+[[ -n "${DB_PASSWORD:-}" ]] ||
+    error "DB_PASSWORD environment variable is required."
+
+[[ -n "${SHARD_PASSWORD:-}" ]] ||
+    error "SHARD_PASSWORD environment variable is required."
+
+[[ -n "$MONGO_URI" ]] ||
+    error "MONGO_URI environment variable is required."
+
+[[ -f "$AGE_RECIPIENT_FILE" ]] ||
+    error "Age recipient file not found: $AGE_RECIPIENT_FILE"
+
+[[ -f "$AGE_IDENTITY_FILE" ]] ||
+    error "Age identity file not found: $AGE_IDENTITY_FILE"
+
+aws sts get-caller-identity >/dev/null ||
+    error "AWS authentication failed."
+
+mkdir -p -m 0700 "$BACKUP_ROOT"
+
+STAGE="$(mktemp -d -p "$BACKUP_ROOT" ".stage.${BACKUP_ID}.XXXXXX")"
+chmod 0700 "$STAGE"
+
+log "Backup ID: $BACKUP_ID"
+
+# --------------------------------------------------
+# 4. POSTGRESQL MAIN DATABASE BACKUP
+# --------------------------------------------------
+
+log "Dumping main PostgreSQL database..."
+
+PGPASSWORD="$DB_PASSWORD" pg_dump \
+    --no-password \
+    --host="$DB_HOST" \
+    --username="$DB_USER" \
+    --dbname="$DB_NAME" \
+    --format=custom \
+    --no-owner \
+    --no-acl \
+    --file="$STAGE/main_${BACKUP_ID}.dump"
+
+[[ -s "$STAGE/main_${BACKUP_ID}.dump" ]] ||
+    error "Main database backup is empty."
+
+# --------------------------------------------------
+# 5. POSTGRESQL SHARD BACKUPS
+# --------------------------------------------------
+
+for shard in "${SHARDS[@]}"; do
+
+    log "Dumping PostgreSQL shard: $shard"
+
+    PGPASSWORD="$SHARD_PASSWORD" pg_dump \
+        --no-password \
+        --host="shard-${shard}" \
+        --username="$DB_USER" \
+        --dbname="truxify_${shard}" \
+        --format=custom \
+        --no-owner \
+        --no-acl \
+        --file="$STAGE/shard_${shard}_${BACKUP_ID}.dump"
+
+    [[ -s "$STAGE/shard_${shard}_${BACKUP_ID}.dump" ]] ||
+        error "Shard backup is empty: $shard"
+
+done
+
+# --------------------------------------------------
+# 6. MONGODB BACKUP
+# --------------------------------------------------
+
 log "Dumping MongoDB..."
-mongodump --uri="mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASSWORD}@mongo:27017/?authSource=admin" --archive="${STAGE}/mongo_${BACKUP_ID}.archive"
 
-# 2) Create archive and encrypt
-log "Creating and encrypting backup archive..."
-tar -czf "${STAGE}/backup_${BACKUP_ID}.tar.gz" -C "$STAGE" \
-  "db_${BACKUP_ID}.sql" \
-  shard_north_${BACKUP_ID}.sql \
-  shard_south_${BACKUP_ID}.sql \
-  shard_east_${BACKUP_ID}.sql \
-  shard_west_${BACKUP_ID}.sql \
-  "mongo_${BACKUP_ID}.archive"
+mongodump \
+    --uri="$MONGO_URI" \
+    --archive="$STAGE/mongo_${BACKUP_ID}.archive" \
+    --gzip
 
-# Encrypt with age (preferred) or AWS KMS envelope
-if [[ -f "$AGE_RECIPIENT_FILE" ]]; then
-  log "Encrypting with age..."
-  age -r "$(cat "$AGE_RECIPIENT_FILE")" -o "${STAGE}/backup_${BACKUP_ID}.tar.gz.age" "${STAGE}/backup_${BACKUP_ID}.tar.gz"
-  ENCRYPTED_FILE="${STAGE}/backup_${BACKUP_ID}.tar.gz.age"
-elif [[ -n "$KMS_KEY_ID" ]]; then
-  log "Encrypting with AWS KMS..."
-  aws kms encrypt --key-id "$KMS_KEY_ID" --plaintext fileb://"${STAGE}/backup_${BACKUP_ID}.tar.gz" --output text --query CiphertextBlob | base64 -d > "${STAGE}/backup_${BACKUP_ID}.tar.gz.enc"
-  ENCRYPTED_FILE="${STAGE}/backup_${BACKUP_ID}.tar.gz.enc"
-else
-  log "ERROR: No encryption method configured (set AGE_RECIPIENT_FILE or BACKUP_KMS_KEY_ID)" >&2
-  exit 1
-fi
+[[ -s "$STAGE/mongo_${BACKUP_ID}.archive" ]] ||
+    error "MongoDB backup is empty."
 
-# 3) Upload with explicit server-side encryption
+# --------------------------------------------------
+# 7. VERIFY DATABASE DUMP FORMATS
+# --------------------------------------------------
+
+log "Checking PostgreSQL dump files..."
+
+for dump in "$STAGE"/*.dump; do
+    pg_restore --list "$dump" >/dev/null ||
+        error "Invalid PostgreSQL dump: $(basename "$dump")"
+done
+
+# --------------------------------------------------
+# 8. CREATE CHECKSUM MANIFEST
+# --------------------------------------------------
+
+log "Generating backup checksums..."
+
+(
+    cd "$STAGE"
+
+    sha256sum \
+        "main_${BACKUP_ID}.dump" \
+        "shard_north_${BACKUP_ID}.dump" \
+        "shard_south_${BACKUP_ID}.dump" \
+        "shard_east_${BACKUP_ID}.dump" \
+        "shard_west_${BACKUP_ID}.dump" \
+        "mongo_${BACKUP_ID}.archive" \
+        > SHA256SUMS
+)
+
+# --------------------------------------------------
+# 9. CREATE COMPRESSED ARCHIVE
+# --------------------------------------------------
+
+log "Creating backup archive..."
+
+ARCHIVE="$STAGE/backup_${BACKUP_ID}.tar.gz"
+
+tar -czf "$ARCHIVE" \
+    -C "$STAGE" \
+    "main_${BACKUP_ID}.dump" \
+    "shard_north_${BACKUP_ID}.dump" \
+    "shard_south_${BACKUP_ID}.dump" \
+    "shard_east_${BACKUP_ID}.dump" \
+    "shard_west_${BACKUP_ID}.dump" \
+    "mongo_${BACKUP_ID}.archive" \
+    SHA256SUMS
+
+[[ -s "$ARCHIVE" ]] ||
+    error "Archive creation failed."
+
+# --------------------------------------------------
+# 10. ENCRYPT WITH AGE
+# --------------------------------------------------
+
+log "Encrypting backup using age..."
+
+RECIPIENT="$(cat "$AGE_RECIPIENT_FILE")"
+
+[[ -n "$RECIPIENT" ]] ||
+    error "Age recipient is empty."
+
+ENCRYPTED_FILE="$STAGE/backup_${BACKUP_ID}.tar.gz.age"
+
+age \
+    --recipient "$RECIPIENT" \
+    --output "$ENCRYPTED_FILE" \
+    "$ARCHIVE"
+
+[[ -s "$ENCRYPTED_FILE" ]] ||
+    error "Encryption failed."
+
+# Remove plaintext archive before upload.
+rm -f -- "$ARCHIVE"
+
+# --------------------------------------------------
+# 11. UPLOAD TO AMAZON S3
+# --------------------------------------------------
+
+S3_KEY="${S3_PREFIX}/${BACKUP_ID}.tar.gz.age"
+S3_URI="s3://${S3_BUCKET}/${S3_KEY}"
+
 log "Uploading encrypted backup to S3..."
-if [[ -f "$AGE_RECIPIENT_FILE" ]]; then
-  aws s3 cp "$ENCRYPTED_FILE" "s3://${S3_BUCKET}/truxify/${BACKUP_ID}.tar.gz.age" \
-    --sse aws:kms --sse-kms-key-id "${KMS_KEY_ID:-aws/s3}"
-elif [[ -n "$KMS_KEY_ID" ]]; then
-  aws s3 cp "$ENCRYPTED_FILE" "s3://${S3_BUCKET}/truxify/${BACKUP_ID}.tar.gz.enc" \
-    --sse aws:kms --sse-kms-key-id "$KMS_KEY_ID"
+
+S3_ARGS=(
+    s3 cp
+    "$ENCRYPTED_FILE"
+    "$S3_URI"
+    --region "$AWS_REGION"
+    --only-show-errors
+)
+
+if [[ -n "${BACKUP_KMS_KEY_ID:-}" ]]; then
+    S3_ARGS+=(
+        --sse aws:kms
+        --sse-kms-key-id "$BACKUP_KMS_KEY_ID"
+    )
+else
+    S3_ARGS+=(--sse AES256)
 fi
 
-# 4) Verify restorability (download, decrypt, test archive integrity)
-log "Verifying backup restorability..."
-aws s3 cp "s3://${S3_BUCKET}/truxify/$(basename "$ENCRYPTED_FILE")" "${STAGE}/verify_$(basename "$ENCRYPTED_FILE")" \
-  --sse aws:kms --sse-kms-key-id "${KMS_KEY_ID:-aws/s3}"
+aws "${S3_ARGS[@]}"
 
-if [[ -f "$AGE_RECIPIENT_FILE" && -f "$AGE_IDENTITY_FILE" ]]; then
-  age -d -i "$AGE_IDENTITY_FILE" -o "${STAGE}/verify.tar.gz" "${STAGE}/verify_$(basename "$ENCRYPTED_FILE")"
-elif [[ -n "$KMS_KEY_ID" ]]; then
-  base64 -d "${STAGE}/verify_$(basename "$ENCRYPTED_FILE")" | aws kms decrypt --key-id "$KMS_KEY_ID" --ciphertext-blob fileb:///dev/stdin --output text --query Plaintext | base64 -d > "${STAGE}/verify.tar.gz"
-fi
+# --------------------------------------------------
+# 12. VERIFY REMOTE OBJECT
+# --------------------------------------------------
 
-tar tzf "${STAGE}/verify.tar.gz" > /dev/null
-log "Backup archive integrity verified."
+log "Checking uploaded S3 object..."
 
-# 5) Clean up staging (temp files auto-removed by trap)
-log "Backup completed successfully: s3://${S3_BUCKET}/truxify/$(basename "$ENCRYPTED_FILE")"
+REMOTE_SIZE="$(
+    aws s3api head-object \
+        --bucket "$S3_BUCKET" \
+        --key "$S3_KEY" \
+        --region "$AWS_REGION" \
+        --query ContentLength \
+        --output text
+)"
+
+LOCAL_SIZE="$(stat -c '%s' "$ENCRYPTED_FILE")"
+
+[[ "$REMOTE_SIZE" == "$LOCAL_SIZE" ]] ||
+    error "Uploaded object size does not match local backup."
+
+# --------------------------------------------------
+# 13. DOWNLOAD AND VERIFY BACKUP
+# --------------------------------------------------
+
+log "Downloading backup for verification..."
+
+DOWNLOADED="$STAGE/verify_${BACKUP_ID}.age"
+
+aws s3 cp \
+    "$S3_URI" \
+    "$DOWNLOADED" \
+    --region "$AWS_REGION" \
+    --only-show-errors
+
+LOCAL_HASH="$(sha256sum "$ENCRYPTED_FILE" | awk '{print $1}')"
+REMOTE_HASH="$(sha256sum "$DOWNLOADED" | awk '{print $1}')"
+
+[[ "$LOCAL_HASH" == "$REMOTE_HASH" ]] ||
+    error "Downloaded backup checksum mismatch."
+
+# --------------------------------------------------
+# 14. DECRYPT AND VERIFY ARCHIVE
+# --------------------------------------------------
+
+log "Decrypting downloaded backup..."
+
+VERIFIED_ARCHIVE="$STAGE/verified_${BACKUP_ID}.tar.gz"
+
+age \
+    --decrypt \
+    --identity "$AGE_IDENTITY_FILE" \
+    --output "$VERIFIED_ARCHIVE" \
+    "$DOWNLOADED"
+
+[[ -s "$VERIFIED_ARCHIVE" ]] ||
+    error "Decryption produced an empty archive."
+
+log "Testing archive integrity..."
+
+tar -tzf "$VERIFIED_ARCHIVE" >/dev/null ||
+    error "Archive integrity verification failed."
+
+# --------------------------------------------------
+# 15. VERIFY INTERNAL CHECKSUMS
+# --------------------------------------------------
+
+log "Verifying individual backup files..."
+
+VERIFY_DIR="$STAGE/verified_contents"
+mkdir -m 0700 "$VERIFY_DIR"
+
+tar -xzf "$VERIFIED_ARCHIVE" \
+    -C "$VERIFY_DIR" \
+    --no-same-owner \
+    --no-same-permissions
+
+(
+    cd "$VERIFY_DIR"
+    sha256sum --check SHA256SUMS
+) || error "One or more backup files failed checksum verification."
+
+# Verify PostgreSQL dumps again.
+for dump in "$VERIFY_DIR"/*.dump; do
+    pg_restore --list "$dump" >/dev/null ||
+        error "Restored archive contains an invalid dump."
+done
+
+# --------------------------------------------------
+# 16. FINAL REPORT
+# --------------------------------------------------
+
+BACKUP_SIZE="$(du -h "$ENCRYPTED_FILE" | awk '{print $1}')"
+
+log "======================================"
+log "TRUXIFY BACKUP COMPLETED SUCCESSFULLY"
+log "======================================"
+log "Backup ID : $BACKUP_ID"
+log "S3 Bucket : $S3_BUCKET"
+log "S3 Object : $S3_KEY"
+log "Size      : $BACKUP_SIZE"
+log "Encryption: age + optional S3 SSE-KMS"
+log "Integrity : Verified"
+log "======================================"

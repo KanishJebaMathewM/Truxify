@@ -9,6 +9,7 @@ from cryptography.fernet import Fernet, MultiFernet, InvalidToken
 import os
 import time
 from threading import RLock
+from .subscription_owner import SubscriptionOwner
 
 from .client_round_protocol import MAX_MODEL_ENVELOPE_BYTES, admit_round_model, round_owned
 from .local_training_transition import fit_candidate
@@ -48,8 +49,7 @@ class FederatedClient:
         self.historical_keys: List[bytes] = []
         self.cipher = None
         self.training_round = 0
-        self.pubsub = None
-        self._sub_thread = None
+        self._subscription = SubscriptionOwner()
 
         # Register client
         self._register_client()
@@ -140,44 +140,37 @@ class FederatedClient:
         ]
         self.cipher = MultiFernet(fernets)
 
+    @property
+    def pubsub(self):
+        return self._subscription.pubsub
+
+    @property
+    def _sub_thread(self):
+        return self._subscription.thread
+
     def _subscribe_updates(self):
-        """Subscribe to server updates via Redis Pub/Sub"""
+        """Idempotently start one native listener; refuse draining overlap."""
+        def _handler(msg):
+            if msg and msg.get('type') == 'message':
+                try:
+                    raw = msg.get('data')
+                    if isinstance(raw, bytes):
+                        raw = raw.decode('utf-8')
+                    data = json.loads(raw)
+                    if data.get('type') == 'weights_available' and data.get('client_id') == self.client_id:
+                        self.receive_weights()
+                except Exception as exc:
+                    logger.error(f"Error handling client update notice: {exc}")
+
         try:
-            self.pubsub = self.redis.pubsub()
+            return self._subscription.start(self.redis, 'federated:updates', _handler)
+        except Exception as exc:
+            logger.warning(f"Could not start federated subscription: {exc}")
+            return False
 
-            def _handler(msg):
-                if msg and msg.get('type') == 'message':
-                    try:
-                        raw = msg.get('data')
-                        if isinstance(raw, bytes):
-                            raw = raw.decode('utf-8')
-                        data = json.loads(raw)
-                        if data.get('type') == 'weights_available' and data.get('client_id') == self.client_id:
-                            self.receive_weights()
-                    except Exception as exc:
-                        logger.error(f"Error handling client update notice: {exc}")
-
-            self.pubsub.subscribe(**{'federated:updates': _handler})
-            self._sub_thread = self.pubsub.run_in_thread(daemon=True, sleep_time=0.01)
-        except Exception as e:
-            logger.warning(f"Could not start client update subscription: {e}")
-            self.pubsub = None
-            self._sub_thread = None
-
-    def stop_subscription(self):
-        """Stop background subscription thread"""
-        if getattr(self, '_sub_thread', None) is not None:
-            try:
-                self._sub_thread.stop()
-            except Exception:
-                pass
-            self._sub_thread = None
-        if getattr(self, 'pubsub', None) is not None:
-            try:
-                self.pubsub.close()
-            except Exception:
-                pass
-            self.pubsub = None
+    def stop_subscription(self, timeout=1.0):
+        """Retire admission; return True only when the native worker drained."""
+        return self._subscription.stop(timeout)
 
     @round_owned
     def receive_weights(self):

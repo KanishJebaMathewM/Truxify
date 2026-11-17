@@ -75,27 +75,6 @@ export function isRetryable(error) {
   if (isNonRetryableSupabaseError(error)) return false;
   return isTransientError(error);
 }
-// backend/api/src/core/retry.js
-
-// Define transient status codes eligible for automatic retry
-const TRANSIENT_STATUSES = new Set([
-  408, // Request Timeout
-  429, // Too Many Requests
-  500, // Internal Server Error
-  502, // Bad Gateway
-  503, // Service Unavailable
-  504  // Gateway Timeout
-]);
-
-/**
- * Determines whether an HTTP status code represents a transient failure.
- * @param {number|string} status - HTTP status code to evaluate.
- * @returns {boolean} True if the status is transient and eligible for retry.
- */
-export const isTransientHttpStatus = (status) => {
-  const numericStatus = Number(status);
-  return Number.isFinite(numericStatus) && TRANSIENT_STATUSES.has(numericStatus);
-};
 export async function executeWithRetry(asyncFn, options = {}) {
   const maxRetries = retryCountOrDefault(options.maxRetries, DEFAULT_MAX_RETRIES);
   const baseDelayMs = options.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;

@@ -27,9 +27,36 @@ vi.mock('../../src/core/telemetry/ContextPropagator.js', () => ({
   },
 }));
 
-const { executeWithRetry, isRetryable } = await import('../../src/core/retry.js');
+const { executeWithRetry, isRetryable, isTransientHttpStatus } = await import('../../src/core/retry.js');
 
 const logger = (await import('../../src/middleware/logger.js')).default;
+
+describe('isTransientHttpStatus', () => {
+  it('is exported exactly once and callable', () => {
+    expect(typeof isTransientHttpStatus).toBe('function');
+  });
+
+  it('returns true for transient 4xx/5xx statuses', () => {
+    expect(isTransientHttpStatus(408)).toBe(true);
+    expect(isTransientHttpStatus(429)).toBe(true);
+    expect(isTransientHttpStatus(500)).toBe(true);
+    expect(isTransientHttpStatus(502)).toBe(true);
+    expect(isTransientHttpStatus(503)).toBe(true);
+    expect(isTransientHttpStatus(504)).toBe(true);
+  });
+
+  it('treats every 5xx status as transient', () => {
+    expect(isTransientHttpStatus(501)).toBe(true);
+    expect(isTransientHttpStatus(505)).toBe(true);
+  });
+
+  it('returns false for terminal statuses and non-numbers', () => {
+    expect(isTransientHttpStatus(400)).toBe(false);
+    expect(isTransientHttpStatus(404)).toBe(false);
+    expect(isTransientHttpStatus(null)).toBe(false);
+    expect(isTransientHttpStatus('503')).toBe(false);
+  });
+});
 
 describe('isRetryable', () => {
   it('returns true for network error codes', () => {

@@ -2,7 +2,6 @@ import crypto from 'crypto';
 import logger from '../middleware/logger.js';
 // backend/api/src/services/trackingTokenService.js (Excerpt)
 
-import logger from '../middleware/logger.js';
 
 export async function generateTrackingToken(orderId) {
   try {

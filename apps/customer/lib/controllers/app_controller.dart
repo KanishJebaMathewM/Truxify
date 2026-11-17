@@ -134,6 +134,7 @@ class TruxifyController extends ChangeNotifier {
       case 'ta': return 'Tamil';
       case 'kn': return 'Kannada';
       case 'mr': return 'Marathi';
+      case 'es': return 'Spanish';
       default: return 'English';
     }
   }
@@ -152,3 +153,4 @@ class TruxifyScope extends InheritedNotifier<TruxifyController> {
     return scope!.notifier!;
   }
 }
+

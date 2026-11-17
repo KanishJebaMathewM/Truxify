@@ -22,6 +22,7 @@ class _LanguageScreenState extends State<LanguageScreen> {
     {'code': 'ta', 'name': 'Tamil', 'native': 'தமிழ்'},
     {'code': 'kn', 'name': 'Kannada', 'native': 'ಕನ್ನಡ'},
     {'code': 'mr', 'name': 'Marathi', 'native': 'मराठी'},
+    {'code': 'es', 'name': 'Spanish', 'native': 'Español'},
   ];
 
   void _showLanguageChangedSnackBar() {
@@ -133,3 +134,4 @@ class _LanguageScreenState extends State<LanguageScreen> {
     );
   }
 }
+

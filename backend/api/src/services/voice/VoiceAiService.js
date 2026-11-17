@@ -5,8 +5,6 @@ import axios from 'axios';
 import logger from '../../middleware/logger.js';
 // backend/api/src/services/voice/VoiceAiService.js
 
-import axios from 'axios';
-import logger from '../../middleware/logger.js';
 
 export class VoiceServiceError extends Error {
   constructor(message, code) {

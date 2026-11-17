@@ -11,6 +11,7 @@ Truxify is built to disrupt India's ₹14 lakh crore freight industry by elimina
 Use the quick links below to navigate through the technical docs:
 
 * **[Architecture & Tech Stack](Architecture-&-Tech-Stack)**: High-level system design, service communication, and production tools.
+* **[Architecture Decision Records (ADRs)](../ARCHITECTURE_DECISIONS.md)**: Technical rationale, trade-offs, and FAQ on Polygon, FastAPI, OSRM, n8n, Supabase+PostGIS, and Hardhat.
 * **[Getting Started & Local Setup](Getting-Started-&-Local-Setup)**: Run the Flutter apps, start the Express API, run the FastAPI ML engine, and launch the database stack locally.
 * **[Database Schema & Flows](Database-Schema)**: Supabase PostgreSQL, MongoDB event streams, and Redis cache strategies.
 * **[Machine Learning Engine](Machine-Learning-Layer)**: Deep dive into the 10 models (matching, dynamic pricing, profit prediction, VRP, demand heatmaps, etc.) running on FastAPI.

@@ -4,6 +4,8 @@ Thank you for considering contributing to Truxify! We appreciate every contribut
 
 Truxify is a broker-free, ML-powered, blockchain-secured freight platform built to connect manufacturers directly with truck drivers across India. By contributing, you help empower India's 1.4 crore truck drivers with transparent pricing, instant payments, and route optimization.
 
+💬 **Join our Community**: Have questions, feature ideas, or want to collaborate on Truxify and other open-source projects? Join our [Discord Server](https://discord.gg/7MhyE48Au)!
+
 ---
 
 ## 📐 Table of Contents
@@ -54,7 +56,7 @@ Ensure you have the following installed on your local machine:
 | Tool | Recommended Version | Download Link |
 |---|---|---|
 | **Flutter SDK** | `>= 3.19.0` | [flutter.dev](https://flutter.dev) |
-| **Node.js** | `>= 20.x` (LTS) | [nodejs.org](https://nodejs.org) |
+| **Node.js** | `>= 22.x` (LTS) | [nodejs.org](https://nodejs.org) |
 | **Python** | `>= 3.11.x` | [python.org](https://python.org) |
 | **Docker & Compose** | Latest | [docker.com](https://www.docker.com) |
 | **Git** | Latest | [git-scm.com](https://git-scm.com) |

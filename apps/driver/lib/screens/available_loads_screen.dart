@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/app_models.dart';
 import '../services/marketplace_repository.dart';
+import 'load_optimiser_screen.dart';
 
 class AvailableLoadsScreen extends StatefulWidget {
   const AvailableLoadsScreen({
@@ -65,12 +66,36 @@ class _AvailableLoadsScreenState extends State<AvailableLoadsScreen> {
     return sorted;
   }
 
+  void _openLoadOptimiser(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => LoadOptimiserScreen(
+          repository: _repository,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Available Loads'),
         centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.auto_awesome_rounded),
+            tooltip: 'Optimise My Load',
+            onPressed: () => _openLoadOptimiser(context),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        icon: const Icon(Icons.auto_awesome_rounded),
+        label: const Text('Optimise My Load'),
+        backgroundColor: const Color(0xFF0F9D58),
+        foregroundColor: Colors.white,
+        onPressed: () => _openLoadOptimiser(context),
       ),
       body: Column(
         children: [
@@ -80,6 +105,13 @@ class _AvailableLoadsScreenState extends State<AvailableLoadsScreen> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
+                  ActionChip(
+                    avatar: const Icon(Icons.auto_awesome_rounded, size: 16, color: Colors.purple),
+                    label: const Text('Optimise My Load', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.purple)),
+                    backgroundColor: Colors.purple.withOpacity(0.08),
+                    onPressed: () => _openLoadOptimiser(context),
+                  ),
+                  const SizedBox(width: 8),
                   FilterChip(
                     label: const Text('Near me'),
                     selected: _selectedFilter == _LoadFilter.nearMe,

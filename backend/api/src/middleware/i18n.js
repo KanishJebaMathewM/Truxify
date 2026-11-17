@@ -8,50 +8,25 @@
 
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import i18next from 'i18next';
 import middleware from 'i18next-http-middleware';
 import logger from './logger.js';
-import logger from './logger.js'; // Adjust relative import path as needed
 
-// Inside backend/api/src/middleware/i18n.js
-
-let enTranslations = {};
-let esTranslations = {};
-
-try {
-  enTranslations = await import('../locales/en.json', { assert: { type: 'json' } });
-} catch (err) {
-  // Replace console.warn with structured logger.warn
-  logger.warn({ 
-    event: 'I18N_LOCALE_LOAD_FALLBACK',
-    locale: 'en',
-    error: err.message,
-    stack: err.stack 
-  }, '[i18n] Failed to load en.json locale, falling back to empty object');
-}
-
-try {
-  esTranslations = await import('../locales/es.json', { assert: { type: 'json' } });
-} catch (err) {
-  // Replace console.warn with structured logger.warn
-  logger.warn({ 
-    event: 'I18N_LOCALE_LOAD_FALLBACK',
-    locale: 'es',
-    error: err.message,
-    stack: err.stack 
-  }, '[i18n] Failed to load es.json locale, falling back to empty object');
-}
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEFAULT_LOCALE = 'en';
 const SUPPORTED_LOCALES = ['en', 'ta', 'hi', 'es'];
+
+export const supportedLocales = ['en', 'es', 'fr', 'de', 'ta'];
+export const defaultLocale = 'en';
 
 // Cache loaded translation dictionaries to prevent repetitive disk I/O
 const translationCache = {};
 
 const enDict = (() => {
   try {
-    return JSON.parse(fs.readFileSync(path.join(__dirname, '../locales/en.json')));
+    return JSON.parse(fs.readFileSync(path.join(__dirname, '../locales/en.json'), 'utf8'));
   } catch (err) {
     logger.warn(
       { event: 'I18N_LOCALE_LOAD_ERROR', locale: 'en', error: err && err.message },
@@ -60,15 +35,18 @@ const enDict = (() => {
     return {};
   }
 })();
-// backend/api/src/middleware/i18n.js
 
-/**
- * i18n Configuration & Localization Utilities
- * Cleaned up per #14582 (unused i18nMiddleware removed)
- */
-
-export const supportedLocales = ['en', 'es', 'fr', 'de', 'ta'];
-export const defaultLocale = 'en';
+const esDict = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, '../locales/es.json'), 'utf8'));
+  } catch (err) {
+    logger.warn(
+      { event: 'I18N_LOCALE_LOAD_ERROR', locale: 'es', error: err && err.message },
+      '[i18n] Failed to load es.json locale, falling back to empty object'
+    );
+    return {};
+  }
+})();
 
 /**
  * Resolves the preferred locale from request headers or query parameters.
@@ -91,17 +69,6 @@ export function resolveLocale(req) {
 
   return defaultLocale;
 }
-const esDict = (() => {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(__dirname, '../locales/es.json')));
-  } catch (err) {
-    logger.warn(
-      { event: 'I18N_LOCALE_LOAD_ERROR', locale: 'es', error: err && err.message },
-      '[i18n] Failed to load es.json locale, falling back to empty object'
-    );
-    return {};
-  }
-})();
 
 function loadLocaleDictionary(locale) {
   if (translationCache[locale]) {
@@ -117,7 +84,6 @@ function loadLocaleDictionary(locale) {
       return parsed;
     }
   } catch (err) {
-    // Replaced console.warn with structured logger.warn
     logger.warn(
       {
         event: 'I18N_LOCALE_LOAD_ERROR',
@@ -134,9 +100,8 @@ function loadLocaleDictionary(locale) {
 export function i18n(defaultLang = DEFAULT_LOCALE) {
   return (req, res, next) => {
     try {
-      // Extract locale from query parameter, Accept-Language header, or default
-      const queryLocale = req.query.lang || req.query.locale;
-      const acceptHeader = req.headers['accept-language'];
+      const queryLocale = req.query?.lang || req.query?.locale;
+      const acceptHeader = req.headers?.['accept-language'];
       
       let detectedLocale = defaultLang;
 
@@ -149,7 +114,6 @@ export function i18n(defaultLang = DEFAULT_LOCALE) {
         }
       }
 
-      // Load dictionary (falls back to default if target fails)
       let dictionary = loadLocaleDictionary(detectedLocale);
       if (!dictionary && detectedLocale !== DEFAULT_LOCALE) {
         detectedLocale = DEFAULT_LOCALE;
@@ -159,7 +123,6 @@ export function i18n(defaultLang = DEFAULT_LOCALE) {
       req.locale = detectedLocale;
       req.t = (key, interpolations = {}) => {
         let text = dictionary?.[key] || translationCache[DEFAULT_LOCALE]?.[key] || key;
-        // Simple interpolation replacement (e.g. {{name}})
         Object.keys(interpolations).forEach((placeholder) => {
           text = text.replace(new RegExp(`{{${placeholder}}}`, 'g'), interpolations[placeholder]);
         });
@@ -198,8 +161,10 @@ export const errorTranslationInterceptor = (req, res, next) => {
   const originalJson = res.json;
   res.json = function(body) {
     if (body !== null && body && typeof body === 'object' && typeof body.error === 'string') {
-      const translated = req.t(body.error, { defaultValue: body.error });
-      body.error = translated;
+      if (typeof req?.t === 'function') {
+        const translated = req.t(body.error, { defaultValue: body.error });
+        body.error = translated;
+      }
     }
     return originalJson.call(this, body);
   };

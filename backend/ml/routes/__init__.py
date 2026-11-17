@@ -49,6 +49,7 @@ ML_ROUTE_MODULES: list[tuple[str, str]] = [
     ("transformer_routes", "Time Series Transformers"),
     ("eta_routes", "Real-Time Traffic ETA"),
     ("cold_chain_routes", "Cold-Chain Anomaly Detection"),
+    ("load_optimiser", "Model #16 Cargo & Payload Optimiser"),
 ]
 
 

@@ -52,10 +52,6 @@ export const validateFile = (file) => {
         throw new Error('No file provided');
     }
 
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-        throw new Error(`File size exceeds maximum limit of ${MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB`);
-    }
-
     if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
         throw new Error(`Invalid file type. Allowed types: ${ALLOWED_MIME_TYPES.join(', ')}`);
     }
@@ -71,6 +67,12 @@ export const validateFile = (file) => {
 
     if (!Buffer.isBuffer(file.buffer)) {
         throw new Error('File content is required for type validation');
+    }
+
+    // The multipart size field is caller-controlled and may be missing, so the
+    // limit has to come from the bytes that will actually be stored.
+    if (file.buffer.length > MAX_FILE_SIZE_BYTES) {
+        throw new Error(`File size exceeds maximum limit of ${MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB`);
     }
 
     const detectedType = detectFileType(file.buffer);
@@ -94,8 +96,17 @@ export const computeSHA256Hash = (buffer) => {
 export const sanitizeFileName = (originalName) => {
     const timestamp = Date.now();
     const randomString = crypto.randomBytes(4).toString('hex');
-    const extension = originalName.substring(originalName.lastIndexOf('.')).toLowerCase();
-    return `${timestamp}-${randomString}${extension}`;
+    if (!originalName || typeof originalName !== 'string') {
+        return `${timestamp}-${randomString}`;
+    }
+    const lastDot = originalName.lastIndexOf('.');
+    if (lastDot === -1 || lastDot === originalName.length - 1) {
+        return `${timestamp}-${randomString}`;
+    }
+    const rawExt = originalName.substring(lastDot).toLowerCase();
+    const cleanExt = rawExt.replace(/[^a-z0-9.]/g, '');
+    const validExt = /^\.[a-z0-9]+$/.test(cleanExt) ? cleanExt : '';
+    return `${timestamp}-${randomString}${validExt}`;
 };
 
 export default {

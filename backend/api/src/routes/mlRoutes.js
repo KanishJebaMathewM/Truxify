@@ -687,4 +687,29 @@ router.post('/vrp', authenticate, userLimiter, async (req, res) => {
   });
 });
 
+/**
+ * POST /api/ml/load-optimiser
+ * Model #16: Cargo & Payload Multi-Load Optimiser
+ */
+router.post(
+  '/load-optimiser',
+  authenticate,
+  userLimiter,
+  async (req, res) => {
+    try {
+      const { truck_payload_kg, truck_volume_m3, available_loads, driver_location } = req.body;
+      if (!truck_payload_kg || !truck_volume_m3 || !available_loads || !driver_location) {
+        return res.status(400).json({
+          error: 'Missing required fields: truck_payload_kg, truck_volume_m3, available_loads, driver_location'
+        });
+      }
+      const result = await optimiseLoads(req.body);
+      return res.json(result);
+    } catch (err) {
+      logger.error({ err: err.message }, '[ML] Failed to run cargo load optimiser');
+      return res.status(502).json({ error: 'Failed to compute optimal load combination.' });
+    }
+  }
+);
+
 export default router;

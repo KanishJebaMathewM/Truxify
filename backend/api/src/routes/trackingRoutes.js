@@ -1,11 +1,11 @@
-﻿import express from 'express';
+import express from 'express';
 import rateLimit from 'express-rate-limit';
 
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { validateBody } from '../middleware/validate.js';
 import { shareTrackingSchema } from '../validation/requestSchemas.js';
-import { createUserClient } from '../config/db.js';
+import { createUserClient, supabaseAdmin } from '../config/db.js';
 import { TrackingTokenService } from '../services/trackingTokenService.js';
 import logger from '../middleware/logger.js';
 import { createStore, safeIpKeyGenerator } from '../middleware/rateLimiter.js';
@@ -162,4 +162,192 @@ router.post(
   }
 );
 
+// Rate limiter for batch tracking updates
+const batchTrackingLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: process.env.NODE_ENV === 'test' ? 1000 : 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id || safeIpKeyGenerator(req),
+  store: createStore('rl:tracking-batch:'),
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// POST /api/tracking/batch
+// Authenticated — uploads buffered GPS coordinates collected while offline.
+// Replays the chronological GPS trail to fill tracking gaps and updates current location.
+// ──────────────────────────────────────────────────────────────────────────
+router.post(
+  ['/batch', '/api/tracking/batch'],
+  authenticate,
+  batchTrackingLimiter,
+  async (req, res) => {
+    try {
+      const userId = req.user?.id || req.body.driver_id;
+      if (!userId) {
+        return res.status(401).json({ error: 'User must be authenticated' });
+      }
+
+      const rawCoords = req.body.coordinates || req.body.locations || req.body;
+      if (!Array.isArray(rawCoords) || rawCoords.length === 0) {
+        return res.status(400).json({ error: 'coordinates must be a non-empty array' });
+      }
+
+      const tripId = req.body.trip_id || null;
+      const batchId = req.body.batch_id || null;
+
+      const validLocations = [];
+      let newestLocation = null;
+      let newestTimestamp = 0;
+
+      for (const point of rawCoords) {
+        if (!point || typeof point !== 'object' || Array.isArray(point)) {
+          continue;
+        }
+
+        const lat = parseFloat(point.latitude !== undefined ? point.latitude : point.lat);
+        const lng = parseFloat(point.longitude !== undefined ? point.longitude : point.lng);
+
+        if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+          continue;
+        }
+
+        const speed = Number.isFinite(parseFloat(point.speed)) ? parseFloat(point.speed) : null;
+        const heading = Number.isFinite(parseFloat(point.heading)) ? parseFloat(point.heading) : null;
+        const accuracy = Number.isFinite(parseFloat(point.accuracy)) ? parseFloat(point.accuracy) : null;
+
+        const timeVal = point.timestamp || point.recorded_at || point.time;
+        const capturedAt = timeVal ? new Date(timeVal) : new Date();
+        if (!Number.isFinite(capturedAt.getTime())) {
+          continue;
+        }
+        const recordedAt = capturedAt.toISOString();
+
+        validLocations.push({
+          driver_id: userId,
+          latitude: lat,
+          longitude: lng,
+          speed,
+          heading,
+          accuracy,
+          recorded_at: recordedAt,
+        });
+
+        const ts = capturedAt.getTime();
+        if (ts > newestTimestamp) {
+          newestTimestamp = ts;
+          newestLocation = validLocations[validLocations.length - 1];
+        }
+      }
+
+      if (validLocations.length === 0) {
+        return res.status(400).json({ error: 'No valid coordinates found in the batch payload' });
+      }
+
+      // Sort valid locations chronologically to replay the exact GPS trail
+      validLocations.sort((a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime());
+
+      // 1. Replay GPS trail into driver_location_history
+      const historyRecords = validLocations.map(loc => ({
+        driver_id: loc.driver_id,
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        speed: loc.speed,
+        heading: loc.heading,
+        recorded_at: loc.recorded_at,
+      }));
+
+      const { error: historyError } = await supabaseAdmin
+        .from('driver_location_history')
+        .upsert(historyRecords, { onConflict: 'driver_id, recorded_at', ignoreDuplicates: true });
+
+      if (historyError) {
+        logger.error({ err: historyError.message, userId }, '[Tracking] Failed to replay location history');
+        return res.status(500).json({ error: 'Failed to persist location trail history' });
+      }
+
+      // 2. If trip_id is present, log telemetry events to trip_events to fill tracking trail gap
+      if (tripId) {
+        try {
+          const tripRecords = validLocations.map((loc, idx) => ({
+            event_id: `offline-gps-${userId}-${new Date(loc.recorded_at).getTime()}-${idx}`,
+            user_id: userId,
+            trip_id: tripId,
+            event_type: 'gpsUpdate',
+            event_timestamp: loc.recorded_at,
+            latitude: loc.latitude,
+            longitude: loc.longitude,
+            metadata: {
+              speed: loc.speed,
+              heading: loc.heading,
+              accuracy: loc.accuracy,
+              replayed_from_offline: true,
+              batch_id: batchId,
+            },
+            created_at: new Date().toISOString(),
+          }));
+
+          await supabaseAdmin
+            .from('trip_events')
+            .upsert(tripRecords, { onConflict: 'event_id', ignoreDuplicates: true });
+        } catch (tripEventErr) {
+          logger.warn({ err: tripEventErr.message, tripId }, '[Tracking] Non-fatal: could not log to trip_events');
+        }
+      }
+
+      // 3. Update current location if this batch has the newest position
+      if (newestLocation) {
+        const { data: existingLocation } = await supabaseAdmin
+          .from('driver_locations')
+          .select('recorded_at')
+          .eq('driver_id', userId)
+          .maybeSingle();
+
+        let updateCurrent = true;
+        if (existingLocation && existingLocation.recorded_at) {
+          if (newestTimestamp <= new Date(existingLocation.recorded_at).getTime()) {
+            updateCurrent = false;
+          }
+        }
+
+        if (updateCurrent) {
+          const { error: currentError } = await supabaseAdmin
+            .from('driver_locations')
+            .upsert(
+              {
+                driver_id: userId,
+                latitude: newestLocation.latitude,
+                longitude: newestLocation.longitude,
+                speed: newestLocation.speed,
+                heading: newestLocation.heading,
+                updated_at: new Date().toISOString(),
+                recorded_at: newestLocation.recorded_at,
+                is_active: true,
+              },
+              { onConflict: 'driver_id' }
+            );
+
+          if (currentError) {
+            logger.error({ err: currentError.message, userId }, '[Tracking] Failed to update newest driver location');
+          }
+        }
+      }
+
+      logger.info({ userId, count: validLocations.length, batchId }, '[Tracking] Replayed GPS trail successfully');
+
+      return res.status(200).json({
+        success: true,
+        replayed_count: validLocations.length,
+        batch_id: batchId,
+        latest_coordinate: newestLocation,
+        message: `Successfully replayed ${validLocations.length} GPS coordinates`,
+      });
+    } catch (err) {
+      logger.error({ err: err.message }, '[Tracking] Unexpected error processing tracking batch');
+      return res.status(500).json({ error: 'Internal Server Error' });
+    }
+  }
+);
+
 export default router;
+

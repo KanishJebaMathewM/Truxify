@@ -1,151 +1,173 @@
-import numpy as np
-import pandas as pd
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import StandardScaler
-from typing import Dict, List, Tuple, Any, Optional
-import networkx as nx
+
 import logging
 from datetime import datetime
-from causalnex.structure.notears import from_pandas
-from dowhy import CausalModel
-import warnings
-warnings.filterwarnings('ignore')
-# backend/ai/causal_inference.py (Excerpt)
-
-warnings.filterwarnings("ignore")
+from typing import Dict, List, Optional, Any
 
 import numpy as np
 import pandas as pd
-from causalimpact import CausalImpact
-import logging
+import networkx as nx
+
+from causalnex.structure.notears import from_pandas
+from dowhy import CausalModel
+from causalimpact import CausalImpact as PyCausalImpact
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_data(data: pd.DataFrame) -> pd.DataFrame:
+    """Validate and prepare numerical data."""
+    if not isinstance(data, pd.DataFrame) or data.empty:
+        raise ValueError("Input must be a non-empty pandas DataFrame.")
+
+    if data.columns.duplicated().any():
+        raise ValueError("Duplicate column names are not allowed.")
+
+    if not all(pd.api.types.is_numeric_dtype(data[c]) for c in data.columns):
+        raise ValueError("All columns must contain numerical values.")
+
+    data = data.replace([np.inf, -np.inf], np.nan).dropna()
+
+    if len(data) < 10:
+        raise ValueError("At least 10 valid observations are required.")
+
+    if data.shape[1] < 2:
+        raise ValueError("At least two variables are required.")
+
+    return data
+
 
 def measure_impact(pre_data, post_data):
-    """
-    Measures causal impact by combining pre-intervention and post-intervention data series
-    and passing correct period bounds to the CausalImpact library.
-    """
-    try:
-        # Ensure inputs are numpy arrays or pandas DataFrames/Series
-        pre_arr = np.asarray(pre_data)
-        post_arr = np.asarray(post_data)
+    """Measure causal impact using pre- and post-intervention data."""
+    pre = np.asarray(pre_data, dtype=float).reshape(-1)
+    post = np.asarray(post_data, dtype=float).reshape(-1)
 
-        # ✅ Concatenate pre_data and post_data into a single full data series
-        full_data = np.concatenate([pre_arr, post_arr], axis=0)
+    if len(pre) < 2 or len(post) < 1:
+        raise ValueError("Insufficient pre/post intervention data.")
 
-        # ✅ Define precise index bounds for pre- and post-intervention periods
-        pre_period = [0, len(pre_arr) - 1]
-        post_period = [len(pre_arr), len(full_data) - 1]
+    if not np.isfinite(pre).all() or not np.isfinite(post).all():
+        raise ValueError("Data contains invalid numerical values.")
 
-        logger.info(f"Running CausalImpact with pre_period={pre_period} and post_period={post_period}")
+    full_data = np.concatenate([pre, post])
 
-        # Initialize and fit CausalImpact
-        ci = CausalImpact(full_data, pre_period, post_period)
-        return ci
-    except Exception as err:
-        logger.error(f"Error in measure_impact: {str(err)}")
-        raise
-logger = logging.getLogger(__name__)
+    return PyCausalImpact(
+        pd.DataFrame({"value": full_data}),
+        [0, len(pre) - 1],
+        [len(pre), len(full_data) - 1]
+    )
 
 
 class CausalDiscovery:
-    """Discover causal relationships from logistics data"""
+    """Discover causal relationships from logistics data."""
 
     def __init__(self):
         self.structure_model = None
-        self.inference_engine = None
         self.causal_graph = nx.DiGraph()
-
-        logger.info("✅ Causal Discovery initialized")
+        logger.info("Causal Discovery initialized")
 
     def discover_causal_graph(
-        self, data: pd.DataFrame, method: str = "notears"
+        self,
+        data: pd.DataFrame,
+        method: str = "notears"
     ) -> nx.DiGraph:
-        """Discover causal graph from data"""
-        try:
-            if method == "notears":
-                # Use NOTEARS algorithm
-                self.structure_model = from_pandas(
-                    data,
-                    tabu_edges=[],
-                    max_iter=100
-                )
-                self.causal_graph = self.structure_model.to_nx()
-            else:
-                # Use PC algorithm
-                from causalnex.structure import PC
+        """Discover causal relationships using NOTEARS."""
 
-                pc = PC()
-                self.structure_model = pc.learn(data)
-                self.causal_graph = self.structure_model.to_nx()
+        try:
+            data = _validate_data(data)
+
+            if method.lower() != "notears":
+                raise ValueError(
+                    "Only NOTEARS is supported by this implementation."
+                )
+
+            self.structure_model = from_pandas(
+                data,
+                tabu_edges=[],
+                max_iter=100,
+                w_threshold=0.1
+            )
+
+            self.causal_graph = nx.DiGraph(
+                self.structure_model.to_directed()
+            )
 
             logger.info(
-                f"✅ Causal graph discovered with "
-                f"{len(self.causal_graph.nodes)} nodes"
+                "Causal graph discovered: %s nodes, %s edges",
+                self.causal_graph.number_of_nodes(),
+                self.causal_graph.number_of_edges()
             )
 
             return self.causal_graph
 
-        except Exception as e:
-            logger.error(f"Causal discovery failed: {e}")
-            return nx.DiGraph()
+        except Exception:
+            logger.exception("Causal discovery failed")
+            self.structure_model = None
+            self.causal_graph = nx.DiGraph()
+            raise
 
     def identify_causes(self, target_variable: str) -> List[str]:
-        """Identify direct causes of target variable."""
+        """Identify direct causes of a target variable."""
+
         if target_variable not in self.causal_graph:
             return []
 
         return list(self.causal_graph.predecessors(target_variable))
 
     def identify_effects(self, source_variable: str) -> List[str]:
-        """Identify direct effects of source variable."""
+        """Identify direct effects of a source variable."""
+
         if source_variable not in self.causal_graph:
             return []
 
         return list(self.causal_graph.successors(source_variable))
 
     def get_causal_paths(
-        self, source: str, target: str
+        self,
+        source: str,
+        target: str
     ) -> List[List[str]]:
-        """Find all causal paths from source to target"""
-        paths = []
+        """Find all simple causal paths."""
 
-        if source not in self.causal_graph or target not in self.causal_graph:
-            return paths
-
-        for path in nx.all_simple_paths(
-            self.causal_graph,
-            source,
-            target
+        if (
+            source not in self.causal_graph
+            or target not in self.causal_graph
         ):
-            paths.append(path)
+            return []
 
-        return paths
+        return list(
+            nx.all_simple_paths(self.causal_graph, source, target)
+        )
 
     def calculate_effect_strength(
-        self, source: str, target: str
+        self,
+        source: str,
+        target: str
     ) -> float:
-        """Calculate causal effect strength"""
-        if self.structure_model is not None:
-            effect = self.structure_model.get_edge_strength(
-                source,
-                target
-            )
-            return effect
+        """Return the learned edge weight."""
 
-        return 0.0
+        if self.structure_model is None:
+            return 0.0
+
+        if not self.structure_model.has_edge(source, target):
+            return 0.0
+
+        return float(
+            self.structure_model.get_edge_data(
+                source, target
+            ).get("weight", 0.0)
+        )
 
 
 class DoCalculus:
-    """Do-calculus for intervention analysis"""
+    """Perform causal effect estimation using DoWhy."""
 
     def __init__(self):
         self.causal_model = None
-        self.do_results = {}
+        self.data = None
+        self.treatment = None
+        self.outcome = None
+        self.confounders = []
 
-        logger.info("✅ Do-Calculus initialized")
+        logger.info("Do-Calculus initialized")
 
     def set_causal_model(
         self,
@@ -153,109 +175,101 @@ class DoCalculus:
         treatments: List[str],
         outcomes: List[str]
     ):
-        """Set up causal model for do-calculus"""
+        """Initialize a causal model for one treatment and outcome."""
+
+        data = _validate_data(data)
+
+        if len(treatments) != 1 or len(outcomes) != 1:
+            raise ValueError(
+                "Provide exactly one treatment and one outcome."
+            )
+
+        treatment = treatments[0]
+        outcome = outcomes[0]
+
+        if treatment == outcome:
+            raise ValueError("Treatment and outcome must differ.")
+
+        if treatment not in data.columns or outcome not in data.columns:
+            raise ValueError("Treatment or outcome column not found.")
+
+        confounders = [
+            col for col in data.columns
+            if col not in (treatment, outcome)
+        ]
+
+        edges = [f'"{treatment}" -> "{outcome}"']
+
+        for confounder in confounders:
+            edges.append(f'"{confounder}" -> "{treatment}"')
+            edges.append(f'"{confounder}" -> "{outcome}"')
+
+        graph = "digraph {\n" + ";\n".join(edges) + ";\n}"
 
         self.causal_model = CausalModel(
             data=data,
-            treatment=treatments,
-            outcome=outcomes,
-            graph=self._build_graph(
-                treatments,
-                outcomes,
-                data
-            )
+            treatment=treatment,
+            outcome=outcome,
+            graph=graph
         )
 
-        logger.info("✅ Causal model set")
+        self.data = data
+        self.treatment = treatment
+        self.outcome = outcome
+        self.confounders = confounders
 
-    def _build_graph(
-        self,
-        treatments: List[str],
-        outcomes: List[str],
-        data: pd.DataFrame
-    ) -> str:
-        """Build graph structure using the real dataframe column names."""
+        logger.info(
+            "Causal model initialized: %s -> %s",
+            treatment, outcome
+        )
 
-        treatment_set = set(treatments)
-        outcome_set = set(outcomes)
+    def _validate_model(self, treatment, outcome):
+        if self.causal_model is None:
+            raise ValueError("Set the causal model first.")
 
-        confounders = [
-            c
-            for c in data.columns
-            if c not in treatment_set and c not in outcome_set
-        ]
+        if treatment != self.treatment or outcome != self.outcome:
+            raise ValueError("Requested treatment/outcome does not match model.")
 
-        lines = []
+    def _estimate(self, treatment, outcome, target_units="ate"):
+        """Estimate an effect using linear regression adjustment."""
 
-        for treatment in treatments:
-            for outcome in outcomes:
-                lines.append(
-                    f"    {treatment} -> {outcome};"
-                )
+        self._validate_model(treatment, outcome)
 
-        for confounder in confounders:
-            for treatment in treatments:
-                lines.append(
-                    f"    {confounder} -> {treatment};"
-                )
+        identified_estimand = self.causal_model.identify_effect()
 
-            for outcome in outcomes:
-                lines.append(
-                    f"    {confounder} -> {outcome};"
-                )
+        estimate = self.causal_model.estimate_effect(
+            identified_estimand,
+            method_name="backdoor.linear_regression",
+            target_units=target_units
+        )
 
-        return "digraph {\n" + "\n".join(lines) + "\n}"
+        return estimate
 
     def estimate_ate(
         self,
         treatment: str,
         outcome: str
-    ) -> Dict:
-        """Estimate the Average Treatment Effect (ATE) using backdoor
-        propensity score weighting, based on the graph built in
-        set_causal_model.
-        """
+    ) -> Optional[Dict[str, Any]]:
+        """Estimate Average Treatment Effect."""
 
         try:
-            identified_estimand = (
-                self.causal_model.identify_effect()
-            )
-
-            estimate = self.causal_model.estimate_effect(
-                identified_estimand,
-                method_name="backdoor.propensity_score_weighting"
-            )
+            estimate = self._estimate(treatment, outcome, "ate")
+            value = float(estimate.value)
 
             return {
                 "treatment": treatment,
                 "outcome": outcome,
-                "ate": estimate.value,
+                "ate": value,
                 "effect_size": (
-                    "large"
-                    if abs(estimate.value) > 0.5
-                    else (
-                        "medium"
-                        if abs(estimate.value) > 0.2
-                        else "small"
-                    )
+                    "large" if abs(value) > 0.5
+                    else "medium" if abs(value) > 0.2
+                    else "small"
                 ),
-                "confidence_interval": (
-                    estimate.get_confidence_intervals()
-                    if hasattr(
-                        estimate,
-                        "get_confidence_intervals"
-                    )
-                    else None
-                ),
-                "method": (
-                    "backdoor.propensity_score_weighting"
-                )
+                "method": "backdoor.linear_regression"
             }
 
-        except Exception as e:
-            logger.error(
-                f"ATE estimation failed: {e}"
-            )
+        except Exception:
+            logger.exception("ATE estimation failed")
             return None
 
     def estimate_cate(
@@ -263,297 +277,280 @@ class DoCalculus:
         treatment: str,
         outcome: str,
         features: List[str]
-    ) -> Dict:
-        """Estimate the Average Treatment Effect (ATE).
-
-        DoWhy's backdoor.propensity_score_weighting with
-        target_units="ate" produces a single population-level ATE,
-        NOT a Conditional Average Treatment Effect (CATE).
-
-        The result is therefore returned under an honest 'ate' key.
-        'features' is retained for API compatibility; it does not
-        condition the estimate.
-        """
+    ) -> Optional[Dict[str, Any]]:
+        """Estimate conditional effects using a Random Forest model."""
 
         try:
-            identified_estimand = (
-                self.causal_model.identify_effect()
-            )
+            self._validate_model(treatment, outcome)
 
-            estimate = self.causal_model.estimate_effect(
-                identified_estimand,
-                method_name="backdoor.propensity_score_weighting",
-                target_units="ate"
-            )
+            if not features:
+                raise ValueError("At least one feature is required.")
+
+            if not all(f in self.data.columns for f in features):
+                raise ValueError("One or more features are missing.")
+
+            if treatment in features or outcome in features:
+                raise ValueError(
+                    "Features must exclude treatment and outcome."
+                )
+
+            # A simple heterogeneous-effect estimator:
+            # Fit separate outcome models for each treatment group.
+            treatment_values = self.data[treatment].dropna().unique()
+
+            if len(treatment_values) != 2:
+                raise ValueError(
+                    "This CATE implementation requires binary treatment."
+                )
+
+            group_a, group_b = sorted(treatment_values)
+
+            models = {}
+
+            from sklearn.ensemble import RandomForestRegressor
+
+            for group in (group_a, group_b):
+                subset = self.data[self.data[treatment] == group]
+
+                if len(subset) < 5:
+                    raise ValueError(
+                        "Insufficient observations in a treatment group."
+                    )
+
+                model = RandomForestRegressor(
+                    n_estimators=100,
+                    random_state=42
+                )
+
+                model.fit(
+                    subset[features],
+                    subset[outcome]
+                )
+
+                models[group] = model
+
+            x = self.data[features]
+
+            prediction_a = models[group_a].predict(x)
+            prediction_b = models[group_b].predict(x)
+
+            individual_effects = prediction_b - prediction_a
 
             return {
                 "treatment": treatment,
                 "outcome": outcome,
-                "ate": estimate.value,
                 "features": features,
+                "cate": float(np.mean(individual_effects)),
+                "individual_effects": individual_effects.tolist(),
+                "method": "random_forest_g_computation"
             }
 
-        except Exception as e:
-            logger.error(
-                f"ATE estimation failed: {e}"
-            )
+        except Exception:
+            logger.exception("CATE estimation failed")
             return None
 
     def estimate_ite(
         self,
         treatment: str,
         outcome: str
-    ) -> Dict:
-        """Estimate the Average Treatment Effect on the Treated (ATT).
-
-        target_units="att" produces a single aggregate ATT,
-        not per-unit Individual Treatment Effects.
-        """
+    ) -> Optional[Dict[str, Any]]:
+        """Estimate aggregate ATT, not individual treatment effects."""
 
         try:
-            identified_estimand = (
-                self.causal_model.identify_effect()
-            )
-
-            estimate = self.causal_model.estimate_effect(
-                identified_estimand,
-                method_name="backdoor.propensity_score_weighting",
-                target_units="att"
-            )
+            estimate = self._estimate(treatment, outcome, "att")
 
             return {
                 "treatment": treatment,
                 "outcome": outcome,
-                "att": estimate.value,
+                "att": float(estimate.value),
+                "method": "backdoor.linear_regression"
             }
 
-        except Exception as e:
-            logger.error(
-                f"ATT estimation failed: {e}"
-            )
+        except Exception:
+            logger.exception("ATT estimation failed")
             return None
 
 
 class CausalImpact:
-    """Measure causal impact of interventions"""
+    """Measure causal impact of interventions."""
 
     def __init__(self):
         self.impact_results = {}
-
-        logger.info("✅ Causal Impact initialized")
+        logger.info("Causal Impact initialized")
 
     def measure_impact(
         self,
         pre_data: np.ndarray,
         post_data: np.ndarray,
-        intervention_point: int
-    ) -> Dict:
-        """Measure impact of intervention"""
-
-        data = np.concatenate(
-            [pre_data, post_data]
-        )
-
-        series = pd.DataFrame(
-            {"value": data}
-        )
-
-        if (
-            intervention_point < 0
-            or intervention_point >= len(data)
-        ):
-            raise ValueError(
-                f"intervention_point {intervention_point} "
-                f"is outside the combined pre/post series "
-                f"of length {len(data)}"
-            )
+        intervention_point: Optional[int] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Measure intervention impact."""
 
         try:
-            pre_period = [
-                0,
-                intervention_point - 1
-            ]
+            pre = np.asarray(pre_data, dtype=float).reshape(-1)
+            post = np.asarray(post_data, dtype=float).reshape(-1)
 
-            post_period = [
-                intervention_point,
-                len(data) - 1
-            ]
+            if len(pre) < 2 or len(post) < 1:
+                raise ValueError("Insufficient pre/post data.")
 
-            from causalimpact import CausalImpact
+            if not np.isfinite(pre).all() or not np.isfinite(post).all():
+                raise ValueError("Invalid values in input data.")
 
-            impact = CausalImpact(
-                series,
-                pre_period,
-                post_period
+            data = np.concatenate([pre, post])
+
+            expected_point = len(pre)
+
+            if (
+                intervention_point is not None
+                and intervention_point != expected_point
+            ):
+                raise ValueError(
+                    f"intervention_point must equal {expected_point} "
+                    "for the supplied pre/post arrays."
+                )
+
+            impact = PyCausalImpact(
+                pd.DataFrame({"value": data}),
+                [0, expected_point - 1],
+                [expected_point, len(data) - 1]
             )
-
-            impact.run()
 
             summary = impact.summary()
-            report = impact.report()
 
-            return {
-                "absolute_effect": summary.get(
-                    "absolute_effect",
-                    0
-                ),
-                "relative_effect": summary.get(
-                    "relative_effect",
-                    0
-                ),
-                "p_value": summary.get(
-                    "p_value",
-                    1.0
-                ),
-                "confidence_interval": summary.get(
-                    "confidence_interval",
-                    [0, 0]
-                ),
-                "summary": summary,
-                "report": report
+            if isinstance(summary, pd.DataFrame):
+                summary_result = summary.to_dict()
+            else:
+                summary_result = str(summary)
+
+            report = impact.summary(output="report")
+
+            result = {
+                "absolute_effect": None,
+                "relative_effect": None,
+                "p_value": None,
+                "confidence_interval": None,
+                "summary": summary_result,
+                "report": str(report)
             }
 
-        except Exception as e:
-            logger.error(
-                f"Causal impact measurement failed: {e}"
-            )
+            self.impact_results[datetime.now().isoformat()] = result
+
+            return result
+
+        except Exception:
+            logger.exception("Causal impact measurement failed")
             return None
 
     def calculate_lift(
         self,
         pre: float,
         post: float
-    ) -> Dict:
-        """Calculate lift from intervention"""
+    ) -> Dict[str, Any]:
+        """Calculate percentage lift."""
 
-        lift = (
-            ((post - pre) / pre) * 100
-            if pre != 0
-            else 0
-        )
+        if pre == 0:
+            lift = None
+        else:
+            lift = ((post - pre) / abs(pre)) * 100
 
         return {
             "pre_value": pre,
             "post_value": post,
             "lift_percentage": lift,
             "improvement": (
-                "positive"
-                if lift > 0
-                else (
-                    "negative"
-                    if lift < 0
-                    else "neutral"
-                )
+                "positive" if lift is not None and lift > 0
+                else "negative" if lift is not None and lift < 0
+                else "neutral" if lift is not None
+                else "undefined"
             )
         }
 
 
 class BottleneckAnalyzer:
-    """Root cause analysis for logistics bottlenecks"""
+    """Root cause analysis for logistics bottlenecks."""
 
     def __init__(self):
         self.bottlenecks = []
         self.root_causes = {}
-
-        logger.info(
-            "✅ Bottleneck Analyzer initialized"
-        )
+        logger.info("Bottleneck Analyzer initialized")
 
     def identify_bottlenecks(
         self,
         data: pd.DataFrame,
         metrics: List[str]
-    ) -> List[Dict]:
-        """Identify bottlenecks in logistics operations"""
+    ) -> List[Dict[str, Any]]:
+        """Identify values above the 75th percentile."""
 
         bottlenecks = []
 
+        if data.empty:
+            return bottlenecks
+
         for metric in metrics:
-            if metric in data.columns:
+            if metric not in data.columns:
+                continue
 
-                # Calculate threshold (75th percentile)
-                threshold = data[metric].quantile(0.75)
+            values = pd.to_numeric(
+                data[metric], errors="coerce"
+            ).dropna()
 
-                # Identify high values
-                high_values = data[
-                    data[metric] > threshold
-                ]
+            if values.empty:
+                continue
 
-                if len(high_values) > 0:
-                    bottlenecks.append({
-                        "metric": metric,
-                        "threshold": threshold,
-                        "count": len(high_values),
-                        "percentage": (
-                            len(high_values)
-                            / len(data)
-                        ) * 100,
-                        "average_value": (
-                            high_values[metric].mean()
-                        ),
-                        "max_value": (
-                            high_values[metric].max()
-                        )
-                    })
+            threshold = values.quantile(0.75)
+            high_values = values[values > threshold]
+
+            if high_values.empty:
+                continue
+
+            bottlenecks.append({
+                "metric": metric,
+                "threshold": float(threshold),
+                "count": int(len(high_values)),
+                "percentage": float(
+                    len(high_values) / len(values) * 100
+                ),
+                "average_value": float(high_values.mean()),
+                "max_value": float(high_values.max())
+            })
 
         self.bottlenecks = bottlenecks
-
         return bottlenecks
 
     def find_root_causes(
         self,
-        bottleneck: Dict,
+        bottleneck: Dict[str, Any],
         causal_graph: nx.DiGraph
-    ) -> List[Dict]:
-        """Find root causes of bottleneck"""
-
-        root_causes = []
+    ) -> List[Dict[str, Any]]:
+        """Find direct and indirect ancestors of a bottleneck."""
 
         target = bottleneck.get("metric")
 
-        if target is None:
-            logger.warning(
-                "Cannot find root causes: "
-                "bottleneck has no 'metric' value"
-            )
+        if not target or target not in causal_graph:
             return []
 
-        if target not in causal_graph:
-            self.root_causes[target] = []
-            return []
+        direct_causes = set(causal_graph.predecessors(target))
+        ancestors = nx.ancestors(causal_graph, target)
 
-        ancestors = nx.ancestors(
-            causal_graph,
-            target
-        )
-
-        direct_causes = set(
-            causal_graph.predecessors(target)
-        )
+        root_causes = []
 
         for ancestor in ancestors:
+            try:
+                path_length = nx.shortest_path_length(
+                    causal_graph,
+                    ancestor,
+                    target
+                )
+            except nx.NetworkXNoPath:
+                continue
+
             root_causes.append({
                 "cause": ancestor,
                 "type": (
-                    "direct"
-                    if ancestor in direct_causes
+                    "direct" if ancestor in direct_causes
                     else "indirect"
                 ),
-                "path_length": (
-                    len(
-                        nx.shortest_path(
-                            causal_graph,
-                            ancestor,
-                            target
-                        )
-                    )
-                    if nx.has_path(
-                        causal_graph,
-                        ancestor,
-                        target
-                    )
-                    else 0
-                )
+                "path_length": path_length
             })
 
         self.root_causes[target] = root_causes
@@ -562,31 +559,28 @@ class BottleneckAnalyzer:
 
     def generate_recommendations(
         self,
-        root_causes: List[Dict]
+        root_causes: List[Dict[str, Any]]
     ) -> List[str]:
-        """Generate recommendations based on root causes"""
+        """Generate recommendations from identified causes."""
 
         recommendations = []
 
         for cause in root_causes:
             if cause["type"] == "direct":
                 recommendations.append(
-                    f"Address direct cause: "
-                    f"{cause['cause']}"
+                    f"Address direct cause: {cause['cause']}"
                 )
             else:
                 recommendations.append(
-                    f"Consider indirect cause: "
-                    f"{cause['cause']} "
-                    f"(path length: "
-                    f"{cause['path_length']})"
+                    f"Investigate indirect cause: {cause['cause']} "
+                    f"(path length: {cause['path_length']})"
                 )
 
         return recommendations
 
 
 class CausalInferenceService:
-    """Main Causal Inference Service"""
+    """Main Causal Inference Service."""
 
     def __init__(self):
         self.causal_discovery = CausalDiscovery()
@@ -594,55 +588,52 @@ class CausalInferenceService:
         self.causal_impact = CausalImpact()
         self.bottleneck_analyzer = BottleneckAnalyzer()
 
-        logger.info(
-            "✅ Causal Inference Service initialized"
-        )
+        logger.info("Causal Inference Service initialized")
 
     def analyze_logistics_data(
         self,
         data: pd.DataFrame,
         target_metric: str
-    ) -> Dict:
-        """Complete causal analysis of logistics data"""
+    ) -> Dict[str, Any]:
+        """Perform complete causal analysis."""
 
         try:
-            # Step 1: Discover causal graph
+            data = _validate_data(data)
+
+            if target_metric not in data.columns:
+                raise ValueError(
+                    f"Target metric '{target_metric}' not found."
+                )
+
+            # Step 1: Discover causal graph.
             causal_graph = (
-                self.causal_discovery.discover_causal_graph(
-                    data
-                )
+                self.causal_discovery.discover_causal_graph(data)
             )
 
-            # Step 2: Identify causes
-            causes = (
-                self.causal_discovery.identify_causes(
-                    target_metric
-                )
+            # Step 2: Identify direct causes.
+            causes = self.causal_discovery.identify_causes(
+                target_metric
             )
 
-            # Step 3: Set up causal model
-            self.do_calculus.set_causal_model(
-                data,
-                causes,
-                [target_metric]
-            )
-
-            # Step 4: Estimate treatment effects
+            # Step 3: Estimate each treatment separately.
             ate_results = []
 
             for cause in causes:
-                if cause != target_metric:
-                    ate = (
-                        self.do_calculus.estimate_ate(
-                            cause,
-                            target_metric
-                        )
-                    )
+                self.do_calculus.set_causal_model(
+                    data,
+                    [cause],
+                    [target_metric]
+                )
 
-                    if ate:
-                        ate_results.append(ate)
+                ate = self.do_calculus.estimate_ate(
+                    cause,
+                    target_metric
+                )
 
-            # Step 5: Identify bottlenecks
+                if ate is not None:
+                    ate_results.append(ate)
+
+            # Step 4: Identify bottlenecks.
             bottlenecks = (
                 self.bottleneck_analyzer.identify_bottlenecks(
                     data,
@@ -650,23 +641,20 @@ class CausalInferenceService:
                 )
             )
 
-            # Step 6: Find root causes
+            # Step 5: Identify root causes.
             root_causes = []
 
             for bottleneck in bottlenecks:
-                rc = (
+                root_causes.extend(
                     self.bottleneck_analyzer.find_root_causes(
                         bottleneck,
                         causal_graph
                     )
                 )
 
-                root_causes.extend(rc)
-
-            # Step 7: Generate recommendations
+            # Step 6: Generate recommendations.
             recommendations = (
-                self.bottleneck_analyzer
-                .generate_recommendations(
+                self.bottleneck_analyzer.generate_recommendations(
                     root_causes
                 )
             )
@@ -674,15 +662,9 @@ class CausalInferenceService:
             return {
                 "success": True,
                 "causal_graph": {
-                    "nodes": list(
-                        causal_graph.nodes()
-                    ),
-                    "edges": list(
-                        causal_graph.edges()
-                    ),
-                    "edges_count": len(
-                        causal_graph.edges()
-                    )
+                    "nodes": list(causal_graph.nodes()),
+                    "edges": list(causal_graph.edges()),
+                    "edges_count": causal_graph.number_of_edges()
                 },
                 "causes": causes,
                 "treatment_effects": ate_results,
@@ -693,11 +675,7 @@ class CausalInferenceService:
             }
 
         except Exception as e:
-            logger.error(f"Analysis failed: {e}")
-            return {'success': False, 'error': str(e)}
-            logger.error(
-                f"Analysis failed: {e}"
-            )
+            logger.exception("Causal analysis failed")
 
             return {
                 "success": False,

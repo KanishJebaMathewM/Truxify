@@ -69,7 +69,6 @@ import Redis from 'ioredis';
 import { CacheNamespace } from './CacheNamespace.js';
 import { CacheKeyBuilder } from './CacheKeyBuilder.js';
 import { createCacheEvent, serializeCacheEvent, CacheEventType } from './CacheEvent.js';
-import logger from '../middleware/logger.js';
 
 let subscriber = null;
 let publishClient = null;

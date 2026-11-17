@@ -64,6 +64,14 @@ export class WorkerEventAdapter extends EventPublisher {
     return this;
   }
 
+  getWorker(name) {
+    return this._workers.get(name);
+  }
+
+  unregisterWorker(name) {
+    return this.removeWorker(name);
+  }
+
   removeWorker(name) {
     const worker = this._workers.get(name);
     const handler = this._workerListeners?.get(name);
@@ -84,11 +92,13 @@ export class WorkerEventAdapter extends EventPublisher {
       throw new Error('[WorkerEventAdapter] Not connected');
     }
 
-    const message = {
-      eventType: event.eventType,
-      payload: event.payload,
-      metadata: event.metadata?.toJSON ? event.metadata.toJSON() : event.metadata,
-    };
+    const message = (event.type && !event.eventType)
+      ? event
+      : {
+          eventType: event.eventType,
+          payload: event.payload,
+          metadata: event.metadata?.toJSON ? event.metadata.toJSON() : event.metadata,
+        };
 
     for (const [name, worker] of this._workers) {
       try {

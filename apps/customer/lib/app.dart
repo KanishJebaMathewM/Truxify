@@ -101,13 +101,7 @@ class _TruxifyAppState extends State<TruxifyApp> {
                 GlobalWidgetsLocalizations.delegate,
                 GlobalCupertinoLocalizations.delegate,
               ],
-              supportedLocales: const [
-                Locale('en'),
-                Locale('hi'),
-                Locale('ta'),
-                Locale('kn'),
-                Locale('mr'),
-              ],
+              supportedLocales: AppLocalizations.supportedLocales,
               home: const SplashScreen(),
             );
           },
@@ -116,3 +110,4 @@ class _TruxifyAppState extends State<TruxifyApp> {
     );
   }
 }
+

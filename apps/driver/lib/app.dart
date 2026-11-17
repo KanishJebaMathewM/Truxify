@@ -88,13 +88,7 @@ class _TruxifyAppState extends State<TruxifyApp> {
               GlobalWidgetsLocalizations.delegate,
               GlobalCupertinoLocalizations.delegate,
             ],
-            supportedLocales: const [
-              Locale('en', ''),
-              Locale('hi', ''),
-              Locale('ta', ''),
-              Locale('kn', ''),
-              Locale('mr', ''),
-            ],
+            supportedLocales: AppLocalizations.supportedLocales,
             initialRoute: AppRoutes.splash,
             onGenerateRoute: (settings) {
               switch (settings.name) {
@@ -173,3 +167,4 @@ class _TruxifyAppState extends State<TruxifyApp> {
     );
   }
 }
+

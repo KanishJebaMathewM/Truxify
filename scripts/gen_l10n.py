@@ -251,7 +251,7 @@ def dart_interpolated(value: str, placeholders) -> str:
     for name in placeholders:
         escaped = escaped.replace(
             "{" + name + "}",
-            "$" + name,
+            "${" + name + "}",
         )
 
     return escaped
@@ -578,4 +578,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

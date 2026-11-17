@@ -1443,4 +1443,3 @@ class _MetricColumn extends StatelessWidget {
     );
   }
 }
-

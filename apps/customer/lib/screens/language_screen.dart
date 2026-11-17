@@ -4,6 +4,7 @@ import '../core/offline/cache/cache_manager.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../controllers/app_controller.dart';
+import '../providers/language_provider.dart';
 
 class LanguageScreen extends StatefulWidget {
   const LanguageScreen({super.key});
@@ -121,7 +122,9 @@ class _LanguageScreenState extends State<LanguageScreen> {
               label: 'Apply',
               onPressed: () async {
                 final controller = TruxifyScope.of(context);
+                final languageProvider = LanguageProvider.of(context);
                 final selectedCode = _languages[_selectedLanguageIndex]['code'] ?? 'en';
+                languageProvider.changeLocale(selectedCode);
                 await controller.setLocale(selectedCode);
                 if (!mounted) return;
                 _showLanguageChangedSnackBar();
@@ -134,4 +137,3 @@ class _LanguageScreenState extends State<LanguageScreen> {
     );
   }
 }
-

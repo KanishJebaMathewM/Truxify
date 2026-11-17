@@ -41,7 +41,11 @@ class _TruxifyAppState extends State<TruxifyApp> {
     _controller.addListener(_onControllerChanged);
     _languageProvider.addListener(_onControllerChanged);
     _controller.loadThemeMode();
-    _controller.loadLocale();
+    _controller.loadLocale().then((_) {
+      if (mounted) {
+        _languageProvider.changeLocale(_controller.locale.languageCode);
+      }
+    });
   }
 
   void _onControllerChanged() {
@@ -167,4 +171,3 @@ class _TruxifyAppState extends State<TruxifyApp> {
     );
   }
 }
-

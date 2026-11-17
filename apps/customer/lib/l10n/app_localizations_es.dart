@@ -24,12 +24,12 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String comingSoon(String title) {
-    return "$title estará disponible pronto";
+    return "${title} estará disponible pronto";
   }
 
   @override
   String greetingMessage(String greeting, String displayName) {
-    return "$greeting, $displayName 👋";
+    return "${greeting}, ${displayName} 👋";
   }
 
   @override
@@ -49,7 +49,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String error(String errorMsg) {
-    return "Error: $errorMsg";
+    return "Error: ${errorMsg}";
   }
 
   @override
@@ -120,7 +120,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String phoneMustBeExactDigits(int digitCount) {
-    return "El número de teléfono debe tener exactamente $digitCount dígitos";
+    return "El número de teléfono debe tener exactamente ${digitCount} dígitos";
   }
 
   @override
@@ -143,7 +143,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String sentTo(String phoneNumber) {
-    return "Enviado a $phoneNumber";
+    return "Enviado a ${phoneNumber}";
   }
 
   @override
@@ -325,7 +325,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String lastUpdated(String timeAgo) {
-    return "Última actualización: $timeAgo";
+    return "Última actualización: ${timeAgo}";
   }
 
   @override
@@ -381,7 +381,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String offlineModeLabel(String timeAgo) {
-    return "Modo sin conexión (última actualización: $timeAgo)";
+    return "Modo sin conexión (última actualización: ${timeAgo})";
   }
 
   @override

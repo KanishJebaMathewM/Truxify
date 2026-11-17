@@ -153,4 +153,3 @@ class TruxifyScope extends InheritedNotifier<TruxifyController> {
     return scope!.notifier!;
   }
 }
-

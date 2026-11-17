@@ -42,6 +42,7 @@ APPS = {
 
 LOCALES = {
     "en": "English",
+    "es": "Spanish",
     "hi": "Hindi",
     "ta": "Tamil",
     "kn": "Kannada",
@@ -577,3 +578,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

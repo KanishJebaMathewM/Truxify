@@ -2,8 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 
-// Resolve the manifest directory relative to this script,
-// so the check works regardless of the current working directory.
+// Resolve the manifest directory relative to this script.
 const dir = path.resolve(__dirname, '..', '..', 'k8s', 'istio');
 
 let failed = false;
@@ -54,18 +53,17 @@ if (!fs.existsSync(dir)) {
 
     const lines = content.split(/\r?\n/);
 
-    // Detect document separators incorrectly attached to values.
+    // Detect document separators attached to other content.
     lines.forEach((line, index) => {
-      if (/\S---[ \t]*(?:#.*)?$/.test(line)) {
+      if (/\S[ \t]*---[ \t]*(?:#.*)?$/.test(line)) {
         reportError(
-          `Document separator "---" is not on its own line ` +
-          `at ${full}:${index + 1} — "${line.trim()}". ` +
-          'Every resource after this point may be lost.'
+          `Misplaced YAML document separator at ${full}:${index + 1}: ` +
+          `"${line.trim()}". The separator must be on its own line.`
         );
       }
     });
 
-    // Split documents using valid YAML document separator lines.
+    // Split YAML documents using valid separator lines.
     const documents = content
       .split(/^---[ \t]*(?:#.*)?$/m)
       .filter((doc) => doc.trim().length > 0);
@@ -73,9 +71,8 @@ if (!fs.existsSync(dir)) {
     documents.forEach((doc, documentIndex) => {
       const seen = new Set();
 
+      // Check only top-level mapping keys.
       for (const line of doc.split(/\r?\n/)) {
-        // Only inspect top-level mapping keys.
-        // Supports plain, single-quoted and double-quoted keys.
         const match = line.match(
           /^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[A-Za-z_][A-Za-z0-9_-]*)[ \t]*:/
         );
@@ -86,12 +83,12 @@ if (!fs.existsSync(dir)) {
 
         let key = match[1];
 
-        // Normalize quoted keys before checking for duplicates.
+        // Normalize quoted keys.
         if (key.startsWith('"')) {
           try {
             key = JSON.parse(key);
           } catch {
-            // Leave malformed quoted keys unchanged.
+            // Keep the original key if parsing fails.
           }
         } else if (key.startsWith("'")) {
           key = key.slice(1, -1).replace(/''/g, "'");
@@ -110,6 +107,7 @@ if (!fs.existsSync(dir)) {
   }
 }
 
+// Display the final validation result.
 if (failed) {
   console.error('\nIstio manifest validation failed.');
   process.exitCode = 1;

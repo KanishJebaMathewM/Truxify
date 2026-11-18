@@ -95,21 +95,34 @@ class TruxifyController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> loadLocale() async {
+  // Set once the user picks a language, so a slower startup load of the
+  // saved language cannot overwrite that choice.
+  bool _localeSelected = false;
+
+  /// Loads the saved language. Returns false if the user picked a language
+  /// before the load finished (the saved value is then ignored) or if the
+  /// load failed.
+  Future<bool> loadLocale() async {
     try {
       final cacheManager = CacheManager();
       await cacheManager.open();
       final settings = await cacheManager.getSettings();
       final selectedCode = settings['language']?['code']?.toString() ?? 'en';
+      if (_localeSelected) return false;
       _locale = Locale(selectedCode);
       notifyListeners();
+      return true;
     } catch (e) {
       developer.log('Failed to load language preference, falling back to English: $e');
+      return false;
     }
   }
 
   Future<void> setLocale(String languageCode) async {
-    if (_locale.languageCode == languageCode) return;
+    final firstSelection = !_localeSelected;
+    _localeSelected = true;
+    // Before the first pick the saved value may differ from _locale, so save it.
+    if (_locale.languageCode == languageCode && !firstSelection) return;
     _locale = Locale(languageCode);
     notifyListeners();
 

@@ -1,301 +1,442 @@
-'use strict';
 
-const difficultyLabels = ['level:beginner', 'level:intermediate', 'level:advanced', 'level:critical'];
-const difficultyLabelsLower = difficultyLabels.map(d => d.toLowerCase());
+'use strict';
 
 const fs = require('fs');
 const path = require('path');
 
-const CONTESTED_TYPE_LABELS = [
-  'type:security', 'type:performance', 'type:bug', 'type:feature',
-  'type:refactor', 'type:testing', 'type:design', 'type:devops',
-  'type:docs', 'type:accessibility'
+const DIFFICULTY_LABELS = [
+  'level:beginner',
+  'level:intermediate',
+  'level:advanced',
+  'level:critical'
 ];
-const CONTESTED_TYPE_LABELS_LOWER = CONTESTED_TYPE_LABELS.map(l => l.toLowerCase());
 
-function loadLabelRules() {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'pr-labeler-rules.json'), 'utf8'));
-  } catch {
-    return {};
-  }
-}
+const CONTESTED_TYPE_LABELS = [
+  'type:security',
+  'type:performance',
+  'type:bug',
+  'type:feature',
+  'type:refactor',
+  'type:testing',
+  'type:design',
+  'type:devops',
+  'type:docs',
+  'type:accessibility'
+];
 
 function normalizeLabel(value) {
   return String(value || '').trim().toLowerCase();
 }
 
-function evaluateRulesForPR({ pr, changedFiles = [], rules = {} }) {
-  const currentLabels = (pr.labels || []).map(l => typeof l === 'string' ? l : l.name);
-  const currentLabelsLower = currentLabels.map(l => l.toLowerCase());
-  const suggested = new Set();
-
-  // Evaluate title rules
-  for (const rule of (rules.titleRules || [])) {
-    const pattern = new RegExp(rule.pattern, 'i');
-    if (pattern.test(pr.title || '')) {
-      for (const label of (rule.labels || [])) {
-        suggested.add(label);
-      }
-    }
-  }
-
-  // Evaluate path rules
-  for (const file of changedFiles) {
-    for (const rule of (rules.pathRules || [])) {
-      const pattern = new RegExp(rule.pattern, 'i');
-      if (pattern.test(file)) {
-        for (const label of (rule.labels || [])) {
-          suggested.add(label);
-        }
-      }
-    }
-  }
-
-  const toAdd = [];
-  for (const label of suggested) {
-    if (!currentLabelsLower.includes(label.toLowerCase())) {
-      toAdd.push(label);
-    }
-  }
-  return toAdd;
+function getLabelNames(labels = []) {
+  return labels
+    .map(label => typeof label === 'string' ? label : label?.name)
+    .filter(Boolean);
 }
 
-function checkRetroChanges(pr, changedFiles = [], rules = {}) {
-  const currentLabels = (pr.labels || []).map(l => typeof l === 'string' ? l : l.name);
-  const currentLabelsLower = currentLabels.map(l => l.toLowerCase());
-  const toAdd = [];
-  const toRemove = [];
-
-  const author = pr.user ? pr.user.login.toLowerCase() : '';
-  const isDependabot = author.includes('dependabot');
-
-  if (isDependabot) {
-    // Remove gssoc:approved if present
-    if (currentLabelsLower.includes('gssoc:approved')) {
-      const originalLabel = currentLabels.find(l => l.toLowerCase() === 'gssoc:approved');
-      toRemove.push(originalLabel || 'gssoc:approved');
-    }
-    // Remove any difficulty labels if present
-    const badLabels = ['beginner', 'intermediate', 'advanced', 'critical'];
-    for (const label of currentLabels) {
-      const lower = label.toLowerCase();
-      if (badLabels.some(bad => lower.includes(bad))) {
-        toRemove.push(label);
-      }
-    }
-  } else {
-    // Human PR
-    // Migration: if it has "Beginner", remove it and add "level:beginner"
-    const hasBeginner = currentLabels.includes('Beginner');
-    if (hasBeginner) {
-      toRemove.push('Beginner');
-      if (!currentLabels.includes('level:beginner')) {
-        toAdd.push('level:beginner');
-      }
-    }
-
-    // Only process for addition if it was merged
-    if (pr.merged_at) {
-      // Check if gssoc:approved is missing
-      if (!currentLabelsLower.includes('gssoc:approved') && !toRemove.includes('gssoc:approved')) {
-        toAdd.push('gssoc:approved');
-      }
-
-      // Check if a difficulty label is already present (or being added)
-      const hasDifficulty = currentLabelsLower.some(l => {
-        if (difficultyLabelsLower.includes(l)) return true;
-        for (const diff of difficultyLabelsLower) {
-          if (l.includes(diff) || diff.includes(l)) return true;
-        }
-        return false;
-      }) || toAdd.includes('level:beginner');
-
-      if (!hasDifficulty && !toRemove.some(r => r.toLowerCase().includes('beginner'))) {
-        toAdd.push('level:beginner');
-      }
-    } else {
-      // Closed but NOT merged
-      if (currentLabelsLower.includes('gssoc:approved')) {
-        const originalLabel = currentLabels.find(l => l.toLowerCase() === 'gssoc:approved');
-        toRemove.push(originalLabel || 'gssoc:approved');
-      }
-    }
-
-    // Add path & title rule suggested labels if missing
-    const ruleSuggested = evaluateRulesForPR({ pr, changedFiles, rules });
-    for (const label of ruleSuggested) {
-      if (!toAdd.includes(label)) {
-        toAdd.push(label);
-      }
-    }
-  }
-
-  // Deduplicate
-  const finalToAdd = [...new Set(toAdd)].filter(l => !toRemove.includes(l));
-  const finalToRemove = [...new Set(toRemove)];
-
-  return { toAdd: finalToAdd, toRemove: finalToRemove };
-}
-
-function deduplicateTypeLabels({ currentLabels, changedFiles, prTitle, rules }) {
-  const currentLabelNames = currentLabels.map(l => typeof l === 'string' ? l : l.name);
-  const contestedOnPR = currentLabelNames.filter(l =>
-    CONTESTED_TYPE_LABELS_LOWER.includes(normalizeLabel(l))
+/**
+ * Loads PR labeling rules.
+ */
+function loadLabelRules() {
+  const rulesPath = path.join(
+    __dirname,
+    '..',
+    'pr-labeler-rules.json'
   );
 
-  if (contestedOnPR.length <= 1) {
-    return { toKeep: contestedOnPR[0] || null, toRemove: [] };
+  try {
+    const rules = JSON.parse(fs.readFileSync(rulesPath, 'utf8'));
+
+    return {
+      ...rules,
+      titleRules: Array.isArray(rules.titleRules) ? rules.titleRules : [],
+      pathRules: Array.isArray(rules.pathRules) ? rules.pathRules : []
+    };
+  } catch (error) {
+    throw new Error(`Failed to load PR label rules: ${error.message}`);
+  }
+}
+
+/**
+ * Safely checks a regular expression.
+ */
+function matchesPattern(pattern, value) {
+  try {
+    return new RegExp(pattern, 'i').test(value || '');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Evaluates title and changed-file rules.
+ */
+function evaluateRulesForPR({
+  pr,
+  changedFiles = [],
+  rules = {}
+}) {
+  const currentLabels = getLabelNames(pr.labels);
+  const currentLabelsLower = new Set(
+    currentLabels.map(normalizeLabel)
+  );
+
+  const suggested = new Set();
+
+  for (const rule of rules.titleRules || []) {
+    if (matchesPattern(rule.pattern, pr.title)) {
+      for (const label of rule.labels || []) {
+        if (typeof label === 'string' && label.trim()) {
+          suggested.add(label.trim());
+        }
+      }
+    }
   }
 
-  const priority = (rules.typeLabelPriority || CONTESTED_TYPE_LABELS).map(normalizeLabel);
-  const scores = new Map();
-  for (const tl of contestedOnPR) {
-    scores.set(normalizeLabel(tl), 0);
-  }
-
-  // Score from path rules
-  for (const file of (changedFiles || [])) {
-    for (const rule of (rules.pathRules || [])) {
-      const pattern = new RegExp(rule.pattern, 'i');
-      if (pattern.test(file)) {
-        for (const ruleLabel of (rule.labels || [])) {
-          const key = normalizeLabel(ruleLabel);
-          if (scores.has(key)) {
-            scores.set(key, scores.get(key) + 1);
+  for (const file of changedFiles) {
+    for (const rule of rules.pathRules || []) {
+      if (matchesPattern(rule.pattern, file)) {
+        for (const label of rule.labels || []) {
+          if (typeof label === 'string' && label.trim()) {
+            suggested.add(label.trim());
           }
         }
       }
     }
   }
 
-  // Score from title rules (bonus +3)
-  for (const rule of (rules.titleRules || [])) {
-    const pattern = new RegExp(rule.pattern, 'i');
-    if (pattern.test(prTitle || '')) {
-      for (const ruleLabel of (rule.labels || [])) {
-        const key = normalizeLabel(ruleLabel);
+  return [...suggested].filter(
+    label => !currentLabelsLower.has(normalizeLabel(label))
+  );
+}
+
+/**
+ * Calculates labels to add and remove for a PR.
+ */
+function checkRetroChanges(pr, changedFiles = [], rules = {}) {
+  const currentLabels = getLabelNames(pr.labels);
+  const currentLabelsLower = new Set(
+    currentLabels.map(normalizeLabel)
+  );
+
+  const toAdd = [];
+  const toRemove = [];
+
+  const author = normalizeLabel(pr.user?.login);
+  const isDependabot = author.includes('dependabot');
+
+  const addLabel = label => {
+    if (!currentLabelsLower.has(normalizeLabel(label))) {
+      if (!toAdd.some(item => normalizeLabel(item) === normalizeLabel(label))) {
+        toAdd.push(label);
+      }
+    }
+  };
+
+  const removeLabel = label => {
+    if (!toRemove.some(item => normalizeLabel(item) === normalizeLabel(label))) {
+      toRemove.push(label);
+    }
+  };
+
+  if (isDependabot) {
+    // Dependabot PRs should not receive GSSoC or difficulty labels.
+    for (const label of currentLabels) {
+      const normalized = normalizeLabel(label);
+
+      if (
+        normalized === 'gssoc:approved' ||
+        DIFFICULTY_LABELS.includes(normalized) ||
+        ['beginner', 'intermediate', 'advanced', 'critical'].includes(normalized)
+      ) {
+        removeLabel(label);
+      }
+    }
+
+    return { toAdd, toRemove };
+  }
+
+  // Migrate the old Beginner label.
+  const oldBeginner = currentLabels.find(
+    label => normalizeLabel(label) === 'beginner'
+  );
+
+  if (oldBeginner) {
+    removeLabel(oldBeginner);
+    addLabel('level:beginner');
+  }
+
+  if (pr.merged_at) {
+    // Add GSSoC approval label to merged human PRs.
+    addLabel('gssoc:approved');
+
+    const hasDifficulty = currentLabels.some(label =>
+      DIFFICULTY_LABELS.includes(normalizeLabel(label))
+    ) || toAdd.some(label =>
+      DIFFICULTY_LABELS.includes(normalizeLabel(label))
+    );
+
+    if (!hasDifficulty) {
+      addLabel('level:beginner');
+    }
+  } else {
+    // Remove approval label from PRs that were not merged.
+    const approvedLabel = currentLabels.find(
+      label => normalizeLabel(label) === 'gssoc:approved'
+    );
+
+    if (approvedLabel) {
+      removeLabel(approvedLabel);
+    }
+  }
+
+  // Apply title and path rules to human PRs.
+  const suggestedLabels = evaluateRulesForPR({
+    pr,
+    changedFiles,
+    rules
+  });
+
+  for (const label of suggestedLabels) {
+    addLabel(label);
+  }
+
+  // Do not add a label that is also being removed.
+  const removedLabels = new Set(toRemove.map(normalizeLabel));
+
+  const finalToAdd = toAdd.filter(
+    label => !removedLabels.has(normalizeLabel(label))
+  );
+
+  return {
+    toAdd: finalToAdd,
+    toRemove
+  };
+}
+
+/**
+ * Keeps only the highest-scoring type label.
+ */
+function deduplicateTypeLabels({
+  currentLabels,
+  changedFiles = [],
+  prTitle = '',
+  rules = {}
+}) {
+  const labels = getLabelNames(currentLabels);
+
+  const contested = labels.filter(label =>
+    CONTESTED_TYPE_LABELS.includes(normalizeLabel(label))
+  );
+
+  if (contested.length <= 1) {
+    return {
+      toKeep: contested[0] || null,
+      toRemove: []
+    };
+  }
+
+  const priority = (
+    Array.isArray(rules.typeLabelPriority)
+      ? rules.typeLabelPriority
+      : CONTESTED_TYPE_LABELS
+  ).map(normalizeLabel);
+
+  const scores = new Map(
+    contested.map(label => [normalizeLabel(label), 0])
+  );
+
+  // Score matching path rules.
+  for (const file of changedFiles) {
+    for (const rule of rules.pathRules || []) {
+      if (!matchesPattern(rule.pattern, file)) continue;
+
+      for (const label of rule.labels || []) {
+        const key = normalizeLabel(label);
+
         if (scores.has(key)) {
-          scores.set(key, scores.get(key) + 3);
+          scores.set(key, scores.get(key) + 1);
         }
       }
     }
   }
 
-  // Find winner
+  // Give matching title rules a bonus of 3.
+  for (const rule of rules.titleRules || []) {
+    if (!matchesPattern(rule.pattern, prTitle)) continue;
+
+    for (const label of rule.labels || []) {
+      const key = normalizeLabel(label);
+
+      if (scores.has(key)) {
+        scores.set(key, scores.get(key) + 3);
+      }
+    }
+  }
+
   let winner = null;
   let winnerScore = -1;
   let winnerPriority = Infinity;
 
-  for (const [key, score] of scores) {
-    const pIdx = priority.indexOf(key);
-    if (score > winnerScore || (score === winnerScore && pIdx < winnerPriority)) {
-      winner = key;
+  for (const [label, score] of scores) {
+    const index = priority.indexOf(label);
+    const labelPriority = index === -1 ? Infinity : index;
+
+    if (
+      score > winnerScore ||
+      (score === winnerScore && labelPriority < winnerPriority)
+    ) {
+      winner = label;
       winnerScore = score;
-      winnerPriority = pIdx;
+      winnerPriority = labelPriority;
     }
   }
 
-  const winnerLabel = contestedOnPR.find(l => normalizeLabel(l) === winner);
-  const toRemove = contestedOnPR.filter(l => normalizeLabel(l) !== winner);
+  return {
+    toKeep: contested.find(
+      label => normalizeLabel(label) === winner
+    ) || null,
 
-  return { toKeep: winnerLabel, toRemove };
+    toRemove: contested.filter(
+      label => normalizeLabel(label) !== winner
+    )
+  };
 }
 
+/**
+ * Detects GitHub API rate-limit errors.
+ */
 function isRateLimitError(error) {
   if (!error) return false;
+
   if (error.status === 429) return true;
+
   if (error.status === 403) {
-    const msg = String(error.message || '').toLowerCase();
-    if (msg.includes('rate limit') || msg.includes('secondary rate limit') || msg.includes('exceeded')) {
-      return true;
-    }
-    const resMsg = String(error.response?.data?.message || '').toLowerCase();
-    if (resMsg.includes('rate limit') || resMsg.includes('exceeded')) {
-      return true;
-    }
+    const message = String(
+      error.response?.data?.message || error.message || ''
+    ).toLowerCase();
+
+    return (
+      message.includes('rate limit') ||
+      message.includes('secondary rate limit') ||
+      message.includes('exceeded')
+    );
   }
+
   return false;
 }
 
-async function run({ github, context, core, dryRun = false, prState = 'closed', sinceHours = 0 }) {
+/**
+ * Main retrospective PR labeler.
+ */
+async function run({
+  github,
+  context,
+  core,
+  dryRun = false,
+  prState = 'closed',
+  sinceHours = 0
+}) {
   const { owner, repo } = context.repo;
 
-  core.info(`Starting retrospective PR labeler (dryRun = ${dryRun}, prState = ${prState}, sinceHours = ${sinceHours})...`);
+  if (!['open', 'closed', 'all'].includes(prState)) {
+    throw new Error('prState must be open, closed, or all.');
+  }
 
-  // Fetch available labels in repo to check if we need to create them
-  let repoLabels = [];
+  if (
+    !Number.isFinite(Number(sinceHours)) ||
+    Number(sinceHours) < 0
+  ) {
+    throw new Error('sinceHours must be a non-negative number.');
+  }
+
+  sinceHours = Number(sinceHours);
+
+  core.info(
+    `Starting retrospective PR labeler (dryRun=${dryRun}, state=${prState}).`
+  );
+
+  // Fetch repository labels.
+  let repoLabels;
+
   try {
-    repoLabels = await github.paginate(github.rest.issues.listLabelsForRepo, {
-      owner,
-      repo,
-      per_page: 100
-    });
+    repoLabels = await github.paginate(
+      github.rest.issues.listLabelsForRepo,
+      { owner, repo, per_page: 100 }
+    );
   } catch (error) {
     if (isRateLimitError(error)) {
-      core.warning(`API rate limit exceeded while listing repository labels: ${error.message}. Stopping retrospective PR labeler.`);
+      core.warning('Rate limit reached while fetching repository labels.');
       return 0;
     }
     throw error;
   }
 
-  const availableLabelsLower = repoLabels.map(l => l.name.toLowerCase());
+  const availableLabels = new Set(
+    repoLabels.map(label => normalizeLabel(label.name))
+  );
 
-  async function ensureLabelExists(name, color, description) {
-    const normalized = name.toLowerCase();
-    if (availableLabelsLower.includes(normalized)) {
-      return;
-    }
+  /**
+   * Creates a missing label when necessary.
+   */
+  async function ensureLabelExists(name) {
+    const normalized = normalizeLabel(name);
+
+    if (availableLabels.has(normalized)) return;
+
     if (dryRun) {
-      core.info(`Dry run: would ensure label "${name}" exists.`);
+      core.info(`[Dry Run] Would create label: ${name}`);
       return;
     }
+
     try {
-      core.info(`Creating label "${name}"...`);
       await github.rest.issues.createLabel({
         owner,
         repo,
         name,
-        color,
-        description
+        color: 'ededed',
+        description: 'Automatically managed PR label'
       });
-      availableLabelsLower.push(normalized);
+
+      availableLabels.add(normalized);
     } catch (error) {
-      if (isRateLimitError(error)) {
-        core.warning(`API rate limit exceeded while creating label "${name}": ${error.message}`);
-        throw error;
+      // Another workflow may have created the label already.
+      if (error.status === 422) {
+        availableLabels.add(normalized);
+        return;
       }
-      if (error.status !== 422) {
-        throw error;
-      }
+
+      throw error;
     }
   }
 
-  // Ensure gssoc:approved and level:beginner exist
+  // Ensure the two labels used by the migration exist.
   try {
-    await ensureLabelExists('gssoc:approved', '0052cc', 'GSSoC approved contribution');
-    await ensureLabelExists('level:beginner', '0e8a16', 'Beginner level task/PR');
+    await ensureLabelExists('gssoc:approved');
+    await ensureLabelExists('level:beginner');
   } catch (error) {
     if (isRateLimitError(error)) {
-      core.warning(`API rate limit exceeded while setting up initial labels. Stopping retrospective PR labeler.`);
+      core.warning('Rate limit reached while creating initial labels.');
       return 0;
     }
     throw error;
   }
 
-  // Fetch pull requests
-  const cutoffTime = sinceHours && sinceHours > 0 ? new Date(Date.now() - sinceHours * 60 * 60 * 1000) : null;
-  if (cutoffTime) {
-    core.info(`Filtering PRs updated/closed within the last ${sinceHours} hours (since ${cutoffTime.toISOString()})...`);
-  } else {
-    core.info(`Fetching ${prState} pull requests...`);
-  }
+  // Load labeling rules.
+  const rules = loadLabelRules();
 
+  // Fetch pull requests.
   let pullRequests = [];
+
+  const cutoffTime = sinceHours > 0
+    ? Date.now() - sinceHours * 60 * 60 * 1000
+    : null;
+
   try {
     if (cutoffTime) {
       let page = 1;
       let stop = false;
+
       while (!stop) {
         const response = await github.rest.pulls.list({
           owner,
@@ -306,155 +447,194 @@ async function run({ github, context, core, dryRun = false, prState = 'closed', 
           per_page: 100,
           page
         });
-        const pageData = Array.isArray(response) ? response : (response && response.data ? response.data : []);
+
+        const pageData = response.data || [];
+
         if (pageData.length === 0) break;
+
         for (const pr of pageData) {
-          const updatedAt = new Date(pr.updated_at || pr.created_at);
+          const updatedAt = new Date(
+            pr.updated_at || pr.created_at
+          ).getTime();
+
           if (updatedAt < cutoffTime) {
             stop = true;
             break;
           }
+
           pullRequests.push(pr);
         }
+
         if (pageData.length < 100) break;
         page++;
       }
     } else {
-      pullRequests = await github.paginate(github.rest.pulls.list, {
-        owner,
-        repo,
-        state: prState,
-        per_page: 100
-      });
+      pullRequests = await github.paginate(
+        github.rest.pulls.list,
+        {
+          owner,
+          repo,
+          state: prState,
+          per_page: 100
+        }
+      );
     }
   } catch (error) {
     if (isRateLimitError(error)) {
-      core.warning(`API rate limit exceeded while fetching pull requests: ${error.message}. Stopping retrospective PR labeler.`);
+      core.warning('Rate limit reached while fetching pull requests.');
       return 0;
     }
     throw error;
   }
 
-  core.info(`Found ${pullRequests.length} ${prState} pull requests matching time criteria. Processing...`);
-
-  const rules = loadLabelRules();
+  core.info(`Found ${pullRequests.length} pull requests.`);
 
   let updatedCount = 0;
+
   for (const pr of pullRequests) {
     try {
+      // Fetch changed files.
       let changedFiles = [];
+
       try {
-        const files = await github.paginate(github.rest.pulls.listFiles, {
+        const files = await github.paginate(
+          github.rest.pulls.listFiles,
+          {
+            owner,
+            repo,
+            pull_number: pr.number,
+            per_page: 100
+          }
+        );
+
+        changedFiles = files.map(file => file.filename);
+      } catch (error) {
+        if (isRateLimitError(error)) throw error;
+
+        core.warning(
+          `Could not fetch files for PR #${pr.number}: ${error.message}`
+        );
+      }
+
+      const { toAdd, toRemove } = checkRetroChanges(
+        pr,
+        changedFiles,
+        rules
+      );
+
+      // Determine the labels that will remain after the changes.
+      const currentLabels = getLabelNames(pr.labels);
+
+      const projectedLabels = [
+        ...currentLabels.filter(label =>
+          !toRemove.some(
+            removed => normalizeLabel(removed) === normalizeLabel(label)
+          )
+        ),
+        ...toAdd
+      ];
+
+      const dedup = deduplicateTypeLabels({
+        currentLabels: projectedLabels,
+        changedFiles,
+        prTitle: pr.title,
+        rules
+      });
+
+      for (const label of dedup.toRemove) {
+        if (!toRemove.some(
+          item => normalizeLabel(item) === normalizeLabel(label)
+        )) {
+          toRemove.push(label);
+        }
+
+        const index = toAdd.findIndex(
+          item => normalizeLabel(item) === normalizeLabel(label)
+        );
+
+        if (index !== -1) {
+          toAdd.splice(index, 1);
+        }
+      }
+
+      if (toAdd.length === 0 && toRemove.length === 0) {
+        continue;
+      }
+
+      updatedCount++;
+
+      const actions = [];
+
+      if (toAdd.length) actions.push(`add: ${toAdd.join(', ')}`);
+      if (toRemove.length) actions.push(`remove: ${toRemove.join(', ')}`);
+
+      if (dryRun) {
+        core.info(
+          `[Dry Run] PR #${pr.number}: ${actions.join(' | ')}`
+        );
+        continue;
+      }
+
+      // Ensure every label exists before adding it.
+      for (const label of toAdd) {
+        await ensureLabelExists(label);
+      }
+
+      // Remove outdated labels.
+      for (const label of toRemove) {
+        try {
+          await github.rest.issues.removeLabel({
+            owner,
+            repo,
+            issue_number: pr.number,
+            name: label
+          });
+        } catch (error) {
+          if (error.status !== 404) throw error;
+        }
+      }
+
+      // Add new labels.
+      if (toAdd.length > 0) {
+        await github.rest.issues.addLabels({
           owner,
           repo,
-          pull_number: pr.number,
-          per_page: 100
+          issue_number: pr.number,
+          labels: toAdd
         });
-        changedFiles = files.map(f => f.filename);
-      } catch (error) {
-        if (isRateLimitError(error)) {
-          core.warning(`API rate limit exceeded while fetching files for PR #${pr.number}: ${error.message}. Stopping further PR processing.`);
-          break;
-        }
-        core.warning(`Failed to fetch files for PR #${pr.number}: ${error.message}`);
       }
 
-      const { toAdd, toRemove } = checkRetroChanges(pr, changedFiles, rules);
-
-      // Type label deduplication
-      const currentLabelNames = (pr.labels || []).map(l => typeof l === 'string' ? l : l.name);
-      const projectedLabels = [...new Set([...currentLabelNames, ...toAdd])].filter(
-        l => !toRemove.includes(l)
+      core.info(
+        `Updated PR #${pr.number}: ${actions.join(' | ')}`
       );
-      const contestedOnPR = projectedLabels.filter(l =>
-        CONTESTED_TYPE_LABELS_LOWER.includes(normalizeLabel(l))
-      );
-
-      if (contestedOnPR.length > 1) {
-        const dedup = deduplicateTypeLabels({
-          currentLabels: projectedLabels.map(l => ({ name: l })),
-          changedFiles,
-          prTitle: pr.title,
-          rules
-        });
-
-        for (const label of dedup.toRemove) {
-          if (!toRemove.includes(label)) {
-            toRemove.push(label);
-          }
-          // Also remove from toAdd if it was about to be added
-          const addIdx = toAdd.indexOf(label);
-          if (addIdx !== -1) {
-            toAdd.splice(addIdx, 1);
-          }
-        }
-      }
-
-      if (toAdd.length > 0 || toRemove.length > 0) {
-        updatedCount++;
-        const actionStr = [];
-        if (toAdd.length > 0) actionStr.push(`add: ${toAdd.join(', ')}`);
-        if (toRemove.length > 0) actionStr.push(`remove: ${toRemove.join(', ')}`);
-
-        if (dryRun) {
-          core.info(`[Dry Run] PR #${pr.number} (${pr.title}): Would ${actionStr.join(' & ')}`);
-        } else {
-          core.info(`PR #${pr.number} (${pr.title}): Performing actions: ${actionStr.join(' & ')}`);
-
-          // Remove labels
-          for (const label of toRemove) {
-            try {
-              await github.rest.issues.removeLabel({
-                owner,
-                repo,
-                issue_number: pr.number,
-                name: label
-              });
-            } catch (error) {
-              if (isRateLimitError(error)) {
-                core.warning(`API rate limit exceeded while removing label "${label}" from PR #${pr.number}: ${error.message}`);
-                throw error;
-              }
-              core.error(`Failed to remove label "${label}" from PR #${pr.number}: ${error.message}`);
-            }
-          }
-
-          // Add labels
-          if (toAdd.length > 0) {
-            try {
-              await github.rest.issues.addLabels({
-                owner,
-                repo,
-                issue_number: pr.number,
-                labels: toAdd
-              });
-            } catch (error) {
-              if (isRateLimitError(error)) {
-                core.warning(`API rate limit exceeded while adding labels to PR #${pr.number}: ${error.message}`);
-                throw error;
-              }
-              core.error(`Failed to add labels to PR #${pr.number}: ${error.message}`);
-            }
-          }
-        }
-      }
     } catch (error) {
       if (isRateLimitError(error)) {
-        core.warning(`API rate limit exceeded processing PR #${pr.number}: ${error.message}. Halting retrospective PR labeler gracefully.`);
+        core.warning(
+          `Rate limit reached while processing PR #${pr.number}. Stopping.`
+        );
         break;
       }
-      core.error(`Error processing PR #${pr.number}: ${error.message}`);
+
+      core.error(
+        `Error processing PR #${pr.number}: ${error.message}`
+      );
     }
   }
 
-  core.info(`Finished processing. Total updated/to-be-updated PRs: ${updatedCount}/${pullRequests.length}`);
+  core.info(
+    `Finished. Total updated or planned PRs: ${updatedCount}/${pullRequests.length}`
+  );
+
   return updatedCount;
 }
 
 module.exports = {
+  loadLabelRules,
+  evaluateRulesForPR,
   checkRetroChanges,
   deduplicateTypeLabels,
   isRateLimitError,
   run
 };
+
 

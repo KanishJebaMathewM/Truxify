@@ -8,22 +8,11 @@ import { supabaseAdmin, redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { encryptMessage, decryptMessage } from '../lib/chatEncryption.js';
 import { enqueueOfflineMessage } from '../lib/messageQueue.js';
+import { getChatEncryptionSecret } from '../config/chatEncryptionSecret.js';
 
 const CHAT_RATE_LIMIT_PREFIX = 'chat:rate:';
 const RATE_LIMIT_WINDOW_SEC = 60;
 const MAX_MESSAGES_PER_WINDOW = 60;
-function getChatEncryptionSecret() {
-  const secret = process.env.CHAT_ENCRYPTION_SECRET;
-  if (secret && secret.length >= 32) return secret;
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('CHAT_ENCRYPTION_SECRET must be set to a value of at least 32 characters in production.');
-  }
-  const fallback = crypto.randomBytes(32).toString('hex');
-  logger.warn('[chatService] CHAT_ENCRYPTION_SECRET is not set. Generated a random per-process secret.');
-  return fallback;
-}
-
-const ENCRYPTION_SECRET = getChatEncryptionSecret();
 
 function parseAttachmentContent(raw) {
     try {
@@ -69,7 +58,7 @@ export async function saveChatMessage({ orderId, senderId, senderRole, type, con
     if (!supabaseAdmin) throw new Error('Supabase not configured');
 
     const encryptedContent = type === 'text'
-        ? encryptMessage(content, ENCRYPTION_SECRET)
+        ? encryptMessage(content, getChatEncryptionSecret())
         : content; // Images/locations are URLs/JSON, not encrypted the same way
 
     const { data, error } = await supabaseAdmin
@@ -136,7 +125,7 @@ export async function getChatHistory(orderId, limit = 50, before = null) {
         senderRole: msg.sender_role,
         type: msg.message_type,
         content: msg.message_type === 'text'
-            ? decryptMessage(msg.encrypted_content, ENCRYPTION_SECRET)
+            ? decryptMessage(msg.encrypted_content, getChatEncryptionSecret())
             : parseAttachmentContent(msg.encrypted_content),
         isRead: msg.is_read,
         timestamp: msg.created_at

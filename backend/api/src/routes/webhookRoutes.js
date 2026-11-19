@@ -6,11 +6,15 @@ import { dlqService } from '../services/webhook/dlqService.js';
 import { processEscrowWebhookEvent } from '../services/webhook/escrowWebhookProcessor.js';
 
 const router = express.Router();
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || 'truxify_webhook_secret_key';
-
 // ✅ Register express.raw middleware to capture exact raw body buffer for HMAC verification
 router.post('/webhook', express.raw({ type: '*/*' }), async (req, res) => {
   try {
+    const webhookSecret = process.env.WEBHOOK_SECRET;
+    if (!webhookSecret) {
+      logger.error('[Webhook] WEBHOOK_SECRET not set - rejecting legacy webhook request');
+      return res.status(500).json({ error: 'Webhook secret not configured' });
+    }
+
     const signatureHeader = req.headers['x-signature'] || req.headers['x-hub-signature-256'] || '';
     const rawBodyBuffer = req.body;
 
@@ -21,7 +25,7 @@ router.post('/webhook', express.raw({ type: '*/*' }), async (req, res) => {
 
     // Compute expected HMAC signature using raw bytes
     const expectedSignature = crypto
-      .createHmac('sha256', WEBHOOK_SECRET)
+      .createHmac('sha256', webhookSecret)
       .update(rawBodyBuffer)
       .digest('hex');
 

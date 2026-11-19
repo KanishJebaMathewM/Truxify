@@ -1,3 +1,4 @@
+
 import 'package:flutter/foundation.dart';
 
 import '../models/trip_event.dart';
@@ -6,7 +7,7 @@ class ConflictResolutionResult {
   final List<TripEvent> resolved;
   final List<String> supersededIds;
 
-  ConflictResolutionResult({
+  const ConflictResolutionResult({
     required this.resolved,
     required this.supersededIds,
   });
@@ -16,87 +17,88 @@ class ConflictResolver {
   ConflictResolutionResult resolveWithDetails(List<TripEvent> events) {
     try {
       final resolved = resolve(events);
-      final resolvedIds = resolved.map((e) => e.id).toSet();
+      final resolvedIds = resolved.map((event) => event.id).toSet();
+
       final supersededIds = events
-          .map((e) => e.id)
-          .where((id) => !resolvedIds.contains(id))
+          .where((event) => !resolvedIds.contains(event.id))
+          .map((event) => event.id)
+          .toSet()
           .toList();
 
       return ConflictResolutionResult(
         resolved: resolved,
         supersededIds: supersededIds,
       );
-    } catch (err, stack) {
-      debugPrint('[ConflictResolver Error] Failed in resolveWithDetails: $err\n$stack');
-      return ConflictResolutionResult(resolved: events, supersededIds: []);
+    } catch (error, stackTrace) {
+      debugPrint(
+        '[ConflictResolver] resolveWithDetails failed: $error\n$stackTrace',
+      );
+
+      return ConflictResolutionResult(
+        resolved: List<TripEvent>.of(events),
+        supersededIds: const [],
+      );
     }
   }
 
   List<TripEvent> resolve(List<TripEvent> events) {
     try {
       final sorted = List<TripEvent>.of(events)
-        ..sort((a, b) => _compareTimestamp(a.occurredAt, b.occurredAt));
+        ..sort(
+          (a, b) => _compareTimestamp(a.occurredAt, b.occurredAt),
+        );
 
       final gpsByTrip = <String, TripEvent>{};
       final otpByStop = <String, TripEvent>{};
       final stopByTripStop = <String, TripEvent>{};
       final lifecycleByTrip = <String, TripEvent>{};
-      final routeEvents = <TripEvent>[];
       final podByTrip = <String, TripEvent>{};
+      final routeEvents = <TripEvent>[];
 
       for (final event in sorted) {
         try {
           switch (event.type) {
             case 'gpsUpdate':
-              {
-                // Latest-wins per trip: a stale queued ping must not override
-                // the freshest position after offline replay.
-                final current = gpsByTrip[event.tripId];
-                if (current == null ||
-                    _compareTimestamp(event.occurredAt, current.occurredAt) >= 0) {
-                  gpsByTrip[event.tripId] = event;
-                }
-              }
+              _keepLatest(gpsByTrip, event.tripId, event);
               break;
+
             case 'otpDelivery':
-              {
-                final key = '${event.tripId}:${event.payload['stopId']}';
-                final current = otpByStop[key];
-                if (current == null || _compareTimestamp(event.occurredAt, current.occurredAt) >= 0) {
-                  otpByStop[key] = event;
-                }
-              }
+              final key = _stopKey(event);
+              _keepLatest(otpByStop, key, event);
               break;
+
             case 'stopArrival':
-              {
-                final key = '${event.tripId}:${event.payload['stopId']}';
-                final current = stopByTripStop[key];
-                if (current == null || _compareTimestamp(event.occurredAt, current.occurredAt) >= 0) {
-                  stopByTripStop[key] = event;
-                }
-              }
+              final key = _stopKey(event);
+              _keepLatest(stopByTripStop, key, event);
               break;
+
             case 'podMetadata':
-              {
-                final key = event.tripId;
-                podByTrip[key] = _mergePodMetadata(podByTrip[key], event);
-              }
+              podByTrip[event.tripId] = _mergePodMetadata(
+                podByTrip[event.tripId],
+                event,
+              );
               break;
+
             case 'routeDeviation':
               routeEvents.add(event);
               break;
+
             case 'tripStart':
             case 'tripEnd':
-              {
-                final key = '${event.tripId}:${event.type}';
-                lifecycleByTrip.putIfAbsent(key, () => event);
-              }
+              final key = '${event.tripId}:${event.type}';
+              lifecycleByTrip.putIfAbsent(key, () => event);
               break;
+
             default:
               routeEvents.add(event);
               break;
           }
-        } catch (eventErr) {
+        } catch (error, stackTrace) {
+          debugPrint(
+            '[ConflictResolver] Failed to process event ${event.id}: '
+            '$error\n$stackTrace',
+          );
+
           routeEvents.add(event);
         }
       }
@@ -108,27 +110,62 @@ class ConflictResolver {
         ...podByTrip.values,
         ...routeEvents,
         ...lifecycleByTrip.values,
-      ]
-        ..sort((a, b) => _compareTimestamp(a.occurredAt, b.occurredAt));
+      ]..sort(
+          (a, b) => _compareTimestamp(a.occurredAt, b.occurredAt),
+        );
 
       return resolved;
-    } catch (e) {
-      return events;
+    } catch (error, stackTrace) {
+      debugPrint(
+        '[ConflictResolver] Resolution failed: $error\n$stackTrace',
+      );
+      return List<TripEvent>.of(events);
+    }
+  }
+
+  static String _stopKey(TripEvent event) {
+    final stopId = event.payload['stopId']?.toString().trim();
+
+    if (stopId == null || stopId.isEmpty) {
+      return '${event.tripId}:unknown:${event.id}';
+    }
+
+    return '${event.tripId}:$stopId';
+  }
+
+  static void _keepLatest(
+    Map<String, TripEvent> target,
+    String key,
+    TripEvent incoming,
+  ) {
+    final current = target[key];
+
+    if (current == null ||
+        _compareTimestamp(
+              incoming.occurredAt,
+              current.occurredAt,
+            ) >=
+            0) {
+      target[key] = incoming;
     }
   }
 
   static int _compareTimestamp(String left, String right) {
-    try {
-      final leftTime = DateTime.tryParse(left)?.millisecondsSinceEpoch ?? 0;
-      final rightTime = DateTime.tryParse(right)?.millisecondsSinceEpoch ?? 0;
-      return leftTime.compareTo(rightTime);
-    } catch (_) {
-      return 0;
-    }
+    final leftTime = DateTime.tryParse(left);
+    final rightTime = DateTime.tryParse(right);
+
+    if (leftTime == null && rightTime == null) return 0;
+    if (leftTime == null) return -1;
+    if (rightTime == null) return 1;
+
+    return leftTime.compareTo(rightTime);
   }
 
-  static Iterable<Map<String, dynamic>> _attachmentRows(Object? value) sync* {
+  static Iterable<Map<String, dynamic>> _attachmentRows(
+    Object? value,
+  ) sync* {
     if (value is! List) return;
+
     for (final item in value) {
       try {
         if (item is Map<String, dynamic>) {
@@ -136,39 +173,56 @@ class ConflictResolver {
         } else if (item is Map) {
           yield Map<String, dynamic>.from(item);
         }
-      } catch (e) {
-        debugPrint('[ConflictResolver] dropped malformed attachment row: $e');
+      } catch (error) {
+        debugPrint(
+          '[ConflictResolver] Dropped malformed attachment: $error',
+        );
       }
     }
   }
 
-  static TripEvent _mergePodMetadata(TripEvent? existing, TripEvent incoming) {
-    if (existing == null) {
-      return incoming;
-    }
+  static TripEvent _mergePodMetadata(
+    TripEvent? existing,
+    TripEvent incoming,
+  ) {
+    if (existing == null) return incoming;
 
     try {
       final mergedPayload = Map<String, dynamic>.from(existing.payload);
       final incomingPayload = Map<String, dynamic>.from(incoming.payload);
 
-      if (incomingPayload['attachments'] is List && mergedPayload['attachments'] is List) {
-        final merged = <Map<String, dynamic>>[];
-        final seen = <String>{};
-        for (final item in [
-          ..._attachmentRows(mergedPayload['attachments']),
-          ..._attachmentRows(incomingPayload['attachments']),
-        ]) {
-          final hash = '${item['name'] ?? ''}:${item['hash'] ?? ''}';
-          if (!seen.contains(hash)) {
-            seen.add(hash);
-            merged.add(item);
-          }
+      final attachments = <Map<String, dynamic>>[];
+      final seen = <String>{};
+
+      for (final item in [
+        ..._attachmentRows(mergedPayload['attachments']),
+        ..._attachmentRows(incomingPayload['attachments']),
+      ]) {
+        final hash = '${item['name'] ?? ''}:${item['hash'] ?? ''}';
+
+        if (seen.add(hash)) {
+          attachments.add(item);
         }
-        mergedPayload['attachments'] = merged;
       }
 
-      return existing.copyWith(payload: mergedPayload, occurredAt: incoming.occurredAt);
-    } catch (_) {
+      if (mergedPayload.containsKey('attachments') ||
+          incomingPayload.containsKey('attachments')) {
+        mergedPayload['attachments'] = attachments;
+      }
+
+      // Preserve the latest metadata fields while retaining attachments.
+      mergedPayload.addAll(incomingPayload);
+      mergedPayload['attachments'] = attachments;
+
+      return existing.copyWith(
+        payload: mergedPayload,
+        occurredAt: incoming.occurredAt,
+      );
+    } catch (error, stackTrace) {
+      debugPrint(
+        '[ConflictResolver] POD metadata merge failed: '
+        '$error\n$stackTrace',
+      );
       return incoming;
     }
   }
@@ -177,6 +231,7 @@ class ConflictResolver {
 class ResolutionStrategy {
   final String name;
   final int priority;
+
   const ResolutionStrategy(this.name, this.priority);
 
   static const latestWins = ResolutionStrategy('latestWins', 1);
@@ -184,7 +239,17 @@ class ResolutionStrategy {
   static const serverWins = ResolutionStrategy('serverWins', 3);
   static const clientWins = ResolutionStrategy('clientWins', 4);
 
-  static ResolutionStrategy fromName(String n) => [latestWins, earliestWins, serverWins, clientWins].firstWhere((s) => s.name == n, orElse: () => latestWins);
+  static const List<ResolutionStrategy> values = [
+    latestWins,
+    earliestWins,
+    serverWins,
+    clientWins,
+  ];
 
-  static final List<ResolutionStrategy> values = [latestWins, earliestWins, serverWins, clientWins];
+  static ResolutionStrategy fromName(String name) {
+    return values.firstWhere(
+      (strategy) => strategy.name == name,
+      orElse: () => latestWins,
+    );
+  }
 }

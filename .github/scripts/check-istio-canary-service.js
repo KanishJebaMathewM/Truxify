@@ -1,23 +1,29 @@
+
 const fs = require("fs");
 const path = require("path");
 
 const ROOT = path.resolve(__dirname, "../..");
 const K8S_DIR = path.join(ROOT, "k8s");
-const CANARY_VS = path.join(K8S_DIR, "istio", "virtual-service.yaml");
+const CANARY_VS = path.join(
+  K8S_DIR,
+  "istio",
+  "virtual-service.yaml"
+);
 
+// Split multiple YAML documents
 function splitDocs(content) {
   return content
     .split(/^\s*---\s*$/m)
-    .map((doc) => doc.trim())
+    .map(doc => doc.trim())
     .filter(Boolean);
 }
 
+// Get a top-level YAML value
 function getScalar(lines, key) {
-  const regex = new RegExp(`^\\s*${key}:\\s*(\\S+)\\s*$`);
+  const regex = new RegExp(`^${key}:\\s*(\\S+)\\s*$`);
 
   for (const line of lines) {
     const match = regex.exec(line);
-
     if (match) {
       return match[1].replace(/^["']|["']$/g, "");
     }
@@ -26,23 +32,26 @@ function getScalar(lines, key) {
   return null;
 }
 
-function getMetadataName(lines) {
+// Get metadata fields
+function getMetadataField(lines, field) {
   let inMetadata = false;
 
   for (const line of lines) {
-    if (/^\s*metadata:\s*$/.test(line)) {
+    if (/^metadata:\s*$/.test(line)) {
       inMetadata = true;
       continue;
     }
 
     if (inMetadata) {
-      // Leave the metadata block when another top-level field starts.
       if (/^\S/.test(line)) {
-        inMetadata = false;
-        continue;
+        break;
       }
 
-      const match = /^\s{2,}name:\s*(\S+)\s*$/.exec(line);
+      const regex = new RegExp(
+        `^\\s{2,}${field}:\\s*(\\S+)\\s*$`
+      );
+
+      const match = regex.exec(line);
 
       if (match) {
         return match[1].replace(/^["']|["']$/g, "");
@@ -53,89 +62,19 @@ function getMetadataName(lines) {
   return null;
 }
 
-function getMetadataNamespace(lines) {
-  let inMetadata = false;
-
-  for (const line of lines) {
-    if (/^\s*metadata:\s*$/.test(line)) {
-      inMetadata = true;
-      continue;
-    }
-
-    if (inMetadata) {
-      if (/^\S/.test(line)) {
-        inMetadata = false;
-        continue;
-      }
-
-      const match = /^\s{2,}namespace:\s*(\S+)\s*$/.exec(line);
-
-      if (match) {
-        return match[1].replace(/^["']|["']$/g, "");
-      }
-    }
-  }
-
-  return "default";
-}
-
 function getKind(lines) {
   return getScalar(lines, "kind");
 }
 
-function normalizeHost(host) {
-  return host
-    .replace(/^["']|["']$/g, "")
-    .trim()
-    .toLowerCase()
-    .replace(/\.$/, "");
-}
-
-function getServiceReference(host, virtualServiceNamespace) {
-  const normalizedHost = normalizeHost(host);
-
-  if (!normalizedHost || normalizedHost === "*") {
-    return null;
-  }
-
-  const parts = normalizedHost.split(".");
-
-  /*
-   * Kubernetes service references can be:
-   *
-   * service
-   * service.namespace
-   * service.namespace.svc
-   * service.namespace.svc.cluster.local
-   *
-   * A fully-qualified service name gives us enough information
-   * to validate both service name and namespace.
-   */
-  const name = parts[0];
-
-  let namespace = virtualServiceNamespace || "default";
-
-  if (parts.length >= 2 && parts[1]) {
-    namespace = parts[1];
-  }
-
-  return {
-    name,
-    namespace,
-    host: normalizedHost,
-  };
-}
-
+// Collect Kubernetes services
 function collectServices(dir) {
   const services = new Map();
 
   function walk(currentDir) {
-    if (!fs.existsSync(currentDir)) {
-      return;
-    }
+    if (!fs.existsSync(currentDir)) return;
 
     for (const entry of fs.readdirSync(currentDir, {
-      withFileTypes: true,
+      withFileTypes: true
     })) {
       const filePath = path.join(currentDir, entry.name);
 
@@ -144,183 +83,167 @@ function collectServices(dir) {
         continue;
       }
 
-      if (!/\.(yaml|yml)$/.test(entry.name)) {
-        continue;
-      }
+      if (!/\.ya?ml$/.test(entry.name)) continue;
 
-      let content;
+      const content = fs.readFileSync(filePath, "utf8");
 
-      try {
-        content = fs.readFileSync(filePath, "utf8");
-      } catch (error) {
-        console.error(`Unable to read ${filePath}: ${error.message}`);
-        process.exit(1);
-      }
+      for (const doc of splitDocs(content)) {
+        const lines = doc.split(/\r?\n/);
 
-      for (const document of splitDocs(content)) {
-        const lines = document.split(/\r?\n/);
+        if (getKind(lines) !== "Service") continue;
 
-        if (getKind(lines) !== "Service") {
-          continue;
-        }
-
-        const name = getMetadataName(lines);
+        const name = getMetadataField(lines, "name");
 
         if (!name) {
-          console.error(
-            `Service manifest is missing metadata.name: ${filePath}`,
+          throw new Error(
+            `Service manifest missing metadata.name: ${filePath}`
           );
-          process.exit(1);
         }
 
-        const namespace = getMetadataNamespace(lines);
+        const namespace =
+          getMetadataField(lines, "namespace") || "default";
 
-        const key = `${namespace}/${name}`;
-
-        services.set(key, {
-          name,
-          namespace,
-          file: filePath,
-        });
+        services.set(`${namespace}/${name}`, true);
       }
     }
   }
 
   walk(dir);
-
   return services;
 }
 
+// Find VirtualService documents
 function getVirtualServiceDocuments(content) {
   return splitDocs(content)
-    .map((document) => document.split(/\r?\n/))
-    .filter((lines) => getKind(lines) === "VirtualService");
+    .map(doc => doc.split(/\r?\n/))
+    .filter(lines => getKind(lines) === "VirtualService");
 }
 
+// Collect destination hosts
 function collectDestinationHosts(lines) {
   const hosts = [];
-
-  let inRouteDestination = false;
+  let destinationIndent = -1;
 
   lines.forEach((line, index) => {
-    /*
-     * We only want destination.host values.
-     *
-     * This prevents the script from accidentally treating a top-level
-     * VirtualService `hosts:` entry as a Kubernetes Service destination.
-     */
     if (/^\s*destination:\s*$/.test(line)) {
-      inRouteDestination = true;
+      destinationIndent = line.search(/\S/);
       return;
     }
 
-    if (inRouteDestination) {
-      const match = /^\s*host:\s*(\S+)\s*$/.exec(line);
+    if (destinationIndent === -1) return;
 
-      if (match) {
-        hosts.push({
-          host: match[1].replace(/^["']|["']$/g, ""),
-          line: index + 1,
-        });
+    if (line.trim() === "" || /^\s*#/.test(line)) return;
 
-        inRouteDestination = false;
-        return;
-      }
+    const indent = line.search(/\S/);
 
-      /*
-       * If indentation returns to the same or lower level before
-       * finding host, this is not a destination block anymore.
-       */
-      if (
-        line.trim() !== "" &&
-        !/^\s{10,}/.test(line)
-      ) {
-        inRouteDestination = false;
-      }
+    if (indent <= destinationIndent) {
+      destinationIndent = -1;
+      return;
+    }
+
+    const match = /^\s*host:\s*(\S+)\s*$/.exec(line);
+
+    if (match) {
+      hosts.push({
+        host: match[1].replace(/^["']|["']$/g, ""),
+        line: index + 1
+      });
+
+      destinationIndent = -1;
     }
   });
 
   return hosts;
 }
 
-if (!fs.existsSync(CANARY_VS)) {
-  console.error(`VirtualService file not found: ${CANARY_VS}`);
-  process.exit(1);
+// Convert destination host into service reference
+function getServiceReference(host, namespace) {
+  const normalized = host
+    .trim()
+    .toLowerCase()
+    .replace(/\.$/, "");
+
+  if (!normalized || normalized === "*") return null;
+
+  const parts = normalized.split(".");
+
+  return {
+    name: parts[0],
+    namespace: parts[1] || namespace || "default"
+  };
 }
 
-let vsContent;
-
-try {
-  vsContent = fs.readFileSync(CANARY_VS, "utf8");
-} catch (error) {
-  console.error(
-    `Unable to read VirtualService file ${CANARY_VS}: ${error.message}`,
-  );
-  process.exit(1);
-}
-
-const virtualServiceDocs = getVirtualServiceDocuments(vsContent);
-
-if (virtualServiceDocs.length !== 1) {
-  console.error(
-    `Expected exactly one VirtualService document in ${CANARY_VS}, found ${virtualServiceDocs.length}.`,
-  );
-  process.exit(1);
-}
-
-const virtualServiceLines = virtualServiceDocs[0];
-
-const virtualServiceNamespace =
-  getMetadataNamespace(virtualServiceLines);
-
-const destinations = collectDestinationHosts(virtualServiceLines);
-
-if (destinations.length === 0) {
-  console.error(
-    `No destination hosts found in VirtualService: ${CANARY_VS}`,
-  );
-  process.exit(1);
-}
-
-const services = collectServices(K8S_DIR);
-
-const missing = [];
-
-for (const destination of destinations) {
-  const reference = getServiceReference(
-    destination.host,
-    virtualServiceNamespace,
-  );
-
-  if (!reference) {
-    continue;
+// Validate VirtualService file
+function main() {
+  if (!fs.existsSync(CANARY_VS)) {
+    throw new Error(`VirtualService file not found: ${CANARY_VS}`);
   }
 
-  const key = `${reference.namespace}/${reference.name}`;
+  const content = fs.readFileSync(CANARY_VS, "utf8");
 
-  if (!services.has(key)) {
-    missing.push(
-      `${destination.host} (${virtualServiceLines ? "virtual-service.yaml" : CANARY_VS}:${destination.line})`,
+  const documents = getVirtualServiceDocuments(content);
+
+  if (documents.length !== 1) {
+    throw new Error(
+      `Expected exactly one VirtualService document, found ${documents.length}`
     );
   }
-}
 
-if (missing.length > 0) {
-  console.error(
-    "Canary VirtualService destinations with no matching Kubernetes Service:",
-  );
+  const lines = documents[0];
 
-  for (const destination of missing) {
-    console.error(`  - ${destination}`);
+  const namespace =
+    getMetadataField(lines, "namespace") || "default";
+
+  const destinations = collectDestinationHosts(lines);
+
+  if (destinations.length === 0) {
+    throw new Error("No destination hosts found in VirtualService");
   }
 
-  console.error(
-    "Add the missing Service with the correct namespace/selector or remove/redirect the destination.",
-  );
+  const services = collectServices(K8S_DIR);
+  const missing = [];
 
-  process.exit(1);
+  for (const destination of destinations) {
+    const reference = getServiceReference(
+      destination.host,
+      namespace
+    );
+
+    if (!reference) continue;
+
+    const key = `${reference.namespace}/${reference.name}`;
+
+    if (!services.has(key)) {
+      missing.push(
+        `${destination.host} (${path.basename(CANARY_VS)}:${destination.line})`
+      );
+    }
+  }
+
+  if (missing.length > 0) {
+    console.error(
+      "Canary VirtualService destinations with no matching Kubernetes Service:"
+    );
+
+    missing.forEach(item => console.error(` - ${item}`));
+
+    console.error(
+      "Add the missing Kubernetes Service or correct the destination host."
+    );
+
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(
+    `All ${destinations.length} canary VirtualService destinations resolve to Services defined in k8s manifests.`
+  );
 }
 
-console.log(
-  `All ${destinations.length} canary VirtualService destinations resolve to Services defined in k8s manifests.`,
-);
+try {
+  main();
+} catch (error) {
+  console.error(error.message);
+  process.exitCode = 1;
+}
+

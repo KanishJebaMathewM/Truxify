@@ -40,12 +40,14 @@ function addLabels(target, labels) {
 
 function labelsMatchingRules(value, rules = []) {
   const labels = new Set();
+
   for (const rule of rules) {
     const pattern = new RegExp(rule.pattern, 'i');
     if (pattern.test(value)) {
       addLabels(labels, rule.labels);
     }
   }
+
   return labels;
 }
 
@@ -54,24 +56,22 @@ function pickDominantTypeLabel({ candidateLabels, changedFiles, prTitle, rules }
   if (priority.length === 0) return candidateLabels;
 
   const prioritySet = new Set(priority);
-  const typeLabels = candidateLabels.filter(l => prioritySet.has(normalize(l)));
-  const nonTypeLabels = candidateLabels.filter(l => !prioritySet.has(normalize(l)));
+  const typeLabels = candidateLabels.filter((label) =>
+    prioritySet.has(normalize(label))
+  );
+  const nonTypeLabels = candidateLabels.filter(
+    (label) => !prioritySet.has(normalize(label))
+  );
 
   if (typeLabels.length <= 1) return candidateLabels;
 
-  // Score each type label by how many changed files match its path rules
-  // plus bonus for title match
-  const scores = new Map();
-  for (const tl of typeLabels) {
-    scores.set(normalize(tl), 0);
-  }
+  const scores = new Map(typeLabels.map((label) => [normalize(label), 0]));
 
-  // Score from path rules: each changed file matching a pathRule that yields a contested type label
+  // Score type labels from changed-file path rules.
   for (const file of changedFiles) {
-    for (const rule of (rules.pathRules || [])) {
-      const pattern = new RegExp(rule.pattern, 'i');
-      if (pattern.test(file)) {
-        for (const ruleLabel of (rule.labels || [])) {
+    for (const rule of rules.pathRules || []) {
+      if (new RegExp(rule.pattern, 'i').test(file)) {
+        for (const ruleLabel of rule.labels || []) {
           const key = normalize(ruleLabel);
           if (scores.has(key)) {
             scores.set(key, scores.get(key) + 1);
@@ -81,11 +81,10 @@ function pickDominantTypeLabel({ candidateLabels, changedFiles, prTitle, rules }
     }
   }
 
-  // Score from title rules: bonus of 3 for title match
-  for (const rule of (rules.titleRules || [])) {
-    const pattern = new RegExp(rule.pattern, 'i');
-    if (pattern.test(prTitle)) {
-      for (const ruleLabel of (rule.labels || [])) {
+  // Give title-rule matches extra weight.
+  for (const rule of rules.titleRules || []) {
+    if (new RegExp(rule.pattern, 'i').test(prTitle)) {
+      for (const ruleLabel of rule.labels || []) {
         const key = normalize(ruleLabel);
         if (scores.has(key)) {
           scores.set(key, scores.get(key) + 3);
@@ -94,23 +93,28 @@ function pickDominantTypeLabel({ candidateLabels, changedFiles, prTitle, rules }
     }
   }
 
-  // Find the winner: highest score, tiebreak by priority order
+  // Choose the highest-scoring label, breaking ties by priority.
   let winner = null;
   let winnerScore = -1;
   let winnerPriority = Infinity;
 
   for (const [key, score] of scores) {
-    const pIdx = priority.indexOf(key);
-    if (score > winnerScore || (score === winnerScore && pIdx < winnerPriority)) {
+    const priorityIndex = priority.indexOf(key);
+
+    if (
+      score > winnerScore ||
+      (score === winnerScore && priorityIndex < winnerPriority)
+    ) {
       winner = key;
       winnerScore = score;
-      winnerPriority = pIdx;
+      winnerPriority = priorityIndex;
     }
   }
 
-  // Keep the original-case version of the winner
-  const winnerLabel = typeLabels.find(l => normalize(l) === winner);
-  return [...nonTypeLabels, winnerLabel].sort((a, b) => a.localeCompare(b));
+  const winnerLabel = typeLabels.find((label) => normalize(label) === winner);
+  return [...nonTypeLabels, winnerLabel].sort((a, b) =>
+    a.localeCompare(b)
+  );
 }
 
 function selectLabels({
@@ -120,23 +124,26 @@ function selectLabels({
   linkedIssueLabels = [],
   currentLabels = [],
   availableLabels = [],
-  rules = loadRules(),
-  detectedPrograms = []
+  rules = loadRules()
 }) {
   const selected = new Set();
   const current = new Set(currentLabels.map(normalize));
   const available = new Set(availableLabels.map(normalize));
   const inherited = new Set((rules.inheritLabels || []).map(normalize));
 
+  // Inherit only labels explicitly configured for inheritance.
   for (const label of linkedIssueLabels) {
     if (inherited.has(normalize(label))) {
       selected.add(label);
     }
   }
 
-  // Apply program labels based on rules if any signals detected
-  const programs = new Set(detectedPrograms);
-  if (rules.programLabels && rules.programLabels.length > 0 && hasProgramSignal({ title: prTitle, body: prBody, rules })) {
+  // Apply program labels when program signals are present.
+  if (
+    rules.programLabels &&
+    rules.programLabels.length > 0 &&
+    hasProgramSignal({ title: prTitle, body: prBody, rules })
+  ) {
     addLabels(selected, rules.programLabels);
   }
 
@@ -152,15 +159,19 @@ function selectLabels({
     .sort((a, b) => a.localeCompare(b));
 
   if (rules.singleTypeLabel) {
-    // Also consider type labels already on the PR
-    const currentTypeLabels = currentLabels.filter(l => {
-      const priority = (rules.typeLabelPriority || []).map(normalize);
-      return new Set(priority).has(normalize(l));
-    });
+    const prioritySet = new Set(
+      (rules.typeLabelPriority || []).map(normalize)
+    );
+
+    const currentTypeLabels = currentLabels.filter((label) =>
+      prioritySet.has(normalize(label))
+    );
+
     if (currentTypeLabels.length > 0) {
-      // PR already has a type label, remove any new type labels from result
-      const prioritySet = new Set((rules.typeLabelPriority || []).map(normalize));
-      result = result.filter(l => !prioritySet.has(normalize(l)));
+      // Avoid adding a second type label if one is already present.
+      result = result.filter(
+        (label) => !prioritySet.has(normalize(label))
+      );
     } else {
       result = pickDominantTypeLabel({
         candidateLabels: result,
@@ -175,21 +186,29 @@ function selectLabels({
 }
 
 async function fetchPaginatedLabels(github, owner, repo) {
-  const labels = await github.paginate(github.rest.issues.listLabelsForRepo, {
-    owner,
-    repo,
-    per_page: 100
-  });
+  const labels = await github.paginate(
+    github.rest.issues.listLabelsForRepo,
+    {
+      owner,
+      repo,
+      per_page: 100
+    }
+  );
+
   return labels.map((label) => label.name);
 }
 
 async function fetchPullRequestFiles(github, owner, repo, pullNumber) {
-  const files = await github.paginate(github.rest.pulls.listFiles, {
-    owner,
-    repo,
-    pull_number: pullNumber,
-    per_page: 100
-  });
+  const files = await github.paginate(
+    github.rest.pulls.listFiles,
+    {
+      owner,
+      repo,
+      pull_number: pullNumber,
+      per_page: 100
+    }
+  );
+
   return files.map((file) => file.filename);
 }
 
@@ -204,16 +223,22 @@ async function fetchLinkedIssueDetails(github, owner, repo, issueNumbers) {
         repo,
         issue_number: issueNumber
       });
+
       const issue = response.data;
+
       if (issue) {
         const issueLabels = (issue.labels || []).map((label) =>
           typeof label === 'string' ? label : label.name
         );
+
         addLabels(labels, issueLabels);
-        issueTexts.push(`${issue.title || ''}\n${issue.body || ''}\n${issueLabels.join(' ')}`);
+
+        issueTexts.push(
+          `${issue.title || ''}\n${issue.body || ''}\n${issueLabels.join(' ')}`
+        );
       }
     } catch (error) {
-      // Missing or cross-repository issue references should not block PR labeling.
+      // Missing or cross-repository issues should not block PR labeling.
       continue;
     }
   }
@@ -225,7 +250,12 @@ async function fetchLinkedIssueDetails(github, owner, repo, issueNumbers) {
 }
 
 async function fetchIssueLabels(github, owner, repo, issueNumbers) {
-  const details = await fetchLinkedIssueDetails(github, owner, repo, issueNumbers);
+  const details = await fetchLinkedIssueDetails(
+    github,
+    owner,
+    repo,
+    issueNumbers
+  );
   return details.labels;
 }
 
@@ -245,57 +275,105 @@ async function ensureLabelExists(github, owner, repo, name, color, description) 
   }
 }
 
-async function run({ github, context, core, rulesPath = DEFAULT_RULES_PATH, dryRun = false }) {
+async function run({
+  github,
+  context,
+  core,
+  rulesPath = DEFAULT_RULES_PATH,
+  dryRun = false
+}) {
   const { owner, repo } = context.repo;
-
   let pullRequest = context.payload.pull_request;
+
   if (!pullRequest) {
     if (context.payload.issue && context.payload.issue.pull_request) {
-      core.info(`Triggered by comment on PR #${context.payload.issue.number}. Fetching PR details...`);
+      core.info(
+        `Triggered by comment on PR #${context.payload.issue.number}. Fetching PR details...`
+      );
+
       const response = await github.rest.pulls.get({
         owner,
         repo,
         pull_number: context.payload.issue.number
       });
+
       pullRequest = response.data;
     } else {
-      core.info('No pull_request payload found and not an issue comment on a PR; skipping PR labeler.');
+      core.info(
+        'No pull_request payload found and not an issue comment on a PR; skipping PR labeler.'
+      );
       return [];
     }
   } else {
-    core.info(`Fetching latest PR details for PR #${pullRequest.number}...`);
+    core.info(
+      `Fetching latest PR details for PR #${pullRequest.number}...`
+    );
+
     const response = await github.rest.pulls.get({
       owner,
       repo,
       pull_number: pullRequest.number
     });
+
     pullRequest = response.data;
   }
 
   const pullNumber = pullRequest.number;
   const rules = loadRules(rulesPath);
 
-  // Find linked issue numbers and fetch their details (title, body, labels)
-  const linkedIssueNumbers = findLinkedIssueNumbers(`${pullRequest.title}\n${pullRequest.body || ''}`);
-  const linkedIssueDetails = await fetchLinkedIssueDetails(github, owner, repo, linkedIssueNumbers);
+  // Find linked issues and retrieve their labels.
+  const linkedIssueNumbers = findLinkedIssueNumbers(
+    `${pullRequest.title}\n${pullRequest.body || ''}`
+  );
+
+  const linkedIssueDetails = await fetchLinkedIssueDetails(
+    github,
+    owner,
+    repo,
+    linkedIssueNumbers
+  );
+
   const linkedIssueLabels = linkedIssueDetails.labels;
 
-  // Fetch available labels in the repo
-  let availableLabels = await fetchPaginatedLabels(github, owner, repo);
+  // Fetch labels currently available in the repository.
+  let availableLabels = await fetchPaginatedLabels(
+    github,
+    owner,
+    repo
+  );
 
-  // Collect rule target labels so valid rules labels aren't dropped if not pre-created in repo settings
+  // Include configured rule labels even if they are not created yet.
   const ruleLabels = new Set();
-  (rules.programLabels || []).forEach((l) => ruleLabels.add(l));
-  (rules.titleRules || []).forEach((r) => (r.labels || []).forEach((l) => ruleLabels.add(l)));
-  (rules.pathRules || []).forEach((r) => (r.labels || []).forEach((l) => ruleLabels.add(l)));
+
+  (rules.programLabels || []).forEach((label) =>
+    ruleLabels.add(label)
+  );
+
+  (rules.titleRules || []).forEach((rule) =>
+    (rule.labels || []).forEach((label) => ruleLabels.add(label))
+  );
+
+  (rules.pathRules || []).forEach((rule) =>
+    (rule.labels || []).forEach((label) => ruleLabels.add(label))
+  );
 
   for (const ruleLabel of ruleLabels) {
-    if (!availableLabels.map(normalize).includes(normalize(ruleLabel))) {
+    if (
+      !availableLabels.some(
+        (label) => normalize(label) === normalize(ruleLabel)
+      )
+    ) {
       availableLabels.push(ruleLabel);
     }
   }
 
-  const changedFiles = await fetchPullRequestFiles(github, owner, repo, pullNumber);
+  const changedFiles = await fetchPullRequestFiles(
+    github,
+    owner,
+    repo,
+    pullNumber
+  );
+
   const currentLabels = (pullRequest.labels || []).map((label) =>
     typeof label === 'string' ? label : label.name
   );
@@ -310,39 +388,76 @@ async function run({ github, context, core, rulesPath = DEFAULT_RULES_PATH, dryR
     rules
   });
 
-  // Handle merge conflict and merge ready labels
-  const isConflict = pullRequest.mergeable === false || pullRequest.mergeable_state === 'dirty';
-  const hasConflictLabel = currentLabels.map(normalize).includes('merge conflicts');
-  const hasReadyLabel = currentLabels.map(normalize).includes('merge ready');
+  // Handle merge-conflict and merge-ready labels.
+  const isConflict =
+    pullRequest.mergeable === false ||
+    pullRequest.mergeable_state === 'dirty';
+
+  const hasConflictLabel = currentLabels
+    .map(normalize)
+    .includes('merge conflicts');
+
+  const hasReadyLabel = currentLabels
+    .map(normalize)
+    .includes('merge ready');
 
   if (isConflict) {
     if (!hasConflictLabel) {
-      if (!availableLabels.map(normalize).includes('merge conflicts')) {
+      if (
+        !availableLabels.some(
+          (label) => normalize(label) === 'merge conflicts'
+        )
+      ) {
         if (!dryRun) {
-          await ensureLabelExists(github, owner, repo, 'merge conflicts', 'd73a4a', 'PR has merge conflicts');
+          await ensureLabelExists(
+            github,
+            owner,
+            repo,
+            'merge conflicts',
+            'd73a4a',
+            'PR has merge conflicts'
+          );
         }
+
         availableLabels.push('merge conflicts');
       }
-      labelsToAdd.push('merge conflicts');
 
-      // Post comment notifying the author about the merge conflict
+      if (
+        !labelsToAdd.some(
+          (label) => normalize(label) === 'merge conflicts'
+        )
+      ) {
+        labelsToAdd.push('merge conflicts');
+      }
+
+      // Notify the author about merge conflicts.
       if (!dryRun) {
         try {
-          const author = pullRequest.user ? pullRequest.user.login : 'author';
+          const author = pullRequest.user
+            ? pullRequest.user.login
+            : 'author';
+
           await github.rest.issues.createComment({
             owner,
             repo,
             issue_number: pullNumber,
-            body: `@${author}, please resolve the commit so that it will be merged soon ......`
+            body: `@${author}, please resolve the merge conflicts so this PR can be merged.`
           });
+
           core.info(`Posted merge conflict comment on PR #${pullNumber}`);
         } catch (error) {
-          core.warning(`Failed to post merge conflict comment: ${error.message}`);
+          core.warning(
+            `Failed to post merge conflict comment: ${error.message}`
+          );
         }
       }
     }
+
     if (hasReadyLabel) {
-      core.info(`PR has conflicts but has 'merge ready' label. Removing the label...`);
+      core.info(
+        "PR has conflicts but has 'merge ready' label. Removing the label..."
+      );
+
       if (!dryRun) {
         try {
           await github.rest.issues.removeLabel({
@@ -352,25 +467,51 @@ async function run({ github, context, core, rulesPath = DEFAULT_RULES_PATH, dryR
             name: 'merge ready'
           });
         } catch (error) {
-          core.warning(`Failed to remove 'merge ready' label: ${error.message}`);
+          core.warning(
+            `Failed to remove 'merge ready' label: ${error.message}`
+          );
         }
       }
     }
   }
 
   const isClean = pullRequest.mergeable === true;
+
   if (isClean) {
     if (!hasReadyLabel) {
-      if (!availableLabels.map(normalize).includes('merge ready')) {
+      if (
+        !availableLabels.some(
+          (label) => normalize(label) === 'merge ready'
+        )
+      ) {
         if (!dryRun) {
-          await ensureLabelExists(github, owner, repo, 'merge ready', '2cbe4e', 'PR is mergeable and has no conflicts');
+          await ensureLabelExists(
+            github,
+            owner,
+            repo,
+            'merge ready',
+            '2cbe4e',
+            'PR is mergeable and has no conflicts'
+          );
         }
+
         availableLabels.push('merge ready');
       }
-      labelsToAdd.push('merge ready');
+
+      if (
+        !labelsToAdd.some(
+          (label) => normalize(label) === 'merge ready'
+        )
+      ) {
+        labelsToAdd.push('merge ready');
+      }
     }
+
     if (hasConflictLabel) {
-      core.info(`PR is mergeable and has 'merge conflicts' label. Removing the label...`);
+      core.info(
+        "PR is mergeable and has 'merge conflicts' label. Removing the label..."
+      );
+
       if (!dryRun) {
         try {
           await github.rest.issues.removeLabel({
@@ -380,7 +521,9 @@ async function run({ github, context, core, rulesPath = DEFAULT_RULES_PATH, dryR
             name: 'merge conflicts'
           });
         } catch (error) {
-          core.warning(`Failed to remove 'merge conflicts' label: ${error.message}`);
+          core.warning(
+            `Failed to remove 'merge conflicts' label: ${error.message}`
+          );
         }
       }
     }
@@ -392,7 +535,9 @@ async function run({ github, context, core, rulesPath = DEFAULT_RULES_PATH, dryR
   core.info(`Labels selected: ${labelsToAdd.join(', ') || 'none'}`);
 
   if (labelsToAdd.length === 0 || dryRun) {
-    if (dryRun) core.info('Dry run enabled; labels were not applied.');
+    if (dryRun) {
+      core.info('Dry run enabled; labels were not applied.');
+    }
     return labelsToAdd;
   }
 

@@ -1,3 +1,4 @@
+
 name: Backend CI
 
 on:
@@ -5,6 +6,7 @@ on:
     paths:
       - "backend/api/**"
       - ".github/workflows/backend-ci.yml"
+
   push:
     branches:
       - main
@@ -24,12 +26,15 @@ jobs:
     name: Backend Tests (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
+
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
 
@@ -42,11 +47,6 @@ jobs:
         working-directory: backend/api
         run: npm ci --workspaces=false --legacy-peer-deps --ignore-scripts
 
-      # Shard the whole test/ tree, not just test/unit. vitest.config.js
-      # collects test/**/*.test.js, so limiting this to test/unit left the 19
-      # suites at the top level of test/ and the 4 in test/contracts/ with no
-      # CI coverage at all. test/integration is excluded here because it runs
-      # in the job below, which provisions Postgres and Redis.
       - name: Run tests (shard ${{ matrix.shard }}/4)
         working-directory: backend/api
         run: npx vitest run --exclude "test/integration/**" --shard=${{ matrix.shard }}/4
@@ -56,6 +56,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: unit-tests
+
     services:
       postgres:
         image: postgres:16
@@ -70,6 +71,7 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+
       redis:
         image: redis:7
         ports:
@@ -79,11 +81,14 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/truxify_test
       REDIS_URL: redis://localhost:6379
+
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
 
@@ -99,3 +104,4 @@ jobs:
       - name: Run integration tests
         working-directory: backend/api
         run: npm run test:integration
+

@@ -2,14 +2,31 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { randomUUID } from 'crypto';
 import logger from './logger.js';
 
-export const correlationContext = new AsyncLocalStorage();
-
 // Enforce safe character set and length cap matching requestId.js
 const SAFE_CORRELATION_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
+export const correlationContext = new AsyncLocalStorage();
+
 /**
- * Middleware to extract, validate, or generate a secure correlation ID.
- * Updated per issue #10492 to prevent log injection and unbounded header reflection.
+ * Retrieves the current correlation store context.
+ * @returns {Object} Current store containing correlationId.
+ */
+export function getCorrelationStore() {
+  return correlationContext.getStore() ?? {};
+}
+
+/**
+ * Runs a callback function within an asynchronous correlation ID context.
+ * @param {string} correlationId - Unique request tracing ID.
+ * @param {Function} fn - Function to execute within context.
+ * @returns {any} Result of the callback execution.
+ */
+export function runWithCorrelationId(correlationId, fn) {
+  return correlationContext.run({ correlationId }, fn);
+}
+
+/**
+ * Express middleware to attach or generate a correlation ID for request tracing.
  */
 export function correlationIdMiddleware(req, res, next) {
   const headers = req?.headers || {};
@@ -46,14 +63,6 @@ export function correlationIdMiddleware(req, res, next) {
 
   const store = { correlationId };
   correlationContext.run(store, next);
-}
-
-export function runWithCorrelationId(correlationId, fn) {
-  return correlationContext.run({ correlationId }, fn);
-}
-
-export function getCorrelationStore() {
-  return correlationContext.getStore() ?? {};
 }
 
 export default correlationIdMiddleware;

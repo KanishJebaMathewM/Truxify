@@ -4,6 +4,7 @@ import { validatePricePrediction, convertToPaisa } from '../lib/predictionValida
 import { LRUCache } from '../utils/cache.js';
 const demandCache = new LRUCache(100, 15 * 60 * 1000);
 const priceCache = new LRUCache(100, 15 * 60 * 1000);
+
 // Single source of truth for ML engine base URL
 const DEFAULT_ML_ENGINE_URL = 'http://localhost:8001';
 
@@ -80,11 +81,7 @@ function parseWeightKg(weight) {
   return match[2].toLowerCase() === 'kg' ? value : value * 1000;
 }
 
-export function parseWeightKgSafe(weightInput, defaultKg = 1000) {
-  if (weightInput == null) return defaultKg;
-  const parsed = typeof weightInput === 'number' ? weightInput : parseFloat(weightInput);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultKg;
-}
+
 
 /**
  * Parse the free-text `dimensions` column of load_offers (e.g. '12 X 6 X 6 ft')

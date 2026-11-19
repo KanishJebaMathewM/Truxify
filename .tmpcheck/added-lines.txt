@@ -1,0 +1,747 @@
+===== efa71ffbe fix: escape report values before HTML export
++++ b/backend/api/src/lib/reportGenerator.js
++/**
++ * Escape user-controlled values before interpolating them into HTML.
++ *
++ * Report titles, metric labels and table cells originate from fleet/order
++ * data, so treating them as trusted markup turns an exported report into a
++ * stored-XSS vector when it is opened in a browser.
++ *
++ * @param {unknown} value
++ * @returns {string}
++ */
++function escapeHtml(value) {
++    return String(value ?? '')
++        .replace(/&/g, '&amp;')
++        .replace(/</g, '&lt;')
++        .replace(/>/g, '&gt;')
++        .replace(/"/g, '&quot;')
++        .replace(/'/g, '&#39;');
++}
++  <title>${escapeHtml(title)}</title>
++  <h1>${escapeHtml(title)}</h1>
++        <div class="metric-value">${escapeHtml(value)}</div>
++        <div class="metric-label">${escapeHtml(key)}</div>
++            html += `<h2>${escapeHtml(table.title)}</h2>`;
+===== a61f98f3a fix: drain offline chat queues atomically
++++ b/backend/api/src/lib/messageQueue.js
++// Read-and-delete must be one Redis operation. LRANGE followed by DEL lets two
++// reconnecting sockets read the same backlog before either delete runs, so both
++// clients receive every message. It can also delete messages appended between
++// the read and the delete. The Lua script runs atomically on the server.
++const DRAIN_QUEUE_SCRIPT = `
++local messages = redis.call('LRANGE', KEYS[1], 0, -1)
++if #messages > 0 then
++  redis.call('DEL', KEYS[1])
++end
++return messages
++`;
++        const messages = await redisClient.eval(DRAIN_QUEUE_SCRIPT, 1, key);
++        if (!Array.isArray(messages) || messages.length === 0) {
++            return [];
++        return messages.map(m => {
++            try {
++                return JSON.parse(m);
++            } catch {
++                return null;
++            }
++        }).filter(Boolean);
+===== 3ac303ff7 fix: sign the complete audit log payload
++++ b/backend/api/src/lib/logSigner.js
++const HMAC_HEX_LENGTH = 64;
++/**
++ * Build a deterministic representation of every field in an audit record.
++ *
++ * Signing only id/timestamp/event_type/user_id leaves the action, resource,
++ * details, IP address, and outcome unauthenticated. An attacker with database
++ * access could rewrite those fields while preserving a valid signature.
++ * Object keys are sorted so signatures do not depend on JSON insertion order.
++ *
++ * @param {unknown} value
++ * @returns {string}
++ */
++function canonicalize(value) {
++    if (value === null || typeof value !== 'object') {
++        return JSON.stringify(value);
++    }
++    if (Array.isArray(value)) {
++        return `[${value.map(canonicalize).join(',')}]`;
++    }
++    const keys = Object.keys(value)
++        .filter((key) => key !== 'signature')
++        .sort();
++    return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalize(value[key])}`).join(',')}}`;
+===== cb16a5cac fix: reject non-integer upload content lengths
++++ b/backend/api/src/lib/uploadFilename.js
++  // HTTP Content-Length is a non-negative decimal integer. Number() also
++  // accepts fractions, exponent notation and hex literals, so validate the
++  // grammar before converting; otherwise '1.5' or '1e9' can slip past the
++  // boundary checks while Node/busboy interprets the raw header differently.
++  if (typeof raw !== 'string' || !/^\d+$/.test(raw)) {
++    const err = new Error('Content-Length must be a non-negative integer');
++    err.status = 400; err.code = 'BAD_REQUEST';
++    return { ok: false, error: err };
++  }
++  if (!Number.isSafeInteger(len) || len < 0) {
++  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
++    const err = new Error('Invalid upload size limit');
++    err.status = 500; err.code = 'INTERNAL_ERROR';
++    return { ok: false, error: err };
++  }
+===== 057bf516b fix: fail closed when verifying a blank OTP
++++ b/backend/api/src/lib/otpHashing.js
++  if (otp === null || otp === undefined || (typeof otp === 'string' && otp.trim() === '')) {
++    return false
++  }
+===== c8bc2ce63 fix: reject missing or invalid document expiry dates
++++ b/backend/api/src/lib/documentValidator.js
++    // A missing or unparseable expiry date must never be treated as valid.
++    // `new Date('not-a-date')` produces an invalid Date whose NaN timestamp
++    // makes every comparison false, which previously returned expired:false
++    // and let an unreadable document pass verification.
++        return { expired: true, daysUntilExpiry: null, warning: false, reason: 'missing_expiry' };
++    if (Number.isNaN(expiry.getTime())) {
++        return { expired: true, daysUntilExpiry: null, warning: false, reason: 'invalid_expiry' };
++    }
+===== 00eded192 fix: stop counting unknown trip statuses as completed
++++ b/backend/api/src/services/driverEarningsService.js
++    if (trip.status === 'completed') {
++    if (trip.status === 'completed') {
++++ b/backend/api/test/unit/services/driverEarningsService.test.js
++        { total_earnings: 1500, net_earnings: 1200 }, // unknown status is not a completed trip
++        completionRate: 0.5, // 2 / 4
+===== af96a7845 fix: never emit a negative driver payout
++++ b/backend/api/src/services/driver/statementPayout.js
++  if (!Number.isFinite(amount)) return 0;
++  // A negative or corrupt legacy amount must never become a wallet debit.
++  return Math.max(0, amount);
+===== ac4451d28 fix: default RTL detection for missing locales
++++ b/backend/api/src/lib/formatters.js
++export function isRTL(locale = 'en-IN') {
++    if (typeof locale !== 'string' || locale.trim() === '') return false;
+===== 3cf22fcfa fix: handle malformed locale query and header values
++++ b/backend/api/src/lib/localeDetector.js
++function normalizeLocaleValue(value) {
++    if (Array.isArray(value)) value = value[0];
++    if (typeof value !== 'string') return '';
++    return value.trim();
++}
++function matchSupportedLocale(value) {
++    const candidate = normalizeLocaleValue(value);
++    if (!candidate) return null;
++    if (SUPPORTED_LOCALES.includes(candidate)) return candidate;
++    const langOnly = candidate.split('-')[0].toLowerCase();
++    if (!langOnly) return null;
++    return SUPPORTED_LOCALES.find((locale) => {
++        const supportedLang = locale.split('-')[0].toLowerCase();
++        return supportedLang === langOnly;
++    }) || null;
++}
++    const value = normalizeLocaleValue(header);
++    if (!value) return null;
++    const languages = value.split(',')
++        .filter(({ code }) => code.length > 0)
++        .sort((a, b) => {
++            if (!Number.isFinite(a.quality)) return 1;
++            if (!Number.isFinite(b.quality)) return -1;
+===== 6b469b528 fix: harden pluralization against non-string inputs
++++ b/backend/api/src/lib/pluralizer.js
++    const language = typeof locale === 'string' ? locale.split('-')[0] : 'en';
++    const rule = PLURAL_RULES[language] || PLURAL_RULES.en;
++    let numeric;
++    if (typeof count === 'symbol') {
++        numeric = NaN;
++    } else {
++        numeric = Number(count);
++    }
++    const safeCount = Number.isFinite(numeric) ? Math.abs(numeric) : 0;
++    return rule(safeCount);
++    if (typeof template !== 'string') {
++        template = String(template ?? '');
++    }
++    if (typeof message !== 'string' || message.length === 0) return '';
++    const vars = variables && typeof variables === 'object' ? variables : {};
++        return vars[key] !== undefined ? String(vars[key]) : match;
+===== 9ea01b347 fix: validate socket rate limiter abuse thresholds
++++ b/backend/api/src/lib/socketRateLimiter.js
++  const now = typeof options.now === 'function' ? options.now : () => performance.now();
++  let maxOverRate = options.maxOverRate ?? SOCKET_RATE_LIMIT_DEFAULTS.maxOverRate;
++  if (!Number.isSafeInteger(maxOverRate) || maxOverRate < 0) {
++    maxOverRate = SOCKET_RATE_LIMIT_DEFAULTS.maxOverRate;
++  }
++  if (!Number.isFinite(lastRefill)) lastRefill = 0;
++    if (!Number.isFinite(current)) return;
++    if (!Number.isFinite(lastRefill)) lastRefill = current;
+===== a090c9b9d fix: measure proof-of-delivery uploads from their buffers
++++ b/backend/api/src/lib/storage/podStorage.js
++    if (!file || !Buffer.isBuffer(file.buffer)) {
++    // `file.size` is supplied by the multipart parser, but callers can also
++    // construct file objects directly. Measure the bytes that will actually be
++    // uploaded so a missing or forged size cannot bypass the limit.
++    const actualSize = file.buffer.length;
++    if (actualSize > maxSize) {
++    if (actualSize === 0) {
+===== d9367a74b fix: contain audit logging failures
++++ b/backend/api/src/middleware/auditLogger.js
++/**
++ * Audit writes are best-effort: a database or queue failure must never turn a
++ * successful business response into an unhandled rejection or a failed request.
++ */
++function enqueueAuditLog(payload) {
++    try {
++        Promise.resolve(queueAuditLog(payload)).catch((err) => {
++            logger.error({ err, eventType: payload.eventType }, 'Failed to queue audit log');
++        });
++    } catch (err) {
++        logger.error({ err, eventType: payload.eventType }, 'Failed to queue audit log');
++    }
++}
++                enqueueAuditLog({
++                enqueueAuditLog({
++        enqueueAuditLog({
+===== a306a54a3 fix: reject unusable cache keys and authenticated responses
++++ b/backend/api/src/middleware/cacheMiddleware.js
++  if (!Number.isSafeInteger(ttlSeconds) || ttlSeconds <= 0) {
++    throw new TypeError('cacheMiddleware requires a positive integer TTL in seconds');
++  }
++  if (typeof keyPrefix !== 'string' || keyPrefix.trim() === '') {
++    throw new TypeError('cacheMiddleware requires a non-empty key prefix');
++  }
++  if (typeof keyGenerator !== 'function') {
++    throw new TypeError('cacheMiddleware requires a key generator function');
++  }
++    // A null/undefined key would collapse every unauthenticated or malformed
++    // request into the same entry (`cache:prefix:undefined`), serving one
++    // user's response to another. Refuse to cache anything that is not a
++    // non-empty primitive identifier.
++    if ((typeof uniqueKey !== 'string' && typeof uniqueKey !== 'number') || String(uniqueKey).trim() === '') {
++      logger.warn({ keyPrefix }, '[Cache] Empty key; bypassing cache');
++      return next();
++    }
++    const cacheKey = `cache:${keyPrefix}:${String(uniqueKey)}`;
++      if (upstashRedisClient && !res.getHeader('Set-Cookie') && res.statusCode >= 200 && res.statusCode < 300 && body !== null && body !== undefined) {
+===== 7eb8d6d2f fix: preserve cookie attributes and reject header injection
++++ b/backend/api/src/middleware/cookieSecurityValidator.js
++const COOKIE_NAME_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
++  if (!parsed.name || !COOKIE_NAME_TOKEN.test(parsed.name)) {
++    return '';
++  }
++  // Reject header injection instead of reflecting the original string. A CRLF
++  // or semicolon in the value would let a caller append arbitrary attributes or
++  // forge another Set-Cookie header.
++  if (parsed.value !== null && /[\r\n;]/.test(parsed.value)) {
++    return '';
++  // Keep Max-Age, Expires, Domain, Path and any vendor attribute. Dropping
++  // them silently changed session lifetime and cookie scope.
++  const preserved = parsed.attributes.filter((attr) => {
++    const name = attr.split('=')[0].trim().toLowerCase();
++    return name !== 'httponly' && name !== 'secure' && name !== 'samesite';
++  });
++  attributes.push(`${parsed.name}=${parsed.value || ''}`);
++  attributes.push(...preserved);
++  const cookieName = name.trim();
++  const cookieValue = String(value).trim();
++  if (!COOKIE_NAME_TOKEN.test(cookieName) || /[\r\n;]/.test(cookieValue)) {
++    return '';
++  }
++  const parts = [`${cookieName}=${cookieValue}`];
+===== 06935fdce fix: measure header overhead in the size guard
++++ b/backend/api/src/middleware/headerSizeMonitor.js
++  // Measure the bytes on the wire. Counting only names and values omits the
++  // ': ', CRLF and request-line overhead, so a request can be several hundred
++  // bytes over the configured threshold and still pass. Node preserves the
++  // original pairs in rawHeaders; fall back to the parsed map only when it is
++  // unavailable (for example in unit tests).
++  let rawTotal = 0;
++  if (Array.isArray(req.rawHeaders)) {
++    for (let i = 0; i < req.rawHeaders.length; i += 2) {
++      rawTotal += Buffer.byteLength(String(req.rawHeaders[i] ?? ''));
++      rawTotal += Buffer.byteLength(String(req.rawHeaders[i + 1] ?? ''));
++      rawTotal += 4; // ': ' + CRLF
++    }
++    rawTotal += 2; // final CRLF
++  }
++  // Middleware and tests can add values to req.headers after Node has built
++  // rawHeaders. Measure that view as well and use the larger result.
++  let parsedTotal = 0;
++    parsedTotal += Buffer.byteLength(name) + 4;
++        parsedTotal += Buffer.byteLength(String(item));
++      parsedTotal += Buffer.byteLength(String(value));
++  let totalSize = Math.max(rawTotal, parsedTotal);
+===== e030c7462 fix: normalize nested duplicate query parameters
++++ b/backend/api/src/middleware/hppProtection.js
++const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
++function normalizeValue(value, path, duplicateParams) {
++  if (Array.isArray(value)) {
++    if (value.length > 1) duplicateParams.push(path);
++    return value.length === 0 ? '' : normalizeValue(value[0], path, duplicateParams);
++  }
++  if (value && typeof value === 'object') {
++    for (const key of Object.keys(value)) {
++      if (UNSAFE_KEYS.has(key)) {
++        delete value[key];
++        continue;
++      }
++      const childPath = path ? `${path}.${key}` : key;
++      value[key] = normalizeValue(value[key], childPath, duplicateParams);
++  return value;
++}
++export default function hppProtection(req, res, next) {
++  const duplicateParams = [];
++  if (req.query && typeof req.query === 'object') {
++    normalizeValue(req.query, '', duplicateParams);
++  }
+===== dfd0fcacf fix: block prototype pollution keys in NoSQL sanitizer
++++ b/backend/api/src/middleware/mongoSanitize.js
++const PROHIBITED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
++function isProhibitedKey(key) {
++  return key.startsWith('$') || key.includes('$') || key.includes('.') || PROHIBITED_KEYS.has(key);
++}
++ * Checks recursively if an object/array contains a MongoDB operator, a dotted
++ * key, or a prototype-pollution key.
++    if (isProhibitedKey(key)) {
++ * Recursively strips MongoDB operators and prototype-pollution keys.
++    if (isProhibitedKey(key)) {
+===== 586d2a068 fix: prevent prototype pollution during response sanitization
++++ b/backend/api/src/middleware/responseSanitizer.js
++      // JSON can contain an own "__proto__" key. Assigning it to a normal
++      // object mutates the prototype of the sanitized response instead of
++      // creating a data property, which can expose inherited fields or
++      // corrupt downstream serialization.
++      if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
+===== 47127781c fix: require explicit opt-in for HSTS preload
++++ b/backend/api/src/middleware/securityHeaders.js
++  // HSTS preload is a one-way commitment to the browser preload list. It must
++  // be opted into explicitly; an unset variable previously enabled it by
++  // default, which makes it impossible to roll back the header for a domain.
++  const includePreload = preload === 'true' || preload === '1';
+===== 6c59ab77c fix: filter Sentry events by exception type and message
++++ b/backend/api/src/middleware/sentry.js
++  if (!err || typeof err !== 'object') return false;
++function shouldIgnoreEvent(event) {
++  const values = Array.isArray(event?.exception?.values) ? event.exception.values : [];
++  return values.some((value) => SENTRY_ERROR_FILTERS.some((filter) => {
++    if (value?.type === filter.code) return true;
++    return typeof value?.value === 'string' && value.value.includes(filter.code);
++  }));
++}
++      if (shouldIgnoreEvent(event)) return null;
+===== f2ea0fef6 fix: sanitize nested query objects against prototype pollution
++++ b/backend/api/src/middleware/suspiciousRequests.js
++export function sanitizeQueryParams(obj, depth = 0, seen = new WeakSet()) {
++  if (depth > 10 || seen.has(obj)) return {};
++  seen.add(obj);
++  if (Array.isArray(obj)) {
++    return obj.map((item) => (
++      item && typeof item === 'object'
++        ? sanitizeQueryParams(item, depth + 1, seen)
++        : item
++    ));
++  }
++    if (safe === null) continue;
++    if (v && typeof v === 'object') {
++      out[safe] = sanitizeQueryParams(v, depth + 1, seen);
++    } else {
++      out[safe] = v;
++    }
+===== f351872be fix: end request spans exactly once
++++ b/backend/api/src/middleware/tracingMiddleware.js
++        // A response can emit more than one terminal event: an aborted
++        // connection often fires 'close' after 'error' or 'finish'. Ending the
++        // span twice corrupts its duration and produces duplicate exports.
++        let spanEnded = false;
++        const endSpan = (statusCode, error) => {
++            if (spanEnded) return;
++            spanEnded = true;
++            if (error) {
++                span.recordException(error);
++            }
++                'http.status_code': statusCode,
++                'http.response_time_ms': Date.now() - req._startTime,
++                code: statusCode >= 400 ? 2 : 1,
++                message: error?.message || (statusCode >= 400 ? `HTTP ${statusCode}` : undefined),
++        };
++        res.once('finish', () => endSpan(res.statusCode));
++        res.once('error', (error) => endSpan(500, error));
++        res.once('close', () => {
++            if (!res.writableEnded) endSpan(499);
+===== 9251243e7 fix: guard demand estimates against malformed model output
++++ b/backend/api/src/routes/demandRoutes.js
++    const baseEarningRate = Number(demandConfig.baseEarningRate);
++    const rawPrediction = mlPrediction?.predicted_demand;
++    const rawMultiplier = rawPrediction === null || rawPrediction === undefined ? NaN : Number(rawPrediction);
++    // The ML gateway is a remote dependency. A null, NaN, string, or
++    // out-of-range prediction must not turn the earning estimate and demand
++    // forecast into null/NaN values in the API response.
++    const multiplier = Number.isFinite(rawMultiplier) && rawMultiplier >= 0 && rawMultiplier <= 1
++      ? rawMultiplier
++      : 0.5;
++    const safeBaseRate = Number.isFinite(baseEarningRate) && baseEarningRate >= 0 ? baseEarningRate : 0;
++    const estimatedEarningPotential = Number((safeBaseRate * (1 + multiplier)).toFixed(2));
++      estimatedEarnings: Number((estimatedEarningPotential * (demandConfig.routeMultiplierBase + idx * demandConfig.routeMultiplierStep)).toFixed(2)),
+===== cbd8ec9a8 fix: prevent client data from overriding fraud event types
++++ b/backend/api/src/routes/fraudRoutes.js
++    if (typeof eventType !== 'string' || eventType.trim() === '') {
++      return res.status(400).json({
++        success: false,
++        error: 'eventType is required'
++      });
++    }
++    // The client supplies `data`. Spreading it after `type` let a caller send
++    // data.type and replace the event category that the server believed it was
++    // recording, bypassing per-event fraud rules and poisoning the model.
++      ...(data && typeof data === 'object' && !Array.isArray(data) ? data : {}),
++      type: eventType.trim()
+===== d86bba415 fix: stop leaking autoscaler errors
++++ b/backend/api/src/routes/kedaRoutes.js
++    logger.error({ err: error, requestId: req.requestId }, `${label} error`);
++    // Prometheus/Kubernetes client errors embed upstream URLs, namespaces and
++    // sometimes bearer-token fragments. Log the detail but never return it to
++    // the caller.
++    res.status(500).json({ success: false, error: 'Autoscaler metrics unavailable' });
+===== 3e8e3465a fix: reject unsupported maintenance photo types explicitly
++++ b/backend/api/src/routes/maintenancePhotoRoutes.js
++function requireUploadedPhotos(req, res, next) {
++  if (Array.isArray(req.files) && req.files.length > 0) return next();
++  return res.status(400).json({
++    error: 'At least one photo file is required. Only JPEG and PNG images are accepted.',
++  });
++}
++  requireUploadedPhotos,
+===== aa0d2e026 fix: reject invalid relay plan coordinates and amounts
++++ b/backend/api/src/routes/relayRoutes.js
++function isValidCoordinate(point, latLimit, lngLimit) {
++  if (!point || typeof point !== 'object') return false;
++  const lat = Number(point.lat);
++  const lng = Number(point.lng);
++  return Number.isFinite(lat) && Number.isFinite(lng)
++    && Math.abs(lat) <= latLimit && Math.abs(lng) <= lngLimit;
++}
++function validateRelayPlan(req, res, next) {
++  const { origin, destination, totalAmount, maxLegDistanceKm } = req.body || {};
++  if (!isValidCoordinate(origin, 90, 180) || !isValidCoordinate(destination, 90, 180)) {
++    return res.status(400).json({
++      success: false,
++      error: 'origin and destination must contain valid latitude and longitude values',
++    });
++  }
++  if (totalAmount !== undefined && (!Number.isFinite(Number(totalAmount)) || Number(totalAmount) < 0)) {
++    return res.status(400).json({ success: false, error: 'totalAmount must be a non-negative number' });
++  }
++  if (maxLegDistanceKm !== undefined && (!Number.isFinite(Number(maxLegDistanceKm)) || Number(maxLegDistanceKm) <= 0)) {
++    return res.status(400).json({ success: false, error: 'maxLegDistanceKm must be a positive number' });
++  }
++  return next();
++}
+===== 49dc4f844 fix: keep tracking links active until a replacement is created
++++ b/backend/api/src/routes/trackingRoutes.js
++      // Validate configuration before touching existing links. Previously the
++      // old link was revoked first, so a missing PUBLIC_TRACKING_URL left the
++      // customer with no working link at all.
++      const baseUrl = process.env.PUBLIC_TRACKING_URL;
++      if (!baseUrl) {
++        logger.error({ orderDisplayId }, 'PUBLIC_TRACKING_URL is not configured');
++        return res.status(503).json({ error: 'Tracking links are temporarily unavailable' });
++      }
++      // Capture the old links, create the replacement, then revoke only the old
++      // IDs. Revoking before creation destroyed the only link when the insert
++      // failed, and a blanket revoke after creation would revoke the new token.
++      let previousTokens = [];
++      try {
++        previousTokens = await tokenService.getActiveTokensForOrder(orderDisplayId);
++      } catch (err) {
++        logger.warn({ err, orderDisplayId }, 'Could not list existing tracking tokens');
++      }
++      for (const previous of previousTokens) {
++        try {
++          await tokenService.revokeToken(previous.id);
++        } catch (err) {
++          logger.warn({ err, orderDisplayId, tokenId: previous.id }, 'Could not revoke previous tracking token');
++        }
+===== ae33efee4 fix: require a shared replay store for production webhooks
++++ b/backend/api/src/routes/webhookRoutes.js
++  if (process.env.NODE_ENV === 'production') {
++    // A per-process Map cannot prevent a captured request from being replayed
++    // against another replica. Production therefore requires the shared store.
++    logger.error('[Webhook] Redis unavailable — refusing production webhook without shared replay protection');
++    throw new Error('Shared webhook replay store unavailable');
++  }
++  }
++  if (typeof nonce !== 'string' || nonce.length === 0 || nonce.length > 128) {
++    logger.warn('[Webhook] Invalid x-escrow-nonce header — rejecting request');
++    return res.status(401).json({ error: 'Invalid replay-protection headers' });
+===== b3fd03991 fix: cap the nearby peer search radius
++++ b/backend/api/src/routes/webrtcRoutes.js
++const DEFAULT_MAX_NEARBY_RADIUS_KM = 100;
++function maxNearbyRadiusKm() {
++  const configured = Number(process.env.WEBRTC_MAX_NEARBY_RADIUS_KM);
++  return Number.isFinite(configured) && configured > 0 && configured <= 1000
++    ? configured
++    : DEFAULT_MAX_NEARBY_RADIUS_KM;
++}
++    const radiusLimit = maxNearbyRadiusKm();
++    if (parsedRadius > radiusLimit) {
++      return res.status(400).json({
++        success: false,
++        error: `radius must not exceed ${radiusLimit} km`
++      });
++    }
+===== 6cd692ced fix: fail alert routing when a channel is unknown
++++ b/backend/api/src/services/blockchain/alertRouter.js
++          // Resolving silently marks the channel as delivered in the
++          // allSettled result, so an unknown/misconfigured channel would drop
++          // the alert without a retry or a Sentry event.
++          throw new Error(`Unknown alert channel: ${channel}`);
++++ b/backend/api/test/unit/services/blockchain/alertRouter.test.js
++    it('rejects when the alert channel is unknown', async () => {
++      await expect(router.sendToChannel('webhook', SAMPLE_CRITICAL_ALERT))
++        .rejects.toThrow('Unknown alert channel: webhook');
+===== 81288789c fix: never route reputation calls to the escrow contract
++++ b/backend/api/src/services/blockchain/batchCallBuilder.js
++    if (!this.reputationAddress) {
++      // Encoding a reputation function against the escrow address makes the
++      // whole multicall revert and takes the payment/balance reads down with
++      // it. Callers that need reputation must configure the contract.
++      throw new Error('REPUTATION_CONTRACT_ADDRESS is not configured');
++    }
++      target: this.reputationAddress,
++    const calls = [
++    if (this.reputationAddress) {
++      calls.push(this.buildReputationCall(shipment.driverAddress));
++    }
++    return calls;
++++ b/backend/api/test/unit/batchCallBuilder.test.js
++    it('refuses to target escrow when no reputation contract is configured', () => {
++      expect(() => builder.buildReputationCall('0x' + 'b'.repeat(40)))
++        .toThrow('REPUTATION_CONTRACT_ADDRESS is not configured')
+===== 1615e7470 fix: contain failures in escalation timers
++++ b/backend/api/src/services/blockchain/escalationHandler.js
++    const runEscalation = (level) => {
++      // Timer callbacks are not awaited by Node. A rejected route/store call
++      // would become an unhandled rejection and can terminate the process,
++      // leaving every other tracked alert without further escalation.
++      this.performEscalation(alertId, level).catch((err) => {
++        logger.error({ err, alertId, level }, '[EscalationHandler] Escalation step failed');
++        Sentry.captureException(err);
++      });
++    };
++      runEscalation(ESCALATION_LEVELS.ON_CALL);
++      runEscalation(ESCALATION_LEVELS.SENIOR_ENGINEER);
++      runEscalation(ESCALATION_LEVELS.OPERATIONS);
+===== 42c17b91b fix: clear multicall timeout timers
++++ b/backend/api/src/services/blockchain/multicall3Service.js
++      if (!Array.isArray(calls)) {
++        throw new TypeError('calls must be an array');
++      }
++      let timeoutHandle;
++        const timeout = new Promise((_, reject) => {
++          timeoutHandle = setTimeout(() => reject(new Error('Multicall timeout')), CALL_TIMEOUT_MS);
++          timeoutHandle.unref?.();
++        });
++          timeout,
++      } finally {
++        // A successful multicall used to leave its 30-second timeout timer
++        // alive, keeping Jest/Node workers open and accumulating one handle
++        // per batch in long-running processes.
++        if (timeoutHandle) clearTimeout(timeoutHandle);
+===== fcdfc33ca fix: persist document verification with the real schema
++++ b/backend/api/src/services/documentVerificationService.js
++    // 9. Persist to database. The table's status constraint uses 'approved'
++    // (not 'verified'), requires mime_type, and has no unique
++    // (driver_id, document_type) key, so an upsert with onConflict cannot work.
++            const now = new Date().toISOString();
++            const payload = {
++                driver_id: driverId,
++                document_type: docType,
++                document_number: extractedData.document_number || null,
++                storage_path: storagePath,
++                mime_type: file.mimetype,
++                extracted_data: extractedData,
++                ocr_confidence: confidence,
++                valid_until: extractedData.valid_until || null,
++                status: status === 'verified' ? 'approved' : status,
++                rejection_reason: status === 'rejected' ? reason : null,
++                verified_at: status === 'verified' ? now : null,
++                updated_at: now
++            };
++            const { data: existingRows, error: lookupError } = await supabaseAdmin
++                .select('id')
++                .eq('driver_id', driverId)
++                .eq('document_type', docType)
++                .order('updated_at', { ascending: false })
+===== 370ac7938 fix: align document expiry alerts with the schema
++++ b/backend/api/src/lib/expiryTracker.js
++          valid_until,
++                .eq('status', 'approved')
++                .eq('valid_until', targetDateStr)
++        const { error } = await supabaseAdmin
++        if (error) {
++            logger.error({ err: error, documentId }, 'Failed to mark alert as sent');
++        }
++            .select('id, document_type, document_number, valid_until')
++            .eq('status', 'approved')
++            .lt('valid_until', now);
++    if (typeof sendAlertFn !== 'function') {
++        // Marking alerts as sent without a sender permanently suppresses them,
++        // so the job must fail loudly instead of silently consuming the queue.
++        logger.error('Expiry check job requires a sendAlertFn; refusing to mark alerts as sent');
++        return;
++    }
++            await sendAlertFn({
++                driverId: doc.driver_id,
++                driverName: doc.driver?.full_name || 'Driver',
++                driverPhone: doc.driver?.phone,
++                documentType: doc.document_type,
++                documentNumber: doc.document_number,
++                expiryDate: doc.valid_until,
+===== 9872c1289 fix: validate shipment IDs before querying
++++ b/backend/api/src/routes/shipmentRoutes.js
++  // orders.id is a UUID. Forwarding an arbitrary string to PostgREST turns a
++  // malformed client request into a database error and a 500; validate the
++  // shape here and make the parameter required to match the controller.
++  shipmentId: z.string().uuid(),
++++ b/backend/api/test/unit/shipmentRoutes.test.js
++    if (shipmentId === '22222222-2222-4222-8222-222222222222') {
++      .query({ shipmentId: '11111111-1111-4111-8111-111111111111' })
++    expect(res.body.data).toHaveProperty('id', '11111111-1111-4111-8111-111111111111');
++    expect(res.body).toHaveProperty('error');
++      .query({ shipmentId: '22222222-2222-4222-8222-222222222222' })
+===== 8bfc86dad fix: reject non-finite autoscaler metric samples
++++ b/backend/api/src/services/kedaService.js
++        const requestedInterval = Number(options.intervalMs);
++        const requestedTimeout = Number(options.timeoutMs);
++        const interval = Number.isFinite(requestedInterval) && requestedInterval > 0
++            ? requestedInterval
++            : this.kedaPollInterval;
++        const timeout = Number.isFinite(requestedTimeout) && requestedTimeout > 0
++            ? requestedTimeout
++            : this.kedaPollTimeout;
++            const result = response.data?.data?.result;
++            if (!Array.isArray(result) || result.length === 0) {
++                return {
++                    success: true,
++                    metric: metricName,
++                    value: 0,
++                    timestamp: new Date().toISOString()
++                };
++            }
++            const value = Number(result[0]?.value?.[1]);
++            if (!Number.isFinite(value)) {
++                // Prometheus uses the literal string "NaN" for undefined
++                // arithmetic. Returning success with NaN makes the JSON body
++                // contain null and drives the autoscaler recommendation from a
++                // value it cannot compare.
+===== 2f543910c fix: reject out-of-range coordinates in cache regions
++++ b/backend/api/src/services/order/loadOfferCacheService.js
++    // ngeohash happily encodes out-of-range values, so a bad GPS sample would
++    // land in a bucket that no real invalidation ever touches. Fall back to
++    // the global generation instead of caching under an impossible location.
++    if (
++      !Number.isFinite(parsedLat) ||
++      !Number.isFinite(parsedLng) ||
++      parsedLat < -90 ||
++      parsedLat > 90 ||
++      parsedLng < -180 ||
++      parsedLng > 180
++    ) {
+===== c3e32b36e fix: validate OTP throttling configuration
++++ b/backend/api/src/services/order/orderNotificationService.js
++function boundedPositiveInt(raw, fallback, min, max) {
++  const parsed = Number(raw);
++  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) return fallback;
++  return parsed;
++}
++// A zero/negative lockout produced `EX 0` (an invalid Redis TTL) or a lock
++// that expired immediately, and a non-numeric attempt limit made every
++// comparison false. Bound both values instead of trusting the environment.
++export const OTP_TTL_MINUTES = boundedPositiveInt(process.env.OTP_TTL_MINUTES, 15, 1, 24 * 60);
++export const OTP_MAX_FAILED_ATTEMPTS = boundedPositiveInt(process.env.OTP_MAX_FAILED_ATTEMPTS, 5, 1, 100);
++export const OTP_LOCKOUT_MINUTES = boundedPositiveInt(process.env.OTP_LOCKOUT_MINUTES, 30, 1, 24 * 60);
++const IN_MEMORY_OTP_MAP_MAX_SIZE = boundedPositiveInt(process.env.IN_MEMORY_OTP_MAP_MAX_SIZE, 10000, 1, 1000000);
+===== c7fe109ce fix: make cancellation timeline cleanup best effort
++++ b/backend/api/src/services/order/orderTimelineService.js
++      // Cancellation has already changed the order status. Throwing here rolled
++      // the caller into an error path it could not recover from and contradicted
++      // the documented best-effort contract.
++      return false;
++    return true;
++      // Cleanup is best-effort; the order itself was already cancelled.
++      return false;
++    return true;
+===== 122db5796 fix: keep profit estimates safe for null input
++++ b/backend/api/src/services/tripProfitEstimator.js
++export function estimateTripProfit(input = {}) {
++  // The function promises not to throw on missing data. Destructuring null (or
++  // a non-object) and then reading properties from a null config violated that
++  // contract for a common "no pricing data yet" request shape.
++  const params = input && typeof input === 'object' ? input : {};
++  const { freightAmountInr, distanceKm } = params;
++  const overrides = params.config && typeof params.config === 'object' ? params.config : {};
++    fuelPricePerLitre: toFinitePositive(overrides.fuelPricePerLitre, DEFAULT_PROFIT_CONFIG.fuelPricePerLitre),
++    truckKmPerLitre:   toFinitePositive(overrides.truckKmPerLitre,   DEFAULT_PROFIT_CONFIG.truckKmPerLitre),
++    tollRatePerKm:     toFinitePositive(overrides.tollRatePerKm,     DEFAULT_PROFIT_CONFIG.tollRatePerKm),
++    otherCostPerKm:    toFinitePositive(overrides.otherCostPerKm,    DEFAULT_PROFIT_CONFIG.otherCostPerKm),
+===== 176cfeced fix: reject out-of-range weather coordinates
++++ b/backend/api/src/services/weatherService.js
++function normalizeCoordinates(lat, lng) {
++  const parsedLat = Number(lat);
++  const parsedLng = Number(lng);
++  if (
++    !Number.isFinite(parsedLat) ||
++    !Number.isFinite(parsedLng) ||
++    parsedLat < -90 ||
++    parsedLat > 90 ||
++    parsedLng < -180 ||
++    parsedLng > 180
++  ) {
++    return null;
++  }
++  return { lat: parsedLat, lng: parsedLng };
++}
++    // latitude would silently fall through to the warm default. Range checks
++    // also stop 999 from being reported as a polar snow forecast.
++    const coordinates = normalizeCoordinates(lat, lng);
++    if (!coordinates) {
++    if (coordinates.lat > 40 || coordinates.lat < -40) {
++  const coordinates = normalizeCoordinates(lat, lng);
++  if (!coordinates) {
++  if (Math.abs(coordinates.lat) > 60) {
+===== ac0d19289 fix: match batch release events to the correct order
++++ b/backend/api/src/services/webhook/escrowVerification.js
++function findPaymentReleasedEvents(receipt, escrowAddress) {
++  const events = [];
++        events.push({
++        });
++  return events;
++  const events = findPaymentReleasedEvents(receipt, escrowAddress);
++  if (events.length === 0) {
++  let expectedBookingId;
++    expectedBookingId = getEscrowBookingId(orderDisplayId);
++      'INVALID_PAYLOAD',
++      `Order ${orderDisplayId} has no valid escrow booking id`,
++  const expectedBookingBigInt = BigInt(expectedBookingId);
++  // A batch release transaction can emit one PaymentReleased event per
++  // booking. Selecting only the first log rejected a valid webhook whenever
++  // another booking's event came first. Match the event that belongs to this
++  // order instead.
++  let event = null;
++  let eventBookingId = null;
++  let eventAmount = null;
++  let malformedEvent = null;
++  for (const candidate of events) {
++    try {
++      const candidateBookingId = BigInt(candidate.bookingId);
+===== 8f7f95e1f fix: validate OCR uploads from their actual buffers
++++ b/backend/api/src/lib/ocrProcessor.js
++    // `file.size` comes from the multipart parser/client and can be omitted or
++    // inflated. Measure the bytes that will actually be sent to OCR so an
++    // undersized or oversized payload cannot slip through.
++    if (!Buffer.isBuffer(file.buffer)) {
++        return { valid: false, error: 'File content is missing or unreadable' };
++    }
++    const size = file.buffer.length;
++    if (size > maxSize) {
++        return { valid: false, error: `File too large (${Math.round(size / 1024 / 1024)}MB). Max 10MB.` };
++    if (size < 1024) {
++++ b/backend/api/test/unit/documentVerificationService.test.js
++const goodFile = { mimetype: 'image/jpeg', size: 500_000, buffer: Buffer.alloc(2048, 0xff) };

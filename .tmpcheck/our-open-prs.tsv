@@ -1,0 +1,129 @@
+18128	fix/routes-healthroutes-duplicate	fix(routes): remove unimported HealthRoutes.js duplicate (fixes #18127)
+18711	fix/18709-telemetry-healthcheck	fix(docker): add HEALTHCHECK to telemetry-ingestion image
+18713	fix/18712-customer-nginx-pin	fix(docker): pin customer web nginx to 1.27-alpine
+18715	fix/18714-driver-nginx-pin	fix(docker): pin driver web nginx to 1.27-alpine
+18717	fix/18716-heatmap-hours-validation	fix(api): clamp demand-heatmap hours to 1-168
+18719	fix/18718-codeql-timeout	fix(ci): bound codeql analyze job with timeout
+18722	fix/18721-flaky-timeout	fix(ci): add timeout to flaky detector job
+18724	fix/18723-auto-assign-timeout	fix(ci): give auto pr assign a short timeout
+18726	fix/18725-wasm-strict	fix(shell): make wasm build fail fast
+18728	fix/18727-matrix-healthcheck	fix(docker): probe route-matrix-cpp health endpoint
+18730	fix/18729-vector-healthcheck	fix(docker): add HEALTHCHECK to vector-matcher-cpp
+18732	fix/18731-escrow-pragma	fix(solidity): lock Escrow pragma to 0.8.24
+18734	fix/18733-rollback-creds	fix(security): read rollback db creds from env
+18736	fix/18735-migrate-creds	fix(security): allow migration db creds via env
+18738	fix/18737-assigner-timeout	fix(ci): cap issue assigner with timeout
+18740	fix/18739-zkp-healthcheck	fix(docker): add HEALTHCHECK to zkp-verifier-rust
+18742	fix/18741-atomicswap-pragma	fix(solidity): lock AtomicSwap pragma to 0.8.20
+18744	fix/18743-argocd-strict	fix(shell): fail fast in argocd helper
+18746	fix/18745-labeler-timeout	fix(ci): bound pr-labeler with timeout
+18748	fix/18747-zkp-strict	fix(shell): tighten zkp wasm build to strict mode
+18750	fix/18749-consul-strict	fix(shell): stop consul installer on first failure
+18940	fix/18282-auth-single-impl	fix(auth): collapse triple-spliced middleware into one implementation
+18941	fix/18894-refresh-token-secret	fix(auth): use central jwt secret for refresh token signing
+18942	fix/18895-chat-encryption-secret	fix(chat): fail closed when chat encryption secret is missing
+18943	fix/18896-quote-token-secret	fix(pricing): require explicit secret for quote token HMAC
+18944	fix/18897-ota-signing-key	fix(ota): require explicit signing key for ecm tuning payloads
+18945	fix/18898-lock-token-release	fix(lock): use token-owned release in legacy distributed lock
+18946	fix/18899-read-receipt-authz	fix(chat): check participation before marking messages read
+18947	fix/18900-chat-history-limits	fix(chat): cap history page size and validate cursor
+18948	fix/18901-pagination-400	fix(api): reject invalid page and limit with 400
+18950	fix/18902-dispatch-validation	fix(voice): return 400 for invalid audio in dispatch-action
+18951	fix/18903-consensus-docker	fix(docker): run consensus image as non-root with health probe
+18952	fix/18904-kshot-bounds	fix(ml): bound k_shot on task sampling endpoint
+18953	fix/18905-record-duration	fix(ml): bound audio record duration
+18954	fix/18906-mtl-input-guards	fix(ml): validate tensor input on multitask endpoints
+18955	fix/18907-gnn-bounds	fix(ml): bound edge weights and training params
+18956	fix/18908-diffusion-bounds	fix(ml): bound generation and training params
+18957	fix/18909-heatmap-fallback-log	fix(ml): log model fallback instead of failing silently
+18958	fix/18910-statechannel-domain	fix(solidity): bind respond state hash to chain and contract
+18959	fix/18911-assettoken-events	fix(solidity): emit events on deactivate and cancel
+18960	fix/18912-attachment-logging	fix(flutter): log dropped attachment rows in conflict resolver
+18961	fix/18913-recording-errors	fix(flutter): log voice recording failures
+18963	fix/18914-keystore-debugprint	fix(flutter): use debugPrint in keystore test helper
+18964	fix/18915-sync-failure-logs	fix(flutter): log sync post failures in location service
+18965	fix/18916-flutter-ci-timeout	fix(ci): bound flutter ci jobs with timeouts
+18966	fix/18917-flutter-build-hardening	fix(ci): least-privilege perms and timeout for flutter build
+18967	fix/18918-cache-flight-timeout	fix(ci): bound cache flight lifecycle job
+18968	fix/18919-event-cache-timeout	fix(ci): bound event cache publication job
+18969	fix/18920-conflict-checker-timeout	fix(ci): bound hourly conflict checker
+18970	fix/18921-fluxcd-strict	fix(shell): fail fast in fluxcd installer
+18971	fix/18923-snyk-script-strict	fix(shell): fail fast in snyk setup script
+19034	fix/19003-notif-dup-import	fix(api): duplicated notification helper breaks module import
+19035	fix/19004-verify-routes-tdz	fix(api): dead route block crashes verification router on load
+19036	fix/19005-ratelimit-crypto-import	fix(api): add missing crypto import to rate limiter
+19037	fix/19006-ticket-status-select	fix(api): include status in closed-ticket comment check
+19038	fix/19007-escrow-participant-check	fix(api): require order participation for escrow milestone and clawback
+19039	fix/19008-escrow-lua-transition	fix(api): make escrow state transition atomic with lua
+19040	fix/19009-tts-text-bind	fix(ml): bind and validate text in voice synthesis endpoint
+19041	fix/19010-transcribe-cap	fix(ml): cap transcription upload size
+19042	fix/19011-voice-fallback-logs	fix(ml): log silent fallbacks across voice pipeline
+19043	fix/19012-imitation-bounds	fix(ml): bound imitation training sizes
+19044	fix/19013-nas-budget-bounds	fix(ml): bound neural architecture search budgets
+19045	fix/19014-nerf-knob-bounds	fix(ml): validate training knobs before touching shared optimizer
+19046	fix/19015-forecast-guards	fix(ml): validate forecast matrix and horizon
+19047	fix/19016-ssl-path-guard	fix(ml): sanitize checkpoint paths in ssl save and load
+19048	fix/19017-abtesting-dead-code	fix(ml): remove dead code breaking ab testing router import
+19049	fix/19018-alert-level-allowlist	fix(ml): restrict manual safety alert levels
+19050	fix/19019-zkevm-checked-calls	fix(solidity): replace stipend transfers with checked calls
+19051	fix/19020-gov-past-block	fix(solidity): probe governance support at a finalized block
+19052	fix/19021-vote-release-lock	fix(solidity): lock vote weight until voting ends
+19053	fix/19022-htlc-expiry-checks	fix(solidity): validate swap inputs and enforce claim expiry
+19054	fix/19023-settlement-party-zeros	fix(solidity): reject zero-address settlement parties
+19055	fix/19024-provider-reregister-guard	fix(solidity): guard provider registration and refund excess
+19056	fix/19025-credential-domain	fix(solidity): bind credential signatures to chain and contract
+19057	fix/19026-mock-bridge-constructor	fix(solidity): set mock bridge at construction
+19058	fix/19027-backup-nonroot	fix(docker): run backup image as non-root with health probe
+19059	fix/19028-osrm-pin	fix(compose): pin routing engine image version
+19060	fix/19029-canary-guardrails	fix(k8s): add guardrails to canary deployment
+19061	fix/19030-n8n-password-quote	fix(shell): quote database password safely in n8n init
+19062	fix/19031-monitoring-rls	fix(db): restrict monitoring reads to authenticated users
+19063	fix/19032-amm-proportion	fix(solidity): require proportional liquidity deposits
+19269	fix/19268-auth-otp-service-role	fix(auth): verify OTPs with the service-role client
+19277	fix/19276-escrow-orphan	fix: remove orphaned escrow funding snippet that crashes module import
+19288	fix/19271-file-magic-bytes	fix: validate uploaded document bytes instead of trusting client MIME type
+19299	fix/19272-r2-mock-fallback	fix: stop reporting successful R2 uploads when the S3 SDK is unavailable
+19306	fix/19273-document-storage-fallback	fix: remove mock storage fallback from document uploads
+19311	fix/19270-gstin-fail-closed	fix: fail closed when GSTIN portal verification is unavailable
+19312	fix/19275-relay-handshake-hardening	fix: harden relay handshake secret, geofence, and OTP integrity checks
+19313	fix/a-19278-iot-ml-key	fix: require ML_API_KEY for telemetry ML evaluation
+19314	fix/a-19279-refresh-token-config	fix: require service-role configuration for refresh tokens
+19315	fix/a-19280-document-scan	fix: scan ingestion documents with the exported scanner
+19316	fix/a-19281-request-cache-scope	fix: export request cache middleware and scope keys by user
+19317	fix/a-19282-require-policy-logger	fix: log policy misconfiguration in requirePolicy
+19318	fix/a-19284-location-logger	fix: import logger in locationService error paths
+19319	fix/a-19286-token-config	fix: fail tokenization getters with configuration errors
+19320	fix/a-19289-cb-translator-url	test: assert cbTranslator hex message identifiers
+19321	fix/a-19292-escrow-lock-mock	test: provide withLockRenewal in escrow reconciliation suite
+19322	fix/a-19294-location-config	fix: require service-role configuration for location persistence
+19323	fix/19274-fastag-settlement-hardening	fix: require configured FASTag webhook secret and reject unverified tolls
+19348	fix/c-19283-flashbots-timeout	fix: bound Flashbots relay submissions and fail closed on non-2xx responses
+19349	fix/c-19285-graphql-health-abort	fix: abort GraphQL health probes when the deadline expires
+19350	fix/c-19287-ml-body-timeout	fix: bound the ML health response body read
+19351	fix/c-19290-withdrawal-single-flight	fix: prevent overlapping withdrawal settlement cycles
+19352	fix/c-19291-analytics-row-cap	fix: cap fleet analytics row scans and return 413 for oversized ranges
+19353	fix/c-19293-support-assignment-bounds	fix: bound load-based support ticket assignment queries
+19354	fix/c-19295-outbox-dlq-batch	fix: batch exhausted-event dead-lettering in the outbox service
+19355	fix/c-19296-divergence-single-flight	fix: single-flight state divergence checks and unref the monitoring timer
+19356	fix/c-19297-audit-export-paging	fix: page audit log exports instead of truncating at 1000 rows
+19357	fix/c-19298-blockchain-metrics-timer	fix: make blockchain metrics collection single-flight and stoppable
+19358	fix/b-19300-p2p-store-cap	fix: cap P2P trailer listing and booking stores with TTL eviction
+19359	fix/b-19301-yms-store-bounds	fix: bound in-memory YMS pin, slot, and dwell stores
+19360	fix/b-19302-dot-date-validation	fix: reject invalid DOT compliance expiration dates
+19361	fix/b-19303-fatigue-numeric-validation	fix: validate finite biometric telemetry and HOS values
+19362	fix/b-19304-ltl-batch-cap	fix: cap LTL consolidation batch size
+19363	fix/b-19305-pricing-oracle-validation	fix: reject non-finite and non-positive pricing oracle inputs
+19364	fix/b-19307-reefer-input-validation	fix: validate reefer precool temperature and duration inputs
+19365	fix/b-19308-seal-payload-cap	fix: cap seal image payloads before decoding and hashing
+19366	fix/b-19309-biometric-session-cap	fix: cap and prune biometric challenge session store
+19367	fix/b-19310-relay-session-expiry	fix: cap and expire in-memory relay sessions
+19378	fix/d-19377-ifta-batch-cap	fix: cap IFTA waypoint and fuel purchase batches
+19379	fix/d-19376-toll-validation	fix: validate toll route coordinates, waypoints, and vehicle class
+19380	fix/d-19368-redis-fallback-bounds	fix: bound the in-memory sliding-window rate limit fallback
+19381	fix/d-19369-ar-plan-bounds	fix: cap and expire in-memory AR loading plans
+19382	fix/d-19370-drone-mission-bounds	fix: bound drone mission registry and persist abort state
+19383	fix/d-19371-tire-report-store	fix: scope tire reports by owner and expire stale entries
+19384	fix/d-19372-i18n-cache	fix: restrict translation locales and bound the i18n memory cache
+19385	fix/d-19373-compliance-upload	fix: limit compliance document uploads and derive safe storage extensions
+19386	fix/d-19374-lumper-authz	fix: require assigned driver authorization for lumper escrow release
+19387	fix/d-19375-deadhead-insert-authz	fix: authorize and atomically claim mid-trip load insertions

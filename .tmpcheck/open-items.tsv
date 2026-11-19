@@ -1,0 +1,1532 @@
+19389	fix(security): encrypt chat messages with a fail-closed secret (fixes #19388)	PR
+19388	Chat messages at rest are encrypted with a hardcoded public fallback secret	ISSUE
+19387	fix: authorize and atomically claim mid-trip load insertions	PR
+19386	fix: require assigned driver authorization for lumper escrow release	PR
+19385	fix: limit compliance document uploads and derive safe storage extensions	PR
+19384	fix: restrict translation locales and bound the i18n memory cache	PR
+19383	fix: scope tire reports by owner and expire stale entries	PR
+19382	fix: bound drone mission registry and persist abort state	PR
+19381	fix: cap and expire in-memory AR loading plans	PR
+19380	fix: bound the in-memory sliding-window rate limit fallback	PR
+19379	fix: validate toll route coordinates, waypoints, and vehicle class	PR
+19378	fix: cap IFTA waypoint and fuel purchase batches	PR
+19377	fix: cap IFTA waypoint and fuel purchase batches	ISSUE
+19376	fix: validate toll route coordinates, waypoints, and vehicle class	ISSUE
+19375	fix: authorize and atomically claim mid-trip load insertions	ISSUE
+19374	fix: require assigned driver authorization for lumper escrow release	ISSUE
+19373	fix: limit compliance document uploads and derive safe storage extensions	ISSUE
+19372	fix: restrict translation locales and bound the i18n memory cache	ISSUE
+19371	fix: scope tire reports by owner and expire stale entries	ISSUE
+19370	fix: bound drone mission registry and persist abort state	ISSUE
+19369	fix: cap and expire in-memory AR loading plans	ISSUE
+19368	fix: bound the in-memory sliding-window rate limit fallback	ISSUE
+19367	fix: cap and expire in-memory relay sessions	PR
+19366	fix: cap and prune biometric challenge session store	PR
+19365	fix: cap seal image payloads before decoding and hashing	PR
+19364	fix: validate reefer precool temperature and duration inputs	PR
+19363	fix: reject non-finite and non-positive pricing oracle inputs	PR
+19362	fix: cap LTL consolidation batch size	PR
+19361	fix: validate finite biometric telemetry and HOS values	PR
+19360	fix: reject invalid DOT compliance expiration dates	PR
+19359	fix: bound in-memory YMS pin, slot, and dwell stores	PR
+19358	fix: cap P2P trailer listing and booking stores with TTL eviction	PR
+19357	fix: make blockchain metrics collection single-flight and stoppable	PR
+19356	fix: page audit log exports instead of truncating at 1000 rows	PR
+19355	fix: single-flight state divergence checks and unref the monitoring timer	PR
+19354	fix: batch exhausted-event dead-lettering in the outbox service	PR
+19353	fix: bound load-based support ticket assignment queries	PR
+19352	fix: cap fleet analytics row scans and return 413 for oversized ranges	PR
+19351	fix: prevent overlapping withdrawal settlement cycles	PR
+19350	fix: bound the ML health response body read	PR
+19349	fix: abort GraphQL health probes when the deadline expires	PR
+19348	fix: bound Flashbots relay submissions and fail closed on non-2xx responses	PR
+19347	Update escrowReleaseReconciliation.js	PR
+19346	Update TruxifyEscrow.sol	PR
+19345	Create auth_service.dart	PR
+19344	Update tracker.js	PR
+19343	Update orderValidationService.js	PR
+19342	Create auth_service.dart	PR
+19341	Update .gitignore	PR
+19340	Update build.gradle.kts	PR
+19339	Update supportRoutes.js	PR
+19338	Update requestSchemas.js	PR
+19337	Update pricing.js	PR
+19336	Update orderRoutes.js	PR
+19335	Update orderRoutes.js	PR
+19334	Update profileCache.js	PR
+19333	Update mid_trip_reoptimiser.py	PR
+19332	Update loadSchemas.js	PR
+19331	Update profileService.js	PR
+19330	Update deviceController.js	PR
+19329	Update osrm.js	PR
+19328	Update Escrow.sol	PR
+19327	Update fuelAdvisorService.js	PR
+19326	Update otpService.js	PR
+19325	Update auditLogConsumer.js	PR
+19324	Update authRoutes.js	PR
+19323	fix: require configured FASTag webhook secret and reject unverified tolls	PR
+19322	fix: require service-role configuration for location persistence	PR
+19321	test: provide withLockRenewal in escrow reconciliation suite	PR
+19320	test: assert cbTranslator hex message identifiers	PR
+19319	fix: fail tokenization getters with configuration errors	PR
+19318	fix: import logger in locationService error paths	PR
+19317	fix: log policy misconfiguration in requirePolicy	PR
+19316	fix: export request cache middleware and scope keys by user	PR
+19315	fix: scan ingestion documents with the exported scanner	PR
+19314	fix: require service-role configuration for refresh tokens	PR
+19313	fix: require ML_API_KEY for telemetry ML evaluation	PR
+19312	fix: harden relay handshake secret, geofence, and OTP integrity checks	PR
+19311	fix: fail closed when GSTIN portal verification is unavailable	PR
+19310	fix: cap and expire in-memory relay sessions	ISSUE
+19309	fix: cap and prune biometric challenge session store	ISSUE
+19308	fix: cap seal image payloads before decoding and hashing	ISSUE
+19307	fix: validate reefer precool temperature and duration inputs	ISSUE
+19306	fix: remove mock storage fallback from document uploads	PR
+19305	fix: reject non-finite and non-positive pricing oracle inputs	ISSUE
+19304	fix: cap LTL consolidation batch size	ISSUE
+19303	fix: validate finite biometric telemetry and HOS values	ISSUE
+19302	fix: reject invalid DOT compliance expiration dates	ISSUE
+19301	fix: bound in-memory YMS pin, slot, and dwell stores	ISSUE
+19300	fix: cap P2P trailer listing and booking stores with TTL eviction	ISSUE
+19299	fix: stop reporting successful R2 uploads when the S3 SDK is unavailable	PR
+19298	fix: make blockchain metrics collection single-flight and stoppable	ISSUE
+19297	fix: page audit log exports instead of truncating at 1000 rows	ISSUE
+19296	fix: single-flight state divergence checks and unref the monitoring timer	ISSUE
+19295	fix: batch exhausted-event dead-lettering in the outbox service	ISSUE
+19294	fix: require service-role Supabase configuration in locationService	ISSUE
+19293	fix: bound load-based support ticket assignment queries	ISSUE
+19292	test: provide withLockRenewal mock in escrow release reconciliation suite	ISSUE
+19291	fix: cap fleet analytics row scans and return 413 for oversized ranges	ISSUE
+19290	fix: prevent overlapping withdrawal settlement cycles	ISSUE
+19289	test: align cbTranslator audio URL assertion with hex message ids	ISSUE
+19288	fix: validate uploaded document bytes instead of trusting client MIME type	PR
+19287	fix: bound the ML health response body read	ISSUE
+19286	fix: make tokenization getters fail with configuration errors on first use	ISSUE
+19285	fix: abort GraphQL health probes when the deadline expires	ISSUE
+19284	fix: import logger in locationService error paths	ISSUE
+19283	fix: bound Flashbots relay submissions and fail closed on non-2xx responses	ISSUE
+19282	fix: import logger in requirePolicy misconfiguration path	ISSUE
+19281	fix: export requestCacheMiddleware and scope cache keys to the authenticated user	ISSUE
+19280	fix: use exported malware scanner in documentIngestionPipeline	ISSUE
+19279	fix: require service-role Supabase configuration in refreshTokenService	ISSUE
+19278	fix: require ML_API_KEY instead of hardcoded fallback in iotTelemetryWorker	ISSUE
+19277	fix: remove orphaned escrow funding snippet that crashes module import	PR
+19276	fix: remove orphaned escrow funding snippet that crashes module import	ISSUE
+19275	fix: harden relay handshake secret, geofence, and OTP integrity checks	ISSUE
+19274	fix: require configured FASTag webhook secret and reject unverified tolls	ISSUE
+19273	fix: remove mock storage fallback from document uploads	ISSUE
+19272	fix: stop reporting successful R2 uploads when the S3 SDK is unavailable	ISSUE
+19271	fix: validate uploaded document bytes instead of trusting client MIME type	ISSUE
+19270	fix: fail closed when GSTIN portal verification is unavailable	ISSUE
+19269	fix(auth): verify OTPs with the service-role client	PR
+19268	fix(auth): verify-otp reads phone_otps through the anon client, so the service-role RLS policy blocks every verification	ISSUE
+19267	docs: Fix Markdown formatting in troubleshooting guide	PR
+19266	docs: Fix Markdown formatting in troubleshooting guide	ISSUE
+19265	Bump aiohttp from 3.14.3 to 3.14.4 in /backend/ml in the pip group across 1 directory	PR
+19264	Update documentRoutes.js	PR
+19263	Create escrowHealth.test.js	PR
+19262	updated supabase	PR
+19261	Create InternalEventAdapter.test.js	PR
+19260	update supabase	PR
+19259	Update authorizationError.test.js	PR
+19258	Update driverRoutes.js	PR
+19257	Update trip_service.dart	PR
+19256	Create env.dart	PR
+19255	Refactor Dockerfile for app user and CMD update	PR
+19254	Update .gitignore	PR
+19253	Update tracker.js	PR
+19252	Update contentType.js	PR
+19251	Device service.js	PR
+19250	Update locationServer.js	PR
+19249	Create gpsLog.model.js	PR
+19248	Update pricing.test.js	PR
+19247	Update FraudDetectionService.js	PR
+19246	Update kyber_core.py	PR
+19245	Update healthRoutes.js	PR
+19244	Update locationService.js	PR
+19243	Update escrow.js	PR
+19242	Update weighStationService.js	PR
+19241	Update auditLogService.test.js	PR
+19240	Update digilockerService.js	PR
+19239	Update wimBypass.js	PR
+19238	Update healthRoutes.test.js	PR
+19237	Update RenderScheduler.test.js	PR
+19236	Modify remove-non-contributor-links workflow settings	PR
+19235	Refactor link handling in remove-non-contributor-links.js	PR
+19234	Refactor link removal for non-contributors	PR
+19233	Update tripRoutes.js	PR
+19232	Update trip_service.dart	PR
+19231	Update flutter-ci.yml	PR
+19230	Update deviceRoutes.js	PR
+19229	Update orderRoutes.js	PR
+19228	Update ymsTracker.js	PR
+19227	Create tracking.js	PR
+19226	Update driverRoutes.js	PR
+19225	Lookup routes.js	PR
+19224	Update trackingTokenService.js	PR
+19223	Update policy.service.js	PR
+19222	Interested in Contributing to Another Open-Source Project?	ISSUE
+19221	Sec/blockchain hardhat tests and abi 2013	PR
+19220	fix(security): fail closed in otpService.verifyOtpHash on hash length mismatch (fixes #19219)	PR
+19219	bug(security): otpService.verifyOtpHash throws RangeError instead of returning false when the stored hash length differs	ISSUE
+19218	Replace console log with logger	PR
+19217	Kyc upload auth and limits	PR
+19216	Location server heartbeat timer	PR
+19215	Document expiry service bare catch	PR
+19214	fix(services): remove orphaned top-level code and CJS class from fuelAdvisorService (#19213)	PR
+19213	[Bug] SyntaxError in fuelAdvisorService.js breaks module import and unit tests	ISSUE
+19212	Order routes syntax errors	PR
+19211	fix(ci): export the non-contributor link helpers and run the helper tests in CI	PR
+19210	Remove Links from Non-Contributors workflow fails: cleaner.run is not a function	ISSUE
+19209	fix(websocket): update tracker.js catch blocks with proper logger.error	PR
+19208	fix(security): add missing auth.uid() authorization check to accept_bid_tx RPC	PR
+19207	feat(documents): integrate DigiLocker verification with on-chain hashing	PR
+19206	feat(documents): integrate DigiLocker verification with on-chain hashing	PR
+19205	Remove transcription API call and clean up code	PR
+19204	fix(api): replace bare catch block in documentExpiryService.js	PR
+19203	fix(security): restrict gps_offline_data RLS policy to service_role	PR
+19202	Bid acceptance service duplicate const wallet	PR
+19201	Digilocker error cause	PR
+19200	Order unit test suites drift	PR
+19199	Driver submit bid endpoint	PR
+19198	Fix htlc preimage leak	PR
+19197	Duplicate submit escrow refund syntax error	PR
+19196	fix(abe): remove pasted snippet that broke test_abe.py	PR
+19195	bug(abe): test_abe.py fails to import because of a pasted before/after snippet	ISSUE
+19194	Update payment_methods_screen.dart	PR
+19193	Update escrow.js	PR
+19192	Update anomalyDetectionService.js	PR
+19191	Update verificationRoutes.js	PR
+19190	Add google_sign_in dependency	PR
+19189	Update profileCache.js	PR
+19188	Update auth.js	PR
+19187	Update idempotency.js	PR
+19186	Update locationServer.js	PR
+19185	Update reputation.js	PR
+19184	Update malwareScanner.js	PR
+19183	Update orderRoutes.js	PR
+19182	fix(security): sign and verify audit-log batches with a fail-closed secret (fixes #19181)	PR
+19181	bug(security): audit-log batches are signed and verified with a hardcoded fallback secret, so the tamper check can be forged	ISSUE
+19179	fix(middleware): implement robust request tracking and tracing headers	PR
+19178	feat(driver): replace raw WebSocket with resilient reconnect wrapper for GPS tracking	PR
+19177	fix(health): resolve syntax errors, remove duplicates, and add structured error logging	PR
+19176	fix(fraud): prevent NaN fraud threshold when env var is unset	PR
+19175	Fix/fcm token validation	PR
+19174	bug: fix(fraud): FRAUD_THRESHOLD defaults to NaN when unset	ISSUE
+19173	fix(test): accept AbortSignal options in trafficService fetch assertions (#19172)	PR
+19172	[Bug] test/unit/services/trafficService.test.js fails on fetch call assertion due to timeout signal argument	ISSUE
+19171	fix(blockchain): remove duplicate ethers declaration and orphaned script in deploy.js (#19170)	PR
+19170	fix(blockchain): remove duplicate ethers declaration and orphaned script in deploy.js	ISSUE
+19169	fix(api): complete profileService implementation and resolve unexpected end of input syntax error (#19168)	PR
+19168	[Bug] SyntaxError in profileService.js breaks profile lookups and unit tests	ISSUE
+19167	fix(security): sign ZKP session token with the central fail-closed JWT secret (fixes #19166)	PR
+19166	bug(security): ZKP session token is signed with a hardcoded fallback secret instead of the central fail-closed JWT secret	ISSUE
+19165	fix(api): remove duplicate unrate-limited sentry-debug router block (fixes #2161)	PR
+19164	fix(driver): query trucks by owner_id instead of driver_id (fixes #2165)	PR
+19163	fix(support): correct inverted status guard on ticket status updates (fixes #700)	PR
+19162	fix(driver): remove duplicate provider import in main.dart	PR
+19161	Update telemetry_EventTracer.test.js	PR
+19160	Update ml.js	PR
+19159	Update escrowServiceRaceCondition.test.js	PR
+19158	Update orderRoutesGeofence.test.js	PR
+19157	fix(solidity): bind credential signatures to chain and contract	PR
+19156	fix(order): remove undefined createOrderTransactional export in orderLifecycleService	PR
+19155	fix(fuel-advisor): remove spliced legacy block breaking calculateFuelEfficiency	PR
+19154	Update index.js	PR
+19153	Driver statement regressions	PR
+19152	Update orderRoutes.js	PR
+19151	Update profileCache.js	PR
+19150	Export sanitize price pricing service	PR
+19149	Enhance driverEarningsService tests for edge cases	PR
+19148	Update ci.yml	PR
+19147	Update iotRoutes.js	PR
+19146	Update documentExpiryService.js	PR
+19145	Update driverRoutes.js	PR
+19144	Update validate.js	PR
+19143	Update auditLog.js	PR
+19142	Update cors.js	PR
+19141	Enhance profile validation with strict type guards	PR
+19140	fix(test): remove duplicate imports and orphaned stub from auditLog.test.js (#19138)	PR
+19139	Update reputation.js	PR
+19138	[Bug] SyntaxError: Identifier 'describe' has already been declared in auditLog.test.js	ISSUE
+19137	fix(test): remove duplicate imports and orphaned stub from trafficService.test.js (#19135)	PR
+19136	Update orderRoutes.js	PR
+19135	[Bug] SyntaxError: Identifier 'describe' has already been declared in trafficService.test.js	ISSUE
+19134	fix(test): remove duplicate import and orphaned stub from reverseGeocode.test.js (#19132)	PR
+19133	Update order.service.js	PR
+19132	[Bug] SyntaxError: Identifier 'describe' has already been declared in reverseGeocode.test.js	ISSUE
+19131	Create 20260806000070_fix_gps_offline_data_policy.sql	PR
+19130	Update container.js	PR
+19129	Update main.cpp	PR
+19128	Update locationServer.js	PR
+19127	Update main.cpp	PR
+19126	Update osrm.js	PR
+19125	Update documentValidation.js	PR
+19124	Update package.json	PR
+19123	Update trackingTokenService.test.js	PR
+19122	Update osrm.js	PR
+19121	Update ml.test.js	PR
+19120	Update keyManagementService.js	PR
+19119	Update profileCache.js	PR
+19118	Update cors.js	PR
+19117	Update lookupRoutes.js	PR
+19116	Update documentExpiryService.test.js	PR
+19115	Update weighStationService.js	PR
+19114	Update osrm.js	PR
+19113	Create store.go	PR
+19112	Update exponentialBackoff.js	PR
+19111	fix(digilocker): remove orphaned snippets causing syntax errors	PR
+19110	[Bug] SyntaxError: Illegal return statement and unexpected identifier in digilockerService.js	ISSUE
+19109	fix(wallet): remove orphaned top-level try-catch block in payoutProvider.js (#19108)	PR
+19108	[Bug] SyntaxError: Illegal return statement in payoutProvider.js	ISSUE
+19107	fix(pricing): remove duplicate computeOrderPricing stub from pricing.js (#19106)	PR
+19106	[Bug] SyntaxError: Duplicated export 'computeOrderPricing' in lib/pricing.js	ISSUE
+19105	fix(driver): remove duplicate parseDistanceKm declarations in earningsReportService (#19104)	PR
+19104	[Bug] SyntaxError: Identifier 'parseDistanceKm' has already been declared in earningsReportService.js	ISSUE
+19103	fix(escort-wallet): remove duplicate AppError import in escortWalletController (#19102)	PR
+19102	[Bug] SyntaxError: Identifier 'AppError' has already been declared in escortWalletController.js	ISSUE
+19101	fix(voice): remove orphaned transcription call from trimCache (#19100)	PR
+19100	[Bug] SyntaxError in voiceService.js breaks audio caching and Whisper speech transcription	ISSUE
+19099	fix(circuit-breaker): remove duplicate class declaration and module.exports in circuitBreaker (#19098)	PR
+19098	[Bug] SyntaxError: Identifier 'CircuitBreaker' has already been declared in circuitBreaker.js	ISSUE
+19097	fix(health): remove duplicate imports and premature router export in healthRoutes (#19096)	PR
+19096	[Bug] SyntaxError in healthRoutes.js breaks health endpoints and unit test execution	ISSUE
+19095	fix(webhook): remove orphaned diff catch block from escrowWebhookProcessor (#19091)	PR
+19094	Update reverseGeocode.js	PR
+19093	Update i18n.test.js	PR
+19092	Update driverRoutes.js	PR
+19091	[Bug] SyntaxError in escrowWebhookProcessor.js breaks webhook processing and unit tests	ISSUE
+19090	Update main.py	PR
+19089	Weigh stati1on service.js	PR
+19088	Update 20260804000000_add_set_default_address_rpc.sql	PR
+19087	Update tracker.js	PR
+19086	Update escapeLike.test.js	PR
+19085	Update loadRoutes.js	PR
+19084	Update orderValidationService.js	PR
+19083	Update wasi-runtime.js	PR
+19082	Update orderRoutes.js	PR
+19081	Update routes.js	PR
+19080	Create check-migrations.js	PR
+19079	Update authContext.js	PR
+19078	Create telematics_service.dart	PR
+19077	Update rating_nullifier.circom	PR
+19076	Update escrow.js	PR
+19075	Log raw trip items during processing	PR
+19074	Implement Sentry debug endpoint with production checks	PR
+19073	Update mlRoutes.js	PR
+19072	Update notificationService.js	PR
+19071	Update orderRoutes.js	PR
+19070	Update osrm.test.js	PR
+19069	Update package.json	PR
+19068	Update correlationId.js	PR
+19067	Update telemetry_filter.c	PR
+19066	Create 20260814000000_fix_fraud_admin_rls.sql	PR
+19065	fix(api): repair driverRoutes statement row splice that blocks module load (fixes #19064)	PR
+19064	bug(api): driverRoutes.js uses ";" inside a return object - SyntaxError at import blocks API boot and the statementPayoutBasis suite	ISSUE
+19063	fix(solidity): require proportional liquidity deposits	PR
+19062	fix(db): restrict monitoring reads to authenticated users	PR
+19061	fix(shell): quote database password safely in n8n init	PR
+19060	fix(k8s): add guardrails to canary deployment	PR
+19059	fix(compose): pin routing engine image version	PR
+19058	fix(docker): run backup image as non-root with health probe	PR
+19057	fix(solidity): set mock bridge at construction	PR
+19056	fix(solidity): bind credential signatures to chain and contract	PR
+19055	fix(solidity): guard provider registration and refund excess	PR
+19054	fix(solidity): reject zero-address settlement parties	PR
+19053	fix(solidity): validate swap inputs and enforce claim expiry	PR
+19052	fix(solidity): lock vote weight until voting ends	PR
+19051	fix(solidity): probe governance support at a finalized block	PR
+19050	fix(solidity): replace stipend transfers with checked calls	PR
+19049	fix(ml): restrict manual safety alert levels	PR
+19048	fix(ml): remove dead code breaking ab testing router import	PR
+19047	fix(ml): sanitize checkpoint paths in ssl save and load	PR
+19046	fix(ml): validate forecast matrix and horizon	PR
+19045	fix(ml): validate training knobs before touching shared optimizer	PR
+19044	fix(ml): bound neural architecture search budgets	PR
+19043	fix(ml): bound imitation training sizes	PR
+19042	fix(ml): log silent fallbacks across voice pipeline	PR
+19041	fix(ml): cap transcription upload size	PR
+19040	fix(ml): bind and validate text in voice synthesis endpoint	PR
+19039	fix(api): make escrow state transition atomic with lua	PR
+19038	fix(api): require order participation for escrow milestone and clawback	PR
+19037	fix(api): include status in closed-ticket comment check	PR
+19036	fix(api): add missing crypto import to rate limiter	PR
+19035	fix(api): dead route block crashes verification router on load	PR
+19034	fix(api): duplicated notification helper breaks module import	PR
+19033	Update bids.test.js	PR
+19032	fix(solidity): require proportional liquidity deposits	ISSUE
+19031	fix(db): restrict monitoring reads to authenticated users	ISSUE
+19030	fix(shell): quote database password safely in n8n init	ISSUE
+19029	fix(k8s): add guardrails to canary deployment	ISSUE
+19028	fix(compose): pin routing engine image version	ISSUE
+19027	fix(docker): run backup image as non-root with health probe	ISSUE
+19026	fix(solidity): set mock bridge at construction	ISSUE
+19025	fix(solidity): bind credential signatures to chain and contract	ISSUE
+19024	fix(solidity): guard provider registration and refund excess	ISSUE
+19023	fix(solidity): reject zero-address settlement parties	ISSUE
+19022	fix(solidity): validate swap inputs and enforce claim expiry	ISSUE
+19021	fix(solidity): lock vote weight until voting ends	ISSUE
+19020	fix(solidity): probe governance support at a finalized block	ISSUE
+19019	fix(solidity): replace stipend transfers with checked calls	ISSUE
+19018	fix(ml): restrict manual safety alert levels	ISSUE
+19017	fix(ml): remove dead code breaking ab testing router import	ISSUE
+19016	fix(ml): sanitize checkpoint paths in ssl save and load	ISSUE
+19015	fix(ml): validate forecast matrix and horizon	ISSUE
+19014	fix(ml): validate training knobs before touching shared optimizer	ISSUE
+19013	fix(ml): bound neural architecture search budgets	ISSUE
+19012	fix(ml): bound imitation training sizes	ISSUE
+19011	fix(ml): log silent fallbacks across voice pipeline	ISSUE
+19010	fix(ml): cap transcription upload size	ISSUE
+19009	fix(ml): bind and validate text in voice synthesis endpoint	ISSUE
+19008	fix(api): make escrow state transition atomic with lua	ISSUE
+19007	fix(api): require order participation for escrow milestone and clawback	ISSUE
+19006	fix(api): include status in closed-ticket comment check	ISSUE
+19005	fix(api): add missing crypto import to rate limiter	ISSUE
+19004	fix(api): dead route block crashes verification router on load	ISSUE
+19003	fix(api): duplicated notification helper breaks module import	ISSUE
+19002	Update apiResponse.test.js	PR
+19001	fix(services): clean duplicate imports and dummy declaration in osrm.js (#10653)	PR
+19000	fix(api): remove duplicate checkBypassEligibility declarations and fix logger in weighStationService (#10664)	PR
+18999	Update healthRoutes.js	PR
+18998	1Update driverEarningsService.test.js	PR
+18997	Update orderRoutes.js	PR
+18996	Update keyRotationService.js	PR
+18995	Update uploadFilename.test.js	PR
+18994	Update orderRoutes.js	PR
+18993	Update orderRoutes.js	PR
+18992	Update digilockerService.test.js	PR
+18991	Update escrow.js	PR
+18990	Update malwareScanner.js	PR
+18989	Implement caching for OSRM route queries	PR
+18988	Update correlationId.js	PR
+18987	Update reverseGeocode.js	PR
+18986	Update notificationService.js	PR
+18985	Update earningsReportService.js	PR
+18984	fix(delivery): restore complete deliveryVerificationService implement…	PR
+18983	bug: deliveryVerificationService.js truncated after "Refactor delivery verification logic" (SyntaxError)	ISSUE
+18982	Update detector.py	PR
+18981	Update workZoneService.test.js	PR
+18980	Update rateLimiter.js	PR
+18979	Implement GET /api/loads endpoint	PR
+18978	Update i18n.js	PR
+18977	Create offline_location_queue.dart	PR
+18976	Add Firebase messaging service worker for notifications	PR
+18975	Implement Load Posting Screen with Map Integration	PR
+18974	Implement driver location update service	PR
+18973	Update orderRoutes.js	PR
+18972	Implement loading screen with spinner for Truxify	PR
+18971	fix(shell): fail fast in snyk setup script	PR
+18970	fix(shell): fail fast in fluxcd installer	PR
+18969	fix(ci): bound hourly conflict checker	PR
+18968	fix(ci): bound event cache publication job	PR
+18967	fix(ci): bound cache flight lifecycle job	PR
+18966	fix(ci): least-privilege perms and timeout for flutter build	PR
+18965	fix(ci): bound flutter ci jobs with timeouts	PR
+18964	fix(flutter): log sync post failures in location service	PR
+18963	fix(flutter): use debugPrint in keystore test helper	PR
+18962	Update snyk.service.js	PR
+18961	fix(flutter): log voice recording failures	PR
+18960	fix(flutter): log dropped attachment rows in conflict resolver	PR
+18959	fix(solidity): emit events on deactivate and cancel	PR
+18958	fix(solidity): bind respond state hash to chain and contract	PR
+18957	fix(ml): log model fallback instead of failing silently	PR
+18956	fix(ml): bound generation and training params	PR
+18955	fix(ml): bound edge weights and training params	PR
+18954	fix(ml): validate tensor input on multitask endpoints	PR
+18953	fix(ml): bound audio record duration	PR
+18952	fix(ml): bound k_shot on task sampling endpoint	PR
+18951	fix(docker): run consensus image as non-root with health probe	PR
+18950	fix(voice): return 400 for invalid audio in dispatch-action	PR
+18949	Update VoiceAiService.js	PR
+18948	fix(api): reject invalid page and limit with 400	PR
+18947	fix(chat): cap history page size and validate cursor	PR
+18946	fix(chat): check participation before marking messages read	PR
+18945	fix(lock): use token-owned release in legacy distributed lock	PR
+18944	fix(ota): require explicit signing key for ecm tuning payloads	PR
+18943	fix(pricing): require explicit secret for quote token HMAC	PR
+18942	fix(chat): fail closed when chat encryption secret is missing	PR
+18941	fix(auth): use central jwt secret for refresh token signing	PR
+18940	fix(auth): collapse triple-spliced middleware into one implementation	PR
+18939	Update wasi-runtime.js	PR
+18938	Add estimated delivery time eta	PR
+18937	Fuel advisor and truck search suites	PR
+18936	Remove dead commonjs escrow chain	PR
+18935	Update policy.service.js	PR
+18934	Circuit breaker and malware scanner	PR
+18933	Implement paginated API response formatting	PR
+18932	Update retry.js	PR
+18931	Shared app infra mock harness	PR
+18930	Update trafficService.js	PR
+18929	Update notificationService.js	PR
+18928	Create unsaved_changes_guard.dart	PR
+18927	Create routeDeviationService.js	PR
+18926	Unfunded escrow delivery verification	PR
+18925	Add tests for EventTracer telemetry functions	PR
+18924	Update notificationService.js	PR
+18923	fix(shell): fail fast in snyk setup script	ISSUE
+18922	Update compression.js	PR
+18921	fix(shell): fail fast in fluxcd installer	ISSUE
+18920	fix(ci): bound hourly conflict checker	ISSUE
+18919	fix(ci): bound event cache publication job	ISSUE
+18918	fix(ci): bound cache flight lifecycle job	ISSUE
+18917	fix(ci): least-privilege perms and timeout for flutter build	ISSUE
+18916	fix(ci): bound flutter ci jobs with timeouts	ISSUE
+18915	fix(flutter): log sync post failures in location service	ISSUE
+18914	fix(flutter): use debugPrint in keystore test helper	ISSUE
+18913	fix(flutter): log voice recording failures	ISSUE
+18912	fix(flutter): log dropped attachment rows in conflict resolver	ISSUE
+18911	fix(solidity): emit events on deactivate and cancel	ISSUE
+18910	fix(solidity): bind respond state hash to chain and contract	ISSUE
+18909	fix(ml): log model fallback instead of failing silently	ISSUE
+18908	fix(ml): bound generation and training params	ISSUE
+18907	fix(ml): bound edge weights and training params	ISSUE
+18906	fix(ml): validate tensor input on multitask endpoints	ISSUE
+18905	fix(ml): bound audio record duration	ISSUE
+18904	fix(ml): bound k_shot on task sampling endpoint	ISSUE
+18903	fix(docker): run consensus image as non-root with health probe	ISSUE
+18902	fix(voice): return 400 for invalid audio in dispatch-action	ISSUE
+18901	fix(api): reject invalid page and limit with 400	ISSUE
+18900	fix(chat): cap history page size and validate cursor	ISSUE
+18899	fix(chat): check participation before marking messages read	ISSUE
+18898	fix(lock): use token-owned release in legacy distributed lock	ISSUE
+18897	fix(ota): require explicit signing key for ecm tuning payloads	ISSUE
+18896	fix(pricing): require explicit secret for quote token HMAC	ISSUE
+18895	fix(chat): fail closed when chat encryption secret is missing	ISSUE
+18894	fix(auth): use central jwt secret for refresh token signing	ISSUE
+18893	Add InvalidCursorError class for pagination errors	PR
+18892	Enhance health check route with structured logging	PR
+18891	Implement error handling in cache get/set functions	PR
+18890	Enhance error handling in handleCacheEvent function	PR
+18889	Update anomalyDetectionService.js	PR
+18888	Implement safe weight parsing function	PR
+18887	Update pagination.js	PR
+18886	Implement file buffer scanning for malware detection	PR
+18885	Implement prediction validation logic	PR
+18884	Update orderDisplayId.js	PR
+18883	Create app_te.arb	PR
+18882	Order routes and openapi yaml	PR
+18881	Geofence and state divergence tests	PR
+18880	Auth verify otp token tests	PR
+18879	fix(graphql): remove duplicate mapOrder and typeDefs declarations in …	PR
+18878	fix: repair route planning endpoint and tests (fixes #18576)	PR
+18877	fix(voice): align mock query intent handling and remove invalid splic…	PR
+18876	fix(api): platoonRoutes imports a phantom authenticateToken export (latent load failure)	PR
+18875	test(api): tireWearService suite — FMCSA legal limits + hazard model (7 cases)	PR
+18874	test(api): relayRoutes integration suite (4 cases)	PR
+18873	fix(api): apply the auth rate limiter once on /api/auth (#2273)	PR
+18872	fix(federated): retain native subscription ownership through drain (fixes #18871)	PR
+18871	bug(federated): subscription generations leak listeners and race native shutdown	ISSUE
+18870	fix(ml): preserve finite A/B arithmetic and vote eligibility (fixes #18868)	PR
+18869	Update orderLifecycleService.js	PR
+18868	bug(ml): A/B finite metric arithmetic and vote eligibility disagree	ISSUE
+18867	fix(federated): retain bounded native HTTP job ownership (fixes #18866)	PR
+18866	bug(federated): native HTTP jobs block the loop without bounded request ownership	ISSUE
+18865	fix(federated): acknowledge native inbox updates after admission (fixes #18836)	PR
+18864	build: bump socket_io_client from 2.0.3+1 to 3.1.6 in /apps/driver	PR
+18863	chore: bump github/codeql-action/init from 4.38.2 to 4.38.3	PR
+18862	chore: bump mysql2 from 3.23.3 to 3.24.5 in /backend/api	PR
+18861	chore: bump actions/setup-python from 5 to 7	PR
+18860	chore: bump @opentelemetry/instrumentation-mongodb from 0.75.0 to 0.76.0 in /backend/api	PR
+18859	build: bump workmanager from 0.9.3 to 0.10.10 in /apps/driver	PR
+18858	chore: bump github/codeql-action/analyze from 4.38.2 to 4.38.3	PR
+18857	build: bump flutter_riverpod from 2.6.1 to 3.4.3 in /apps/driver	PR
+18856	chore: bump socket.io from 4.8.3 to 4.8.4 in /backend/api	PR
+18855	chore: bump actions/checkout from 4 to 7	PR
+18854	chore: bump supertest from 7.2.2 to 7.3.1 in /backend/api	PR
+18853	chore: bump i18next from 26.3.6 to 26.4.3 in /backend/api	PR
+18852	build: bump share_plus from 10.1.4 to 12.0.2 in /apps/driver	PR
+18851	build: bump audioplayers from 5.2.1 to 6.8.1 in /apps/driver	PR
+18850	chore: bump actions/upload-artifact from 7.0.1 to 7.0.2	PR
+18846	Remove phantom telemetry buffer tests	PR
+18845	Auth middleware syntax error	PR
+18844	Dispute evidence openapi	PR
+18843	Flashbots signature header	PR
+18842	Restore request context exports	PR
+18841	fix(api): remove top-level diff residue in notificationService.js	PR
+18836	bug(federated): destructive queue reads lose native updates before admission	ISSUE
+18819	test(api): chatService suite — rate limiting + encrypted persistence (6 cases)	PR
+18800	N8n automation tests esm	PR
+18799	Training readiness since validation	PR
+18798	Deduplicate swap mev services	PR
+18797	fix(blockchain): secure KYC ZK-SNARK verification (#11247)	PR
+18774	chore(customer): remove 4 dead type checks (same class as driver's #18769)	PR
+18771	docs: repair 9 more broken internal links (wiki .md suffixes, escrow ABI ref, api README retargets)	PR
+18762	Fix CommonJS loading in non-contributor links workflow	PR
+18750	fix(shell): stop consul installer on first failure	PR
+18749	fix(shell): stop consul installer on first failure	ISSUE
+18748	fix(shell): tighten zkp wasm build to strict mode	PR
+18747	fix(shell): tighten zkp wasm build to strict mode	ISSUE
+18746	fix(ci): bound pr-labeler with timeout	PR
+18745	fix(ci): bound pr-labeler job with timeout	ISSUE
+18744	fix(shell): fail fast in argocd helper	PR
+18743	fix(shell): fail fast in argocd cli helper	ISSUE
+18742	fix(solidity): lock AtomicSwap pragma to 0.8.20	PR
+18741	fix(solidity): lock AtomicSwap pragma to 0.8.20	ISSUE
+18740	fix(docker): add HEALTHCHECK to zkp-verifier-rust	PR
+18739	fix(docker): add HEALTHCHECK to zkp-verifier-rust image	ISSUE
+18738	fix(ci): cap issue assigner with timeout	PR
+18737	fix(ci): cap issue assigner job with timeout	ISSUE
+18736	fix(security): allow migration db creds via env	PR
+18735	fix(security): allow migration db user and password via env	ISSUE
+18734	fix(security): read rollback db creds from env	PR
+18733	fix(security): read liquibase rollback credentials from env instead of hardcoding	ISSUE
+18732	fix(solidity): lock Escrow pragma to 0.8.24	PR
+18731	fix(solidity): lock Escrow pragma to 0.8.24 for reproducible builds	ISSUE
+18730	fix(docker): add HEALTHCHECK to vector-matcher-cpp	PR
+18729	fix(docker): add HEALTHCHECK to vector-matcher-cpp image	ISSUE
+18728	fix(docker): probe route-matrix-cpp health endpoint	PR
+18727	fix(docker): probe route-matrix-cpp with HEALTHCHECK on its health endpoint	ISSUE
+18726	fix(shell): make wasm build fail fast	PR
+18725	fix(shell): make wasm build fail fast with strict mode	ISSUE
+18724	fix(ci): give auto pr assign a short timeout	PR
+18723	fix(ci): give auto pr assign job a short timeout	ISSUE
+18722	fix(ci): add timeout to flaky detector job	PR
+18721	fix(ci): add timeout to flaky detector so hung suites do not burn runners	ISSUE
+18720	Route routes syntax and imports	PR
+18719	fix(ci): bound codeql analyze job with timeout	PR
+18718	fix(ci): bound codeql analyze job with timeout-minutes	ISSUE
+18717	fix(api): clamp demand-heatmap hours to 1-168	PR
+18716	fix(api): clamp demand-heatmap hours to 1-168 to block invalid forecasts	ISSUE
+18715	fix(docker): pin driver web nginx to 1.27-alpine	PR
+18714	fix(docker): pin driver web nginx base for reproducible builds	ISSUE
+18713	fix(docker): pin customer web nginx to 1.27-alpine	PR
+18712	fix(docker): pin nginx base in customer web image to a stable release	ISSUE
+18711	fix(docker): add HEALTHCHECK to telemetry-ingestion image	PR
+18710	Device controller syntax	PR
+18709	fix(docker): add HEALTHCHECK to telemetry-ingestion image so orchestrators can detect hangs	ISSUE
+18706	chore(driver): remove 16 written-but-never-read fields + their dead writes (setState churn removed)	PR
+18700	fix(anomaly): bound temporal windows with LRU (fixes #18690)	PR
+18698	fix(driver): en-route loads ignored driver GPS + zone status icons never rendered (found via unused_local_variable) + 7 dead locals	PR
+18697	chore(customer): remove ~1,000 lines of dead code — the pre-repair desktop settings layout was left orphaned	PR
+18690	bug(anomaly): per-entity temporal windows retain inactive streams without a memory bound	ISSUE
+18689	fix(customer): guard async-gap BuildContext uses + declare the path_provider dependency	PR
+18687	chore(customer): remove 18 analyzer-flagged unused/unnecessary imports	PR
+18684	fix(graphql): run orderCurrency tests under vitest and add test script	PR
+18679	docs: repair broken internal links (api README retargets, wiki Windows paths, bare domain, planned docs marked)	PR
+18675	fix(routing): bound candidate tables and preserve global ranking (fixes #18673)	PR
+18673	bug(mid-trip): eligible candidate sets exceed the bounded OSRM table contract	ISSUE
+18661	fix(blockchain): hardhat suite loads again — config discovery, OZ v5 paths, placeholder verifier width, escrow test splice	PR
+18641	RenderScheduler cancellation tests contradict the deliberate unblocking contract (and their own sibling test)	ISSUE
+18639	graphql subproject: orderCurrency suite never runs (node:test imports under a vitest runner) + no test script	ISSUE
+18638	fix(kafka): order read model splice — duplicate getOrderStats heads + filter tail (4 suites dead)	PR
+18637	kafka/order.read.model.js unparseable — spliced duplicate getOrderStats heads + duplicated filter tail (4 suites dead)	ISSUE
+18634	healthRoutes suite stale: log-event assertions pin the pre-7226f91d8 names	ISSUE
+18632	Fuel advisor engine-load chain silently dead — ESM class references a supabaseAdmin that exists only in the spliced CJS half	ISSUE
+18630	WIM request-bypass unparseable + runtime ReferenceError — 7a0a99b57 merge destroyed the trusted-measurement flow	ISSUE
+18627	fix(api): attach the caught error as cause on four rethrows (fixes #18626)	PR
+18625	fix(driver-app): restore truncated driver_profile_screen.dart and drop stray non-Dart snippet (fixes #18624)	PR
+18623	fix(ci): make the n8n escrow-webhook audit suites runnable again (fixes #18622)	PR
+18610	fix(api): OpenAPI {id} templating + params/responses for admin withdrawal endpoints (fixes #18609)	PR
+18602	ci(eventsourcing): run every event-sourcing suite in npm test and CI (fixes #18601)	PR
+18592	deviceController.js unparseable — pasted 'example fix' snippet splits registerDeviceToken in two	ISSUE
+18590	Voice query responses ignore intent — enum-case mismatch in buildResponseForIntent, ETA never spoken	ISSUE
+18587	validate.js has a duplicated logger import — every route using validateBody/validateParams is unimportable on main	ISSUE
+18583	i18n.js unparseable on main — four-site splice (IIFE-in-function, lost catch brace, missing i18next imports, broken res.json passthrough)	ISSUE
+18577	fix(api): routeRoutes brace splice + phantom policy.js import (unbootable on main)	PR
+18576	routeRoutes.js is unparseable on main — brace splice + phantom policy.js import from 84582ce09 (API cannot boot)	ISSUE
+18573	fix(api): remove the route handler spliced into profileService.js (fixes #18572)	PR
+18571	fix(api): index.js double server-start + supportRoutes/oracleRoutes duplicates (fixes #18570)	PR
+18569	test(api): geofence mongo mock + stateDivergence rebuild (fixes #18568)	PR
+18568	test(api): orderRoutesGeofence 503s — no mongoDb mock for the fail-closed telemetry read; stateDivergence suite spliced with a phantom jest block	ISSUE
+18567	fix(api): pickup_date past-date boundary uses local calendar days (fixes #18566)	PR
+18564	test(api): order unit suites drifted — hoisting violations, phantom milestone APIs, punctuation, geofence rewrite	ISSUE
+18427	fix(api): restore express-validator dep + publicTrackingRoutes parse + /history (fixes #18426)	PR
+18426	fix(api): express-validator dropped from package.json by ea533a2f92 — fresh installs cannot boot (validate.js imports it)	ISSUE
+18423	fix(api): outboxRelayWorker reconstructed — gutted on main (fixes #18422)	PR
+18422	fix(api): outboxRelayWorker.js gutted on main — head and tail spliced off; relay unparseable and unstartable	ISSUE
+18337	fix(test): rebuild ml.test.js as a valid vitest suite for predictPrice	ISSUE
+18335	fix(api): remove orphaned escrow-release snippet from DeliveryVerificationService	ISSUE
+18314	chore(api): remove the dead CommonJS escrow chain + artifact files (fixes #18312)	PR
+18312	chore(api): dead CommonJS escrow chain (unloadable in ESM package, unmounted) + trailing-dot/typo artifact files in services/	ISSUE
+18302	fix(api): circuit-breaker double-count + malwareScanner splice/case-dupe + pattern normalization (fixes #18301)	PR
+18301	fix(api): circuit breaker double-counts CLOSED-state successes + malwareScanner stacked throws + case-colliding duplicate	ISSUE
+18300	fix(api): services/ml.js splice removed + trip-aware /api/ml/eta restored (fixes #18299)	PR
+18299	fix(api): services/ml.js is two files spliced (unparseable) + GET /api/ml/eta lost the trip-aware contract (#8761/#9632)	ISSUE
+18298	test(api): escapeLike + apiResponse suites aligned (fixes #18297)	PR
+18297	test(api): escapeLike + apiResponse suites reference a removed helper / predate pagination normalization	ISSUE
+18296	fix(api): driver statement payout enrichment + sorting + CSV restored; header guard warn-once (fixes #18295)	PR
+18295	fix(api): driver statement endpoint lost payout enrichment, sorting, CSV export, and bid_amount — statements show wrong payouts	ISSUE
+18292	fix(api): restore orderRoutes.js parseability + swagger YAML repairs + mint docblock (fixes #18291)	PR
+18291	fix(api): orderRoutes.js unparseable on main (route splices + orphan blocks) + swagger YAML damage poisoning every OpenAPI suite	ISSUE
+18290	fix(api): notificationService splice residue + worker suite repairs (fixes #18289)	PR
+18289	fix(api): notificationService.js throws at import — '// Before' splice residue executing at module top level	ISSUE
+18288	test(api): drop the duplicate dead TelemetryBuffer suites (fixes #18287)	PR
+18287	test(api): duplicate TelemetryBuffer suites import a module that has never existed	ISSUE
+18285	fix(api): consolidate the case-colliding WebRTCSignalingServer pair (fixes #18284)	PR
+18284	fix(api): case-colliding WebRTCSignalingServer duplicate — two divergent files, one unshippable on macOS/Windows	ISSUE
+18283	fix(api): repair the auth.js splice — middleware is a hard SyntaxError on main (fixes #18282)	PR
+18282	fix(api): src/middleware/auth.js is a hard SyntaxError on main — three concatenated versions of the file	ISSUE
+18276	test(api): telemetry_EventTracer.test.js tests an API EventTracer.js does not have	ISSUE
+18275	fix: make refresh-token rotation database-authoritative so it is corr…	PR
+18273	Implement ML_API_KEY and headers construction	PR
+18267	fix(api): restore reconnect subscription restoration + repair the tracker suite (fixes #18266)	PR
+18266	fix(api): reconnecting WebSocket clients lose all subscriptions — restoreSubscriptions body lost to a merge splice; tracker suite unloadable on main	ISSUE
+18265	Kafka event partitioning and stats directory path	PR
+18264	fix(api): restore atomic+idempotent order creation (#11434/#7135) + repair the orders suite (fixes #18263)	PR
+18263	fix(api): order creation lost atomicity + durable idempotency (#11434/#7135) to a merge accident — duplicate orders on client retries	ISSUE
+18262	Ring signatures implementation	PR
+18261	Dao auth request hanging	PR
+18260	fix(api): restore bid routes regressed by 06fc87a72e + repair the bids suite (fixes #18259)	PR
+18259	fix(api): bid submission/acceptance broken on main — 06fc87a72e regressed the routes away from the service contract	ISSUE
+18258	test(api): authVerifyOtp + authVerifyToken suites (fixes #18257)	PR
+18257	test(api): authVerifyOtp + authVerifyToken suites broken — mock drift + splice-lost mock declaration	ISSUE
+18256	test(api): shared app-infra mock harness (#17628) + the repairs it surfaced (fixes #18255)	PR
+18255	test(api): shared app-infra mock harness (issue #17628) + the repairs it surfaced	ISSUE
+18252	fix(api): truck search had two divergent cache layers — route manual redis + cacheMiddleware (fixes #17639)	PR
+18250	fix(pqc): mlkem 0.2 API drift — top-level imports, key objects, framing-aware tests (fixes #18249)	PR
+18249	bug(pqc): mlkem 0.2 API drift — kyber_relayer imports/uses the old submodule layout + raw-bytes keys; hybrid_crypto tests predate the framing header	ISSUE
+18247	fix(api): fuelAdvisor + truckSearchFilter — CJS require bypassed mocks; seed/column drift; mongo limit chain (fixes #18246)	PR
+18246	bug(api): fuelAdvisor + truckSearchFilter suites broken — CJS require bypasses mocks; seed/column drift (trip_id, metadata); mongo mock lacks .limit	ISSUE
+18228	fix(api): wimBypass splice — braces, imports, measurement construction, fail-closed ordering; logger pretty transport off in tests (fixes #18227)	PR
+18227	bug(api): wimBypass route fails to parse + handler gaps (missing measurement, undeclared isVerified/LBS_PER_TONNE); fail-closed ordering; logger pretty transport crashes tests	ISSUE
+18196	fix(api): syncWeightSchema contradicts the endpoint's wire contract — the endpoint was unusable (fixes #18195)	PR
+18195	bug(api): syncWeightSchema contradicts the sync-weight endpoint's wire contract — the endpoint is unusable	ISSUE
+18190	fix(api): restore driver-location + route-geometry endpoints dropped by the bid-route refactor (fixes #18189)	PR
+18189	bug(api): GET /api/orders/:id/driver-location and /:id/route are gone — deleted as collateral by the bid-route refactor (06fc87a72)	ISSUE
+18184	fix(api): restore the PoD upload route lost to a splice (fixes #18183)	PR
+18183	bug(api): POST /api/orders/:id/pod is gone — the route registration was lost to a splice (imports survived, handler didn't)	ISSUE
+18128	fix(routes): remove unimported HealthRoutes.js duplicate (fixes #18127)	PR
+18127	fix: HealthRoutes.js is an unimported duplicate of healthRoutes.js	ISSUE
+18105	fix(api): never-funded escrow ('pending') fell through to the misleading status-change 409 (fixes #18104)	PR
+18104	bug(api): never-funded escrow ('pending') falls through to the misleading status-change 409 — release RPC can run against unfunded escrow	ISSUE
+18098	fix(graphql): orderCurrency suite used node:test inside a vitest run (fixes #18097)	PR
+18097	bug(graphql): orderCurrency suite imports node:test — vitest finds zero suites in the file; node_modules stale	ISSUE
+18096	fix(kafka): aggregate-key ordering + version preservation; stats cover stored statuses; test mocks repaired (fixes #18095)	PR
+18095	bug(kafka): events keyed by unique eventId scatter aggregates across partitions; version clobbered to 1.0; stats miss stored statuses	ISSUE
+18094	fix(dao): JWT rejection hung the request — verifySupabaseJwt never settles its callback on 401 (fixes #18093)	PR
+18093	bug(dao): rejected DAO auth requests hang forever — verifySupabaseJwt never settles its callback on 401	ISSUE
+18092	fix(privacy): implement real LSAG ring signatures — the old one never used the private key and had no verifier (fixes #18091)	PR
+18091	bug(privacy): ring signatures are fake — private key never used, no verifier exists	ISSUE
+18090	fix(quantum): QUBO route formulation — linear objective keys, double measure_all, late flow vars break scipy broadcast (fixes #18089)	PR
+18089	bug(quantum): QUBO route formulation broken — tuple-keyed linear objective, double measure_all, late flow vars break scipy broadcast	ISSUE
+18088	Update namspace.yaml	PR
+18081	Update index.js	PR
+18080	Performance stats earnings unit conversion	PR
+18079	fix(truckRoutes): remove duplicate name filter	PR
+18066	Implement mock weigh station bypass eligibility service	PR
+18065	Refactor checkBypassEligibility with logging and mock response	PR
+18047	bug: Replace console.log with Centralised logger	ISSUE
+18046	feat: Connect ML Pricing Routes to Actual Prediction Service	ISSUE
+18036	bug(telemetry): delayed observations replace fresh driver locations	ISSUE
+18035	build(deps): bump the npm_and_yarn group across 2 directories with 1 update	PR
+18032	fix(imitation): recover rejected native cloning transitions	PR
+18031	bug(imitation): continuous cloning accepts corrupt native Adam candidates	ISSUE
+18028	fix(ssl): publish owned native checkpoint tuples (fixes #18027)	PR
+18027	bug(ssl): checkpoint loading publishes partial native model and AdamW state	ISSUE
+18026	fix(imitation): verify owned categorical Adam transitions (fixes #18025)	PR
+18025	bug(imitation): policy fitting accepts corrupted native Adam candidates	ISSUE
+18020	fix(nerf): verify paired native checkpoint restores (fixes #18019)	PR
+18019	bug(nerf): checkpoint restore mutates live state before native Adam validation	ISSUE
+18006	fix: keep idempotency lock held until the handler finishes when the c…	PR
+17871	fix(foundation): preserve observed inference tokens and vocabulary	PR
+17870	bug(foundation): prediction invents observed tokens and corrupts active vocabulary	ISSUE
+17854	Add structured error logging escrow service	PR
+17852	Refactor support ticket routes and add validation	PR
+17844	Enhance auth middleware with logging for missing token	PR
+17838	Enhance documentation for OSRM service functions	PR
+17829	Refactor admin routes and update OpenAPI docs	PR
+17827	Add driver_details table to Supabase setup	PR
+17814	fix: remove trailing-dot duplicate files that overwrite the escrow fu…	PR
+17813	Driver confirm otp type cast error	PR
+17791	Fix/blockchain monitor event loss on handler failure	PR
+17790	fix: repair routes/wimBypass.js, whose bad merge (7a0a99b57) left POS…	PR
+17692	Refactor secure storage for web and mobile handling	PR
+17684	Fix/redis lock owner fencing and lease renewal	PR
+17681	feat: Add progressive route-deviation detection for active trips	ISSUE
+17680	fix: prevent duplicate driver payouts when an ambiguous withdrawal di…	PR
+17641	test(api): integration suites' db mocks missing exports current code imports (fixes #17640)	PR
+17640	test(api): four integration suites' db mocks lack exports current code imports (createUserClient/redisClient/getAdminClient/upstashRedisClient)	ISSUE
+17639	test(api): truckSearchCache suite 500s in the search handler — needs the driver/truck enrichment mock surface	ISSUE
+17627	fix(api): repair the server entry and extract src/app.js for the integration suites (fixes #17626)	PR
+17626	bug(api): src/index.js has two interleaved startup variants (duplicate PORT/listen, routes after export) and src/app.js never existed	ISSUE
+17574	bug(ml): MTL PCGrad crashes — per-task gradient vectors have ragged lengths; init test calls MultiTaskModel without tasks	ISSUE
+17567	fix(ml): repair the traffic/ETA patch chain — recursion, degraded flag, ETA formula, route signature (fixes #17566)	PR
+17566	bug(ml): traffic/ETA patch chain broken — ingest recursion, missing degraded flag, wrong ETA formula, unread versioned cache	ISSUE
+17522	test: carbon suite still expects the fabricated chain proofs	ISSUE
+17419	test(ml): remove the stale ml.recommendLoads.test.js (fixes #17418)	PR
+17418	test: ml.recommendLoads.test.js exercises an export 326273539 deliberately removed	ISSUE
+17404	[Feature] Add Unsaved Form Change Protection to Critical Forms	ISSUE
+17402	fix(lib): remove duplicate safePage const in paginated() — resolves SyntaxError on import (fixes #17343)	PR
+17394	Fix stale notification service tests	PR
+17385	fix(carbon): restore the mint validation and owner binding lost to a merge (fixes #17383)	PR
+17383	bug(carbon): merge dropped the mint route's owner binding, identifier guard and single-trip thresholds — unowned, unvalidated credits can be minted	ISSUE
+17367	Fix redis lock null guard test	PR
+17343	bug: lib/apiResponse.js declares safePage twice — SyntaxError breaks every importer	ISSUE
+17342	fix(auth): drop duplicate authenticate restored by a bad merge; unblock the backend suite (fixes #17341)	PR
+17341	bug: middleware/auth.js declares authenticate twice — SyntaxError at import time blocks the whole backend test suite	ISSUE
+17273	test: outbox suites assert pre rename columns and two arg failure calls	ISSUE
+17269	test: delivery verification lock cases use the dummy OTP and retired lock API	ISSUE
+17261	fix: voice service crashes on import without credentials and tests target a phantom API	ISSUE
+17239	fix: paginated helper ignores minimum limit and misreports next page at the end	ISSUE
+17180	fix: avoid caching ABE master secret at module import	ISSUE
+17136	P0: backend entry src/index.js does not parse, API cannot boot on main	ISSUE
+17127	fix(escrow): eliminate duplicate release update and ensure driver wallet credit (fixes #17122)	PR
+17124	test: three sendNotification cases still use a retired object-form API	ISSUE
+17122	bug(escrow): duplicate release mutation in handlePaymentReleased aborts driver wallet credit and poisons webhook DLQ	ISSUE
+17100	test: auth.test.js has 19 failing cases against current middleware behavior	ISSUE
+17081	Fix/escrow dispute timelock	PR
+17080	fix: prevent outbox relay marking failed publishes as published	PR
+17079	Fix/profile debug comments 1316	PR
+17078	Fix/remove profile debug markers	PR
+17067	fix(escrow): add idempotency and concurrency guards to order cancellation flow (fixes #11242)	PR
+17066	fix: guard null truckId in truckSearchService (#14445)	PR
+17061	fix(resilience): retain native recovery and circuit ownership (fixes #17060)	PR
+17060	bug(resilience): shared breaker loses circuit-generation and native probe ownership	ISSUE
+17057	fix(notifications): fence FCM lifecycle outcomes against token rotation (fixes #17056)	PR
+17056	fix(notifications): fence delayed FCM lifecycle outcomes against token rotation	ISSUE
+17055	fix(telemetry): recover partial bulk failures per record (fixes #17054)	PR
+17054	bug: telemetry bulk recovery drops retryable records in mixed native Mongo failures	ISSUE
+17053	fix(telemetry): bound shutdown with owned recovery (fixes #17052)	PR
+17052	bug: telemetry shutdown stalls on owned writes and can delete failed recovery	ISSUE
+17050	fix(sharding): own native checkout and query deadlines (fixes #17049)	PR
+17049	bug: cross-shard pool checkout dispatches SQL after caller deadline	ISSUE
+17048	fix(eta): fence persisted estimates by database generation (fixes #17040)	PR
+17047	fix(api): prevent client GPS spoofing in geofence confirmation	PR
+17046	test(notification): add unit tests for NotificationService sendNotification and FCM fan-out (fixes #12253)	PR
+17045	fix(trucks): use authenticated client for registration	PR
+17042	Update bug_report.mdbug: Improve Battle Mode accessibility and respon…	PR
+17041	Update bug_rfix: improve Battle Mode accessibility and responsive lay…	PR
+17040	bug: checked stale ETA calculation can overwrite a newer persisted result	ISSUE
+17039	bug: bug: Geofence delivery confirmation trusts client-supplied GPS coordinates	ISSUE
+17038	fix(tracker): isolate fanout failures and bound queued frames (fixes #17037)	PR
+17037	bug: tracker fanout stops on one failed socket and admits unbounded queued frames	ISSUE
+17036	fix(osrm): bound live routing cache body and retry lifetime	PR
+17033	bug: live OSRM routing lacks a total cache/body/retry deadline	ISSUE
+17032	fix(dlq): fence admission and settlement by leased attempt (fixes #17031)	PR
+17031	bug: webhook DLQ settlements ignore claim generation and lease expiry	ISSUE
+17029	Backend/api/test/unit/tracker.test.js	PR
+17026	fix(workers): retain stale-order lease ownership (fixes #17021)	PR
+17023	Backend/api/src/services/osrm	PR
+17021	fix(workers): restore stale-order sweep lease ownership and admission	ISSUE
+17020	Backend/api/src/index.js	PR
+17018	fix(relay): constrain great-circle corridor planning (fixes #17016)	PR
+17016	fix(relay): constrain great-circle corridor planning and hub snapping	ISSUE
+17015	perf(fraud): aggregate risk history in one database snapshot (fixes #17014)	PR
+17014	perf(fraud): aggregate risk history in one database snapshot	ISSUE
+17006	Backend/api/src/routes/order routes	PR
+17001	Paginated clamp negative page	PR
+17000	fix(rpc): isolate recovery probe ownership and stale feedback (fixes #16999)	PR
+16999	fix(rpc): isolate recovery probe ownership and stale circuit feedback	ISSUE
+16998	fix(routing): preserve complete delivery-stop permutations (fixes #16997)	PR
+16997	fix(routing): preserve delivery stops when OSRM returns an invalid permutation	ISSUE
+16996	fix(cold-chain): atomically bound Redis telemetry windows (fixes #16995)	PR
+16995	fix(cold-chain): atomically bound Redis telemetry windows and preserve error fallback	ISSUE
+16994	fix(traffic): retain shared native provider ownership (fixes #16992)	PR
+16992	fix(traffic): coalesce provider work with retained native admission	ISSUE
+16991	perf(ml): coalesce cached outbound prediction ownership (fixes #16990)	PR
+16990	perf(ml): coalesce and bound cached outbound prediction ownership	ISSUE
+16987	bug: Add telugu and complete Hindi/ Tamil - closes phase 5 multilanguage	ISSUE
+16980	fix(workers): retain device-pruning leases and drain bounded batches	PR
+16979	fix(workers): fence device pruning leases and drain bounded batches	ISSUE
+16962	fix(kafka): prevent duplicate event processing on stale reclaim	PR
+16957	bug: Missing Null Guard in ML Model Prediction Validator	ISSUE
+16956	bug: Unchecked Null Buffer in Malware Scanner Utility	ISSUE
+16955	bug: Uncaught TypeError on Null Input in orderDisplayId.js	ISSUE
+16954	bug: Negative Offset Query Vulnerability in pagination.js	ISSUE
+16953	bug: NaN Weight Value Propagation in ml.js	ISSUE
+16952	bug: Missing null Guard in Anomaly Detection Service	ISSUE
+16951	bug: Unreferenced Catch Variable in CacheEvent.js	ISSUE
+16950	bug: Unstructured Error Logging in CacheManager.js	ISSUE
+16949	bug: Unstructured console.log Calls in Health Routes	ISSUE
+16948	bug: Error Swallowing in Base64 Cursor Pagination Decoder	ISSUE
+16947	bug: NaN Propagation from Environment Variables in compression.js	ISSUE
+16946	bug: Missing OTP Value in Push Notification Payload	ISSUE
+16945	bug: Notification Type Mismatch in Delivery OTP Flow	ISSUE
+16944	bug: Equator and Prime Meridian Coordinate Rejection in trafficService.js	ISSUE
+16943	bug: Redundant Duplicate Status Code Check in retry.js	ISSUE
+16942	bug: Negative Page Boundary Calculation in apiResponse.js	ISSUE
+16941	bug: Unhandled JSON Parsing in OPA Policy Service	ISSUE
+16940	bug: Uncaught JSON.parse on WASI Runtime Stdout	ISSUE
+16939	bug: Missing Request Timeout in Voice AI Service	ISSUE
+16938	bug: Unhandled JSON.parse in Snyk Security Service	ISSUE
+16934	Guard ml base url trim	PR
+16933	fix(pod): persist fenced retries and dead-letter recovery (fixes #11231)	PR
+16917	Backend/api/src/middleware/api key.js	PR
+16915	Backend/api/test/unit/services/reputation.test.js	PR
+16911	Backend/api/src/routes/verification routes.js	PR
+16905	Improve FCM token update route with validation and error handling	PR
+16891	Backend/api/src/routes/order route	PR
+16887	Backend/api/src/services/ml.js	PR
+16885	Backend/api/test/unit/profile cache.test.js	PR
+16844	Backend/api/test/unit/document validation.test.js	PR
+16843	Backend/api/test/unit/pricing.test.js	PR
+16840	Backend/api/src/lib/profile cache.js	PR
+16838	Apps/driver/lib/screens/trips screen.dart	PR
+16827	title :Backend/api/src/services/escrow	PR
+16824	fix(traffic): validate zero-valued coordinates correctly	PR
+16819	Backend/kafka/test/order.read.model.test.js	PR
+16818	Backend/api/src/routes/order routes.js	PR
+16814	feat(driver): add driver statement and earnings report	PR
+16800	Add EscrowService for deposit verification and scaling	PR
+16799	fix: avoid caching ABE master secret at module import	PR
+16796	refactor: keep CROSS_DOCK_STATUSES private to crossDockService	PR
+16795	bug: Geofence delivery confirmation trusts client-supplied GPS coordinates	ISSUE
+16794	Await supabase rpc outbox retry count	PR
+16793	fix(ai): move estimate_ate to DoCalculus class scope	PR
+16791	Refactor Causal Inference code for clarity and structure	PR
+16790	Unauthorized Shipment Status Update (CWE-639 IDOR)	PR
+16789	Unauthorized Shipment Status Update (CWE-639 IDOR)	ISSUE
+16783	refactor: upgrade project to OpenZeppelin v5 and resolve contract migrations	PR
+16776	WebGLMemoryReclaimerService does not actually reclaim WebGL/Canvas me…	PR
+16775	WebGLMemoryReclaimerService does not actually reclaim WebGL/Canvas memory	ISSUE
+16765	Update auth.js	PR
+16752	Order controller syntax error and missing apperror import	PR
+16751	Auth controller duplicate declaration and missing imports	PR
+16732	Handle missing bottleneck metrics in root cause analysis	PR
+16724	Kafka adapter UUID dependency issue	PR
+16707	feat(web): add desktop PWA installation support	PR
+16702	fix(api): restore circuit breaker timeout abort and timer unref	PR
+16698	Render scheduler duplicate export and test path	PR
+16684	git commit -m "feat: add responsive customer home dashboard"	PR
+16678	Liquibase optional db env directory path	PR
+16674	fix(orders): restore create order route	PR
+16668	Osrm retry backoff clamp	PR
+16667	Missing mock exports limiter admin client	PR
+16660	Utc earnings period cutoff tz mismatch	PR
+16658	perf(web): optimize Flutter Web CanvasKit bundle size, font tree-shaking, and asset preloading	ISSUE
+16652	feat(ui): desktop split-screen load booking and interactive route visualizer	ISSUE
+16651	feat(ui): responsive desktop home dashboard with multi-column freight overview	ISSUE
+16645	feat(notifications): Firebase Cloud Messaging web push and service worker architecture	ISSUE
+16644	feat(realtime): resilient WebSocket client with tab suspension lifecycle and backoff reconnect	ISSUE
+16641	feat(auth): browser-safe token storage and Web Crypto persistence for Customer Web	ISSUE
+16638	Invalid openapi yaml internal routes	PR
+16632	Issue number short description	PR
+16631	Event store syntax error 16484	PR
+16623	Gpslog esm location bounds 16570	PR
+16621	Update ml.js	PR
+16605	Dao service init guard	PR
+16589	README repository links	ISSUE
+16588	docs: fix outdated Truxify repository links in README	ISSUE
+16584	feat: Implement Reliable Driver Location Tracking with Offline Recovery	ISSUE
+16581	Add payment routes helper with OpenAPI documentation	PR
+16574	fix(auth): split monolithic apiKey.js into focused API-key modules	PR
+16570	bug:  gpslog-esm-location-bounds	ISSUE
+16539	fix(voice): prevent raw AI content in logs	PR
+16502	bug: /api/internal/pause-escrow and defensive-pause are missing from API docs — their @openapi YAML is invalid	ISSUE
+16454	test: add unit tests for core/health/index.jstest: add health index unit tests	PR
+16451	Feat/ml retraining n8n pipeline	PR
+16450	test: added unit tests for the zkp service	PR
+16426	feat: On-Device Edge Telematics for Driver Fatigue & Safety Scoring	ISSUE
+16422	feat: Escrow-Backed Fuel & Working Capital Micro-Advance System	ISSUE
+16421	feat: Automated e-Way Bill & GST Compliance Gateway	ISSUE
+16409	docs(api-reference): document biometric authentication endpoints	PR
+16408	[bug] Document biometric authentication endpoints in API reference	ISSUE
+16384	docs(api): document ML en-route load matching endpoint	PR
+16383	[bug] Document ML en-route load matching endpoint in OpenAPI	ISSUE
+16376	docs(api): document road-condition telemetry endpoints	PR
+16375	[bug] Document road-condition telemetry endpoints in OpenAPI	ISSUE
+16372	docs(api): add OpenAPI contract for cross-dock routes	PR
+16371	[bug] Add missing OpenAPI documentation for cross-dock endpoints	ISSUE
+16350	test(api): add OpenAPI and route-contract coverage for privileged operations	PR
+16349	[feature] Add OpenAPI and route-contract coverage for privileged operational APIs	ISSUE
+16348	test(api): add OpenAPI and route-contract coverage for tokenization and atomic swap	PR
+16347	[feature] Add OpenAPI and route-contract coverage for tokenization and atomic-swap APIs	ISSUE
+16346	test(api): add OpenAPI and route-contract coverage for ZK-ID, DAO, and MEV	PR
+16345	[feature] Add OpenAPI and route-contract coverage for ZK-ID, DAO, and MEV APIs	ISSUE
+16344	fix(did): resolve on-chain owner mismatch and secure fallback credent…	PR
+16340	fix(consolidation): implement CMVR axle weight statics and 3D LIFO pa…	PR
+16339	bug(consolidation): ltlConsolidation Omits CMVR Axle Weight Statics and 3D LIFO Drop Sequencing Causing Severe Axle Overloads	ISSUE
+16337	Fix/issue 16331 ebol signature tamper seal	PR
+16331	bug(ebol): smartEbol Allows Unauthorized Delivery Signatures Without Cryptographic Non-Repudiation or Tamper-Seal Verification	ISSUE
+16318	Refactor duplicated haversine distance logic to use shared utils/coordinates.js	ISSUE
+16317	Refactor haversine distance logic to shared utility	PR
+16316	Fix/maintenance photo rpc	PR
+16315	fixed correction	PR
+16312	fix(backend): ensure insertNotification is properly awaited and error…	PR
+16311	fix(quantum): validate edge endpoints against declared nodes	PR
+16310	[bug] Quantum route optimization accepts edges that reference undeclared nodes	ISSUE
+16309	fix(quantum): reject routes that omit declared nodes	PR
+16308	[bug] Quantum route decoder can accept a route that omits declared nodes	ISSUE
+16307	test(backend): expand shardRoutes unit test suite (#13792)	PR
+16305	fix(quantum): preserve parallel road edges in route optimization	PR
+16304	[bug] Quantum route optimization collapses parallel road edges	ISSUE
+16303	fix(quantum): preserve node IDs containing underscores	PR
+16302	[bug] Quantum route decoding breaks node IDs containing underscores	ISSUE
+16299	test: expand validate middleware coverage	PR
+16295	feat(zkp): implement 1-of-5 range rating proof and nullifier anti-replay defense	PR
+16293	feat(telematics): implement SAE J1939 CAN-bus OTA frame packaging and moving gradient filter	PR
+16289	feat(telematics): implement emergency distress override and cryptographic signing for CB radio voice streams	PR
+16287	feat(dispatch): implement weight-degraded fuel economy and multi-axle toll optimization engine	PR
+16284	fix(auction): resolve concurrent bid races, solvency locking, and ant…	PR
+16282	feat(sustainability): implement GLEC carbon calculation and cryptographic certificate verification	PR
+16247	bug: Unprotected Concurrent Bid Submission Allows Front-Running, Zero-Collateral Bids, and Lacks Anti-Sniping Protection	ISSUE
+16211	fix: make delivery verification idempotent	PR
+16205	fix: secure Mistral prompt boundaries	PR
+16198	fix: secure Mistral prompt boundaries	PR
+16111	fix(deadhead): reject missing and invalid coordinates	PR
+16110	[Bug report] Deadhead matching treats missing coordinates as (0, 0)	ISSUE
+16099	fix(gnn): normalize objective costs before multi-objective scoring	PR
+16098	[Bug] GNN multi-objective route scoring depends on raw metric units	ISSUE
+16097	fix(gnn): separate node embeddings from graph-level prediction	PR
+16096	[Bug] GNN training and route inference use inconsistent output representations	ISSUE
+16094	bug: ISSUE_TEMPLATE/bug_report.md	ISSUE
+16054	fix(delivery): resolve isGeofenced ReferenceError and implement cryptographic ePOD verification routes	PR
+16008	fix(ml): honor requested traffic forecast horizon	PR
+16007	[bug] Traffic forecast ignores the requested forecast horizon	ISSUE
+16006	fix(ml): move synchronous traffic DB I/O off the async event loop	PR
+16005	[bug] Traffic pipeline performs synchronous database I/O inside async handlers	ISSUE
+16004	fix(eta): reuse OSRM route data during realtime ETA updates	PR
+16003	[bug] ETA update performs duplicate OSRM requests for the same route	ISSUE
+16000	fix(gnn): scope real-time route reoptimization to affected traffic	PR
+15999	[bug] GNN real-time routing reoptimizes for unrelated traffic changes	ISSUE
+15998	fix(gnn): preserve nondominated labels during constrained route search	PR
+15997	[bug] GNN constrained route search can discard feasible paths under HOS time limits	ISSUE
+15989	fix(gnn): preserve edge direction in real-time traffic updates	PR
+15988	[Bug] Real-time traffic updates can modify the wrong directed road edge	ISSUE
+15987	fix(gnn): reroute real-time updates from the vehicle's current position	PR
+15986	[Bug] Real-time rerouting starts from the original route origin instead of the vehicle's current position	ISSUE
+15971	fix(gnn): centralize multi-objective route weights	PR
+15970	[Bug] Keep representative-route objective weights consistent across GNN optimization paths	ISSUE
+15969	fix(traffic): use OSRM route speed as reference speed	PR
+15968	[Bug] Avoid inventing an inflated OSRM free-flow reference speed	ISSUE
+15955	fix(eta): stream historical training data in bounded batches	PR
+15954	[bug] ETA model training materializes historical data without a bounded memory strategy	ISSUE
+15953	fix(gnn): bound exact Pareto search resources	PR
+15952	[bug] Exact Pareto route search has no bounded resource budget	ISSUE
+15924	fix(security): fail closed on unknown hazmat road restrictions	PR
+15923	[bug] GNN hazmat routing treats missing road restrictions as permitted	ISSUE
+15903	fix(gnn): evaluate validation data during training	PR
+15902	[bug] GNN training accepts validation data without evaluating it	ISSUE
+15899	fix(gnn): ignore traffic updates for inactive graph edges	PR
+15898	[bug] GNN route updates accept traffic data for edges outside the active graph	ISSUE
+15848	fix(gnn): reject non-finite edge and traffic metrics	PR
+15847	[Bug]: GNN route graph accepts NaN and infinite edge metrics	ISSUE
+15846	fix(gnn): respect road direction in realtime traffic updates	PR
+15845	[Bug]: Real-time traffic updates can be applied to the wrong road direction	ISSUE
+15823	fix(routing): replace undeclared axios dependency with native fetch	PR
+15805	fix: Missing axios dependency causes runtime crash in routingController and osrmService	ISSUE
+15782	fix(security): bind encryptedData to ZKPrivacy commitment	PR
+15781	[bug] ZKPrivacy does not bind encryptedData to private transaction commitment	ISSUE
+15669	fix(api): use exported auth middleware	PR
+15626	## Bug: Negative ETA displayed for active orders	ISSUE
+15587	feat(api): add idempotency protection for order and bid creation	PR
+15415	[FEATURE] Add estimated delivery time and ETA updates for active orders	ISSUE
+15398	Enforce resource ownership checks on order and trip operations	ISSUE
+15390	bug: [BUG][API] Prevent duplicate driver location updates from creating stale tracking state	ISSUE
+15208	feat(api): add idempotency protection for order and bid creation	ISSUE
+14857	concurrency : Kafka consumer re-applies exactly-once side effects when an event is reclaimed after the 5-min stale window	ISSUE
+14818	orderRoutes.js has two export default router statements at HEAD - module cannot load, API boot fails even after the duplicate createOrder import is fixed	ISSUE
+14582	refactor : remove unused i18nMiddleware from middleware/i18n.js	ISSUE
+14581	refactor : stop exporting internal PAISA_WEI_SCALE and ESCROW_AMOUNT_TOLERANCE_WEI in escrow.js	ISSUE
+14566	refactor : deduplicate validateCoordinateRange between shardMiddleware.js and shardRoutes.js	ISSUE
+14490	refactor : remove dead sanitizeLoadFilters helper from loadRoutes.js	ISSUE
+14464	fix : guard against null err in loadRoutes catch handler	ISSUE
+14445	fix : add null guard for truckId in truckSearchService	ISSUE
+14366	fix : validate tripId is a UUID in trackingTokenService	ISSUE
+14365	test : add unit tests for withdrawalSettlementWorker	ISSUE
+14364	test : add unit tests for devicePruningWorker	ISSUE
+14363	test : add unit tests for i18n middleware	ISSUE
+14362	fix : validate routeId is a non-empty string in routeRoutes	ISSUE
+14361	fix : add NaN guard in fuelAdvisorService calculateFuelEfficiency	ISSUE
+14360	fix : guard against null sessionId in requestContext middleware	ISSUE
+14359	fix : add null guard for null driverId in getDriverRoute	ISSUE
+14358	test : add unit tests for app index.js	ISSUE
+14357	test : add unit tests for orderRoutes.js	ISSUE
+14356	test : add unit tests for paymentRoutes.js	ISSUE
+14355	test : add unit tests for orderController.js	ISSUE
+14354	test : add unit tests for zkp.routes.js	ISSUE
+14353	test : add unit tests for voice.routes.js	ISSUE
+14352	test : add unit tests for TraceMiddleware.js	ISSUE
+14351	test : add unit tests for wim.js config	ISSUE
+14350	test : add unit tests for WorkerEventAdapter.js	ISSUE
+14349	test : add unit tests for read-model-schema.js	ISSUE
+14348	test : add unit tests for zkp.service.js	ISSUE
+14338	fix : add NaN guard to getRushHourMultiplier in trafficService	ISSUE
+14310	fix(rateLimiter): remove dead adminRateLimiter export	ISSUE
+14291	fix : add missing await on async insertNotification call in notificationService	ISSUE
+14274	fix : close if block in supabaseMock.js to fix parse error	ISSUE
+14222	fix : remove duplicate submitFlashbotsBundle definition in MEVService	ISSUE
+14213	fix : remove duplicate supabaseAdmin import in deviceController so module loads	ISSUE
+14038	test : add unit tests for workZoneService.js	ISSUE
+14033	test : add unit tests for audioValidation.js detectAudioMimeType and validateAudioBuffer	ISSUE
+13887	DID createDID is signed by the relayer wallet (on-chain owner mismatch) and fallback credentialId derivation is wrong	ISSUE
+13885	Transaction anomaly detection can never fire: the rolling window is keyed per transaction_id, so every window is a constant	ISSUE
+13876	Diffusion model cannot accept conditioned / start-end inputs (conditional & route generation crash; geometry ignored)	ISSUE
+13875	Biometric 'login' shows success but never authenticates the user	ISSUE
+13874	Supabase migrations contain byte-identical duplicates (replay / applied-ledger divergence risk)	ISSUE
+13873	DAO governance: votes are signed by the server wallet and all /dao routes are unauthenticated (impersonation)	ISSUE
+13862	test : add unit tests for lib/lruCache.js LRUCache class	ISSUE
+13859	fix : remove query string API key acceptance from requireApiKey middleware	ISSUE
+13858	fix : add Number.isFinite guard for value in lruCache clampMaxKeys	ISSUE
+13857	fix : add error parameter to reverseGeocode catch block for logging	ISSUE
+13856	fix : add comment documenting emitSafe return value in outboxRelayWorker	ISSUE
+13822	fix : notificationService silently drops errors on Redis publish	ISSUE
+13815	fix : osrm routeWithFailover catch block references undefined err variable	ISSUE
+13813	fix : malwareScanner silently swallows scan errors without logging	ISSUE
+13808	fix : correct wrong escaping order in escapeLike that double-escapes backslashes	ISSUE
+13792	test : add unit tests for routes/shardRoutes.js	ISSUE
+13766	fix(apiResponse): hasNextPage is off-by-one, false on second-to-last page	ISSUE
+13598	fix : strengthen coordinate boundary validation in reverseGeocode after NaN check	ISSUE
+13596	fix : add Number.isFinite guard in parseDecimal in driverEarningsReportService	ISSUE
+13521	fix : await emitSafe listeners before marking event published in outboxRelayWorker	ISSUE
+13494	fix : correlationId missing runWithCorrelationId/getCorrelationStore exports	ISSUE
+13488	fix : osrm route cache key rounds coordinates to 8 decimals but contract expects 6	ISSUE
+13485	fix : escrow deposit-tx early value guard shadows driver/amount/booking checks	ISSUE
+13449	test : add unit tests for DigilockerService	ISSUE
+13344	fix : await supabase.rpc call before using result in outboxService	ISSUE
+13307	POST /api/orders/:id/ratings has no route - submitRatingSchema is a dead import and the customer app 404s when rating a driver	ISSUE
+13305	Driver submitBid POST /api/orders/:id/bids returns 404 - submitBidSchema and bidLimiter are dead imports, only GET /api/driver/bids exists	ISSUE
+13304	fetchEnRouteLoads GET /api/orders/load-offers/en-route returns 404 - matchEnRouteLoads is imported but never registered	ISSUE
+13256	fix : use req.params.id in geofence-confirm route handler in orderRoutes.js	ISSUE
+13255	fix : define devIdentity or use x-user-id header in auth.js dev bypass	ISSUE
+13245	test : add unit tests for core/health/index.js	ISSUE
+13238	test : add unit tests for services/zkp/zkp.service.js	ISSUE
+13212	[BUG][api/backend][P2] uploadFilename.test.js fails to load - duplicate vitest import at line 107; upload-filename sanitization tests never run	ISSUE
+13205	[BUG][api/backend][P2] profileCache.test.js fails to load - duplicate vitest import at line 40; profile-cache tests never run	ISSUE
+13029	fix : remove emojis from logger calls in escrow.js	ISSUE
+12913	test : add unit tests for PostgresHealth.js	ISSUE
+12903	fix : test	ISSUE
+12900	fix	ISSUE
+12898	fix	ISSUE
+12886	test : add unit tests for orderDisplayIdValidation.js	ISSUE
+12885	test : add unit tests for apiResponseHelpers.js	ISSUE
+12884	test : add unit tests for AuthorizationEngine.js	ISSUE
+12883	test : add unit tests for PolicyEvaluator.js	ISSUE
+12882	test : add unit tests for SpanFactory.js	ISSUE
+12881	test : add unit tests for EventBus.js	ISSUE
+12880	test : add unit tests for CachePublisher.js	ISSUE
+12878	fix : replace console.log with logger in healthRoutes.js	ISSUE
+12874	fix : fetchLoadOffers expects bare array but marketplace returns paginated envelope	ISSUE
+12873	fix : register GET /api/orders/load-offers/en-route en-route loads route	ISSUE
+12872	fix : register POST /api/orders/:id/bids driver bid submission route	ISSUE
+12871	fix : register POST /api/orders/:id/ratings driver rating submission route	ISSUE
+12870	fix : register POST /api/orders/:id/bids/:bidId/accept customer bid accept route	ISSUE
+12836	fix : geofence-confirm unreachable at /api/deliveries inside order router	ISSUE
+12834	fix : deleteProfileCache swallows Redis del errors in empty catch blocks	ISSUE
+12770	[BUG][api/backend][P2] escapeLike.test.js fails to load - duplicate vitest import at line 49; SQL LIKE escaping tests never run	ISSUE
+12756	wasi-runtime: uncaught JSON.parse of wasm stdout crashes on any non-JSON output line	ISSUE
+12473	[BUG][backend][P2] trafficService.js:23 falsy guard rejects valid 0 coordinates — traffic multiplier silently skipped at equator/prime meridian	ISSUE
+12451	test : add unit tests for lib/documentValidation.js	ISSUE
+12447	test : add unit tests for lib/pricing.js	ISSUE
+12323	fix : guard mlBaseUrl trimmed check before calling ML OCR service	ISSUE
+12322	fix : prevent duplicate keyRotationService method declarations	ISSUE
+12312	fix : validate mlApiKey trimmed before using in kyc upload	ISSUE
+12288	fix : tripRoutes GET /:id/events stores display-id but queries by order UUID	ISSUE
+12287	fix : transition escrow funding heal path to funded status instead of leaving order stranded	ISSUE
+12286	fix : verify on-chain txHash in escrowWebhookProcessor before marking order released	ISSUE
+12285	fix : digilockerService bundles an ABI with functions from two different contracts	ISSUE
+12284	fix : validate payout HTTP response body in dispatchPayout before marking transfer as COMPLETED	ISSUE
+12283	fix : write FlashbotsRelay.bundleResults to DB and emit BundleExecuted event after successful submission	ISSUE
+12267	fix : add logger.warn for swallowed error in reputationReconciliation.js	ISSUE
+12265	fix : replace bare catch block in services/escrowCircuitBreaker.js	ISSUE
+12256	test : add unit tests for services/reputation.js	ISSUE
+12223	fix : add type guard for route points as num in trips_screen _buildRouteMap	ISSUE
+12047	shardMiddleware test asserts a default export that does not exist	ISSUE
+12044	hppProtection unit tests reference undefined makeReq/makeRes helpers	ISSUE
+12043	contentType unit tests reference undefined createMocks helper	ISSUE
+12042	trips_screen dead debugPrint placed after return inside .map()	ISSUE
+11921	### Feature: "Swipable" Freight Load Board UI	ISSUE
+11652	test(driver): add unit tests for location_service	ISSUE
+11551	backup.sh: no verification, encryption, retention, or compression of pg_dump	ISSUE
+11496	[Medium] Backend GlobalStore - transaction rollback corrupts undo history and uses shallow snapshots	ISSUE
+11311	fix : remove duplicate escrow_status key in confirm-deposit order update	ISSUE
+11308	fix : rewrite driverEarningsService.test.js against real API shape	ISSUE
+11247	KYC ZK-SNARK Circuit Lets a User Self-Assert `verified` and Uses a Collision-Prone Additive Hash	ISSUE
+11242	Order Cancellation Flow Lacks Idempotency and Has Race Conditions	ISSUE
+11241	Background POD Sync Uses Unreliable Firebase/Supabase Auth in Isolate Context	ISSUE
+11240	Change Drop Reprices Escrow Off-Chain Without Updating On-Chain Booking Amount	ISSUE
+11235	Rating Nullifier Circuit Computes an Invertible Linear Hash, Destroying Privacy and Enabling Linkage	ISSUE
+11231	Background Sync Service Lacks Exponential Backoff and Dead Letter Queue	ISSUE
+11229	Driver App Local Pod Database Has No Migration Strategy and Schema Issues	ISSUE
+11227	Change Drop Endpoint Allows Drop Location Change Mid-Trip Without Validation	ISSUE
+11175	test : add CachePublisher channel subscription deduplication tests	ISSUE
+11174	test : add HealthAggregator slow threshold logging and version reporting tests	ISSUE
+11173	test : add zkp.routes verify endpoint lock and already-verified tests	ISSUE
+11172	test : add voice.routes audio file missing and language edge case tests	ISSUE
+11171	fix : protect transactionMonitor monitorQuery against null query string	ISSUE
+11170	test : add roadConditionRoutes grip data validation tests	ISSUE
+11169	test : add InternalEventAdapter message routing and error handling tests	ISSUE
+11168	test : add BaseEvent serialization and deserialization tests	ISSUE
+11167	test : add EventRegistry duplicate registration and retrieval tests	ISSUE
+11166	test : add EventHandler register and dispatch error propagation tests	ISSUE
+11165	test : add CacheNamespace namespace validation and key building tests	ISSUE
+11164	test : add shardRoutes coordinate parsing boundary value tests	ISSUE
+11163	test : add transactionMonitor monitorQuery null query protection tests	ISSUE
+11162	test : add WorkerEventAdapter worker message error handling tests	ISSUE
+11161	test : add KafkaAdapter message handling null payload and error tests	ISSUE
+11160	test : add CacheEvent invalid type and missing namespace tests	ISSUE
+11159	test : add HealthCheck withTimeout timeout and executeCheck error path tests	ISSUE
+11158	test : add HealthAggregator aggregate health with empty and mixed status tests	ISSUE
+11157	test : add EventBus publish and subscribe edge case tests	ISSUE
+11156	test : add CachePublisher null subscriber and graceful degradation tests	ISSUE
+11055	fix : add null guard for redisClient in escrow service	ISSUE
+11052	fix : guard against undefined/null webhook secret in webhookRoutes	ISSUE
+11049	fix : add null guard for fuelAdvisor vehicleType lookup	ISSUE
+11046	fix : guard division by zero in reputation getWeightedRating	ISSUE
+11043	test : add unit tests for headerSizeMonitor middleware	ISSUE
+11038	fix : remove duplicate validateBody middleware in sync-weight route	ISSUE
+10937	[Bug][ebpf] loader.py reads last_time_ns at offset 4 but the struct u64 is aligned at offset 8 - pruner reads garbage	ISSUE
+10923	test : add unit tests for errors util AppError	ISSUE
+10922	test : add unit tests for errorFormatter formatError	ISSUE
+10921	test : add unit tests for responseSanitizer	ISSUE
+10920	test : add unit tests for cacheControlVerifier warnings	ISSUE
+10919	test : add unit tests for securityHeadersVerifier production skip	ISSUE
+10918	test : add unit tests for validatePagination middleware	ISSUE
+10917	test : add unit tests for pagination buildPagination	ISSUE
+10915	test : add unit tests for correlationId middleware	ISSUE
+10913	test : add unit tests for audit log scrubPii	ISSUE
+10904	test : add unit tests for sanitizeUploadFilename	ISSUE
+10901	test : add unit tests for pricing sanitizePrice and convertKmToMiles	ISSUE
+10900	test : add unit tests for WeatherService	ISSUE
+10896	test : add unit tests for notificationService helpers	ISSUE
+10685	fix : osrm.js bare catch block silently swallows routing errors	ISSUE
+10665	test : add unit tests for healthAggregation service	ISSUE
+10664	fix : WeighStationService uses undefined logger variable	ISSUE
+10653	fix : osrm.js bare catch block silently swallows errors from failed HTTP fetches	ISSUE
+10608	fix : errorHandler reads err.errors but zod v4 uses err.issues	ISSUE
+10607	test : add unit tests for cookieSecurityValidator middleware	ISSUE
+10606	fix : auth logout response hardcodes cacheInvalidated true on failure	ISSUE
+10605	fix : notificationService returns success true when Firebase not configured	ISSUE
+10604	fix : notificationService logger.error uses strings not structured objects	ISSUE
+10603	fix : add Secure to cookieSecurityValidator RECOMMENDED_ATTRIBUTES	ISSUE
+10602	fix : remove headerSizeMonitor production skip and return 431	ISSUE
+10588	bug: driver app main.dart has duplicate imports and unreachable runApp	ISSUE
+10518	test : fix tracker test stale fixtures for role guards and promise-returning APIs	ISSUE
+10517	test : fix osrm test missing fetch stub in edge-case block and stale logger assertion	ISSUE
+10514	test : fix trafficService test to set TOMTOM_API_KEY for surge tests	ISSUE
+10511	fix : remove undefined url variable from ml.js handleResponse catch block	ISSUE
+10505	fix : move responseSanitizer middleware before API route registration	ISSUE
+10499	[BUG][supabase][P2] fraud-table admin read policies use profiles.id = auth.uid() - never true, admins can never read fraud tables via user client	ISSUE
+10492	[BUG][backend][P3] correlationId echoes unbounded client-supplied X-Correlation-ID into response header, logs, and OTEL spans	ISSUE
+10475	[BUG][repo][P1] Root `npm install` fails on clean main — hardhat peer-dependency ERESOLVE (hardhat ^2.28.6 vs @nomicfoundation/hardhat-verify peer ^3.12.0), no lockfile committed	ISSUE
+10262	GET /api/orders/history accepts an unbounded limit	ISSUE
+10132	[BUG][backend][P1] Delivery OTP generated and stored but never delivered to the customer - sendDeliveryOtpNotification body, DB row and FCM payload contain no code (regression of #5633 fix)	ISSUE
+10112	[BUG][backend][test] VerificationService.test.js fails 3 - calls removed verifyDocument/rejectDocument methods	ISSUE
+10105	[BUG][backend][test] truckSearchServiceRole.test.js fails 2/2 - mongo telemetry mock lacks .limit()	ISSUE
+10101	[BUG][backend][test] FraudDetectionService.test.js fails 7/7 - config/db.js mock omits supabaseAdmin	ISSUE
+10065	fix : remove duplicate syncWeightSchema export in requestSchemas.js	ISSUE
+10064	fix : add logger import and cause to error throws in ml.js and weighStationService.js	ISSUE
+10063	fix : fix ESLint pre-existing errors in unit test and load test files	ISSUE
+10061	fix : fix duplicate existingDoc const in documentController.js	ISSUE
+10060	fix : remove duplicate errorResponse import in deviceController.js	ISSUE
+9893	GET /api/ml/eta: no ownership check, any auth user can query any trip's route coords/ETA via service-role client	ISSUE
+9851	[BUG][backend][P2] GET /api/orders/load-offers and /load-offers/en-route have no backend route - driver load market always 404s	ISSUE
+9846	GET /api/health/sentry-debug throws for anonymous callers — forced 500s and Sentry event flooding	ISSUE
+9841	Services read RLS-protected tables via shared anon-key Supabase client — 42501 permission denied in production (oracle, admin dashboard, profile, verification, driver/user routes)	ISSUE
+9833	POST /api/loads and GET /api/loads accept invalid numeric inputs (coords, price filters) -> 500s and bad data on the board	ISSUE
+9683	test : add unit tests for AuthorizationError Permission and Role primitives	ISSUE
+9682	test : add unit tests for WorkerEventAdapter bridge contract	ISSUE
+9681	test : add unit tests for InternalEventAdapter publish subscribe lifecycle	ISSUE
+9666	test : add unit tests for escrowHealth status mapping	ISSUE
+9571	bug: docs/supabase_setup.sql driver_details CREATE TABLE omits polygon_wallet_address but its own seed INSERT references it - fresh setup fails and PUT /api/profile/wallet gets PGRST204	ISSUE
+9570	bug: driver confirm-otp casts amount_inr to String but backend returns a number - TypeError on successful delivery release, success dialog never shown	ISSUE
+9543	[BUG][backend][P1] POST /api/driver/documents always 500s - documentController references undeclared existingDoc/MAX_FILE_SIZE_BYTES/SCAN_TIMEOUT_MS	ISSUE
+9536	test : add unit tests for escapeLike utility function	ISSUE
+9529	fix : add structured logging to adminRoutes.js error calls	ISSUE
+9522	fix : add structured logging to driverRoutes.js error and warn calls	ISSUE
+9461	fix : add structured error logging to osrm.js service catch blocks	ISSUE
+9460	fix : add structured error logging to osrm.js service	ISSUE
+9394	[BUG][backend][P0] documentController references an undefined `existingDoc` — every driver KYC upload 500s, and 6 of the 9 documentRoutes tests already fail	ISSUE
+9318	fix : add structured error logging for escrow service failures in escrowService.js	ISSUE
+9311	fix : add empty-string validation guard for support ticket subject field	ISSUE
+9306	fix : add structured logger.warn for missing Bearer token in authenticate middleware	ISSUE
+9280	fix : add bounded limit to getOfflineGPSData query	ISSUE
+9279	fix : add pagination to document expiry window queries	ISSUE
+9278	fix : add bounded limit to batch orders query in getBatchUserConnections	ISSUE
+9277	fix : add bounded limit to earnings trips query in driverRoutes	ISSUE
+9276	fix : add bounded limit to getKeyRotationHistory query	ISSUE
+9207	POST /api/trucks (register) always fails — duplicate check + insert via anon client	ISSUE
+9086	docs : add documentation for the fuel advisor service	ISSUE
+9085	docs : add documentation for blockchain metrics collection	ISSUE
+9084	docs : add documentation for the earnings summary service	ISSUE
+9083	docs : add documentation for the ML prediction validator	ISSUE
+9082	docs : add documentation for audio upload validation	ISSUE
+9081	docs : add documentation for upload filename sanitisation	ISSUE
+9080	docs : add documentation for the centralized authorization engine	ISSUE
+9079	docs : add documentation for the health check framework	ISSUE
+9078	docs : add documentation for the cache namespace registry	ISSUE
+9077	docs : add API documentation for verificationRoutes endpoints	ISSUE
+9076	docs : add API documentation for routeRoutes estimate endpoint	ISSUE
+9075	docs : add API documentation for deviceRoutes endpoints	ISSUE
+9074	docs : add API documentation for fraudRoutes endpoints	ISSUE
+9073	docs : add API documentation for adminRoutes dashboard	ISSUE
+9072	docs : add API documentation for auditRoutes endpoints	ISSUE
+9071	docs : add API documentation for trackingRoutes share-tracking	ISSUE
+9070	docs : add API documentation for oracleRoutes endpoints	ISSUE
+9069	docs : add API documentation for lookupRoutes endpoints	ISSUE
+9068	docs : add API documentation for shardRoutes endpoints	ISSUE
+9067	docs : add API documentation for deadheadRoutes match endpoint	ISSUE
+9066	fix : add requestId context to auditRoutes query catch	ISSUE
+9065	fix : add requestId context to lookupRoutes cache errors	ISSUE
+9064	fix : add requestId context to verificationRoutes digilocker errors	ISSUE
+9063	fix : add requestId context to trackingRoutes revoke error	ISSUE
+9062	fix : add requestId context to deadheadRoutes ML unavailable warn	ISSUE
+9061	fix : add requestId context to routeRoutes validateCoordinates error	ISSUE
+9060	fix : add requestId context to fraudRoutes risk endpoint	ISSUE
+9059	fix : add defensive error logging to adminRoutes drivers error path	ISSUE
+9058	fix : add requestId context to deviceController registerDeviceToken	ISSUE
+9057	fix : add structured logging to blockchainMonitor handlePaymentReceived	ISSUE
+9056	fix : add requestId context to shardRoutes error logging	ISSUE
+9055	fix : add requestId context to verificationRoutes error logging	ISSUE
+9054	fix : add explicit blank-orderId guard to oracleRoutes authorizeOrderAccess	ISSUE
+9053	fix : add timeout guard to lookupRoutes inflight cache	ISSUE
+9052	fix : add null guard to trackingRoutes terminal status check	ISSUE
+9051	fix : add defensive guard in CacheKeyBuilder parse for empty key	ISSUE
+9050	fix : add whitespace guard to demand config parseNumberList	ISSUE
+9049	fix : add input validation guard to transactionMonitor setUser	ISSUE
+9048	fix : add structured logging to blockchainMonitor storeEvent	ISSUE
+9047	fix : add structured logging to blockchainMonitor error paths	ISSUE
+9046	fix : add structured logging to fuelAdvisorService catch block	ISSUE
+9045	fix : add requestId context to deviceRoutes error handling	ISSUE
+9044	fix : add requestId context to lookupRoutes error logging	ISSUE
+9043	fix : add requestId context to trackingRoutes error logging	ISSUE
+9042	fix : add requestId context to fraudRoutes error logging	ISSUE
+8983	fix : add null guard in auth middleware before chaining on decoded token	ISSUE
+8977	GraphQL gateway always resolves role to CUSTOMER — resolveUserContext queries profiles by auth UID instead of firebase_uid	ISSUE
+8976	saved_addresses / set_default_address broken: app passes auth UID as user_id while rows store profiles.id	ISSUE
+8975	Tracking WebSocket looks up profiles by auth UID (id) instead of firebase_uid — all app live-tracking connections close with 4001	ISSUE
+8965	test : add unit tests for wimBypass service input validation edge cases	ISSUE
+8964	fix : remove duplicate /api/blockchain mount in index.js causing handler override	ISSUE
+8958	fix : replace Math.random regulatory coin-flip in weighStationService checkBypassEligibility	ISSUE
+8957	fix : replace Math.random regulatory coin-flip in weighStationService checkBypassEligibility	ISSUE
+8956	fix : replace Math.random regulatory coin-flip in weighStationService checkBypassEligibility	ISSUE
+8955	fix : replace Math.random regulatory coin-flip in weighStationService checkBypassEligibility	ISSUE
+8895	bug: reputationReconciliation deletes failures before awarding — crash permanently loses reputation	ISSUE
+8888	bug: API fails to boot — escrow.js uses module.exports in ESM module	ISSUE
+8853	[SECURITY] atomic-swap persists HTLC preimage secret to DB and returns it in API responses - escrow funds claimable on DB/API leak	ISSUE
+8827	chore : remove dead MAX_CONCURRENT_INFERENCE and INFERENCE_SEMAPHORE	ISSUE
+8826	fix : move wimBypassRouter mount before 404 handler in index.js	ISSUE
+8821	fix : use correct columns in digilockerService upsert driver_documents	ISSUE
+8819	fix : relax FCM token regex in userRoutes.js to accept real Firebase tokens	ISSUE
+8818	fix : remove erroneous /100 from avg_earning_per_km calculation	ISSUE
+8816	fix : paginate FraudDetectionService.getFraudStats beyond 1000-row cap	ISSUE
+8813	fix : remove module.exports from orderLifecycleService.js ESM file	ISSUE
+8775	docs: README contains mojibake/encoding corruption	ISSUE
+8774	bug: Kubernetes namespace manifest is misspelled as namspace.yaml	ISSUE
+8773	bug: Kubernetes deployment manifests are under misspelled deployements path	ISSUE
+8729	bug: n8n dispute-resolution workflows have no retry or error handling on escrow-mutating nodes	ISSUE
+8658	[BUG][backend][P1] orderRoutes.js references undefined `orderService` — getOrderResource throws ReferenceError	ISSUE
+8657	[BUG][backend][P0] orderRoutes.js ends with `module.exports` in ESM file — ReferenceError crashes API boot	ISSUE
+8622	[BUG] /driver/performance-stats reports base_freight (paisa) as rupees — lifetime/monthly earnings 100x underreported	ISSUE
+8620	[BUG] voiceService.js Whisper/OpenAI/ElevenLabs calls have no timeout — /api/voice hangs indefinitely	ISSUE
+8618	[BUG] FraudDetectionService.getFraudStats caps at .limit(1000) — admin fraud stats silently undercount	ISSUE
+8615	test : add unit tests for i18n.js errorTranslationInterceptor	ISSUE
+8589	fix : resolve all remaining pre-existing ESLint errors blocking backend CI	ISSUE
+8581	fix : add missing constants import to documentController	ISSUE
+8580	fix : restore weighStationService.test.js to clean parseable version	ISSUE
+8579	fix : add missing errorResponse import to deviceController	ISSUE
+8530	[BUG][backend][P0] healthRoutes checkEscrow reads an out-of-scope 'result' — ReferenceError crashes every health probe	ISSUE
+8472	[BUG][backend][P1] HealthAggregator drops the critical flag — database outage reported as 'degraded' instead of 'unhealthy'	ISSUE
+8452	bug: ml.js getHeaders() is corrupted with a pasted predictDriverProfit block - API server cannot boot	ISSUE
+8435	test : add unit tests for wasi/wasi-runtime.js executeFunction	ISSUE
+8434	fix : add unit tests for diffusion_routes.py generate-routes endpoint	ISSUE
+8433	fix : add unit tests for anomaly_routes.py threshold endpoints	ISSUE
+8432	bug : offline sync engine leaves orphaned superseded events causing infinite retries	ISSUE
+8431	test : add unit tests for SnykService scanCode method	ISSUE
+8430	test : add unit tests for tracker.js WebSocket authentication path	ISSUE
+8429	bug : tracker.js WebSocket handler silently swallows JWT decode errors	ISSUE
+8360	test : add unit tests for auditLogService	ISSUE
+8359	test : add unit tests for documentExpiryService	ISSUE
+8357	fix : add structured error logging in routes/lookupRoutes.js cache layer	ISSUE
+8356	fix : add structured error logging in services/trackingTokenService.js	ISSUE
+8347	fix : remove duplicate const declarations in escrowReleaseReconciliation.js	ISSUE
+8346	fix : add error logging in reverseGeocode.js catch block	ISSUE
+8344	fix : replace console.error with logger in orderLifecycleService.js	ISSUE
+8342	fix : replace bare catch {} in cors.js with catch (err)	ISSUE
+8340	fix : add null guard in isValidCachedProfile for typeof null edge case	ISSUE
+8264	fix : keyManagementService storeEncryptedKey missing await on Supabase insert - failures silently succeed	ISSUE
+8263	fix : OracleService.js declares DELIVERY_IN_PROGRESS_STATUSES twice - SyntaxError prevents module load	ISSUE
+8262	fix : escrow webhook drops the settlement tx hash on BookingCancelled and WithdrawalReady	ISSUE
+8260	fix : redisLock.test.js is a Jest suite in a Vitest repo - 21 fail-closed locking tests never run	ISSUE
+8259	fix : payout webhook fetch has no timeout - one unresponsive provider stalls all withdrawal settlement	ISSUE
+8258	fix : escrow.js declares markEscrowBookingStarted twice - SyntaxError prevents module load	ISSUE
+8255	fix : POST /api/wim/request-bypass is unauthenticated and trusts client-supplied values	ISSUE
+8254	fix : wimBypass signs packets with hardcoded fallback HMAC secret - security risk	ISSUE
+8252	fix : polygonHealth check reports HEALTHY from env var alone - never probes RPC	ISSUE
+8250	fix : workerHealth fails open - zero registered workers reported healthy	ISSUE
+8249	fix : HealthAggregator accepts timeoutMs but never applies it - hung check blocks /health	ISSUE
+8248	fix : multicall3Service batchCallsWithCache marks cached hits as cached:false	ISSUE
+8247	fix : escrowReleaseReconciliation.test.js SyntaxError - reconciliation unit tests never run	ISSUE
+8246	fix : CacheKeyBuilder.buildVersioned never reads Redis - version bumps have no effect	ISSUE
+8245	fix : CacheKeyBuilder.pattern emits versioned glob that never matches build() keys	ISSUE
+8244	fix : use full-secret hash for deriveDeviceEncryptionKey cache key	ISSUE
+8093	test : add unit tests for reputationReconciliation.js	ISSUE
+7770	test : add unit tests for ml.js service helpers	ISSUE
+7767	test : add unit tests for validate middleware	ISSUE
+7764	fix : add error logging to silent catch block in osrm.js getRouteEstimate	ISSUE
+7422	test : add unit tests for getExpiryDate in trackingTokenService	ISSUE
+7283	bug: index.js:112 imports tracing.js which requires 8 @opentelemetry packages absent from package.json - API server cannot boot	ISSUE
+7234	feat : export validateDocumentBuffer helper from documentValidation.js	ISSUE
+7231	fix : add NaN guard in osrm route estimate calculation	ISSUE
+7230	fix : replace console.log with structured logger in locationServer WebSocket events	ISSUE
+7229	test : add unit tests for notificationService sendDeliveryOtpNotification	ISSUE
+7228	fix : validate cursor parameter as positive integer in GET /orders/history	ISSUE
+7221	fix : replace browser window global with Node.js timer in idempotency middleware	ISSUE
+7198	[BUG] vector-matcher-cpp main.cpp has unescaped quotes in JSON string literals - does not compile	ISSUE
+7196	[BUG] route-matrix-cpp main.cpp has unescaped quotes in JSON string literals - does not compile	ISSUE
+7193	[BUG] submitEscrowRefund declared twice in container.js, orderLifecycleService.js and orderRoutes.js - SyntaxError blocks API boot	ISSUE
+7178	[SECURITY] gps_offline_data_service_policy has no TO role - migration 20260805000060 re-adds PUBLIC allow-all RLS on gps_offline_data, defeating owner-scoped fix (#6244/#6249)	ISSUE
+7162	[GraphQL] Subgraph services never build Apollo context and use shared anon supabase client - every resolver fails (Authentication required / RLS)	ISSUE
+7144	[BUG] orderRoutes.js:1660 unbalanced paren -> SyntaxError, breaks entire /api/orders module and server boot	ISSUE
+7036	feat: Enhance Driver Dashboard with Weekly Earnings Analytics	ISSUE
+6984	feat : export clampReputation helper in reputation.js for on-chain bounds validation	ISSUE
+6982	fix : add strict type guards for uid and profile in profileCache isValidCachedProfile	ISSUE
+6981	fix : sanitize role input with trim and toLowerCase in requireRole middleware	ISSUE
+6973	fix : sanitize origin header string in cors middleware validator	ISSUE
+6968	fix : add null guard for req.user access in auditLog middleware	ISSUE
+6967	fix : export formatValidationIssues helper in validate middleware	ISSUE
+6965	fix : correct route_map_points update from claimed to is_claimed column	ISSUE
+6964	fix : replace invalid document_expiry notif_type with document in documentExpiryService	ISSUE
+6963	fix : replace invalid cold_chain_alert notif_type with system in iotRoutes	ISSUE
+6958	[BUG] CI backend tests job fails: package-lock.json deleted but workflow still runs npm ci with cache-dependency-path	ISSUE
+6949	test : add edge case unit tests for driver earnings service calculations	ISSUE
+6947	fix : export sanitizePrice utility helper in pricing service	ISSUE
+6939	fix : add type guard and null validation in profileCache isValidCachedProfile	ISSUE
+6936	fix : validate geofence_radius_m is a positive number before use in delivery confirm	ISSUE
+6892	[BUG] atomic-swap can never execute - hot wallet is always the initiator, never the counterparty	ISSUE
+6876	[BUG] orderRoutes.js fails to parse at boot - malformed requirePolicy handlers for /:id/driver-location, /:id/route and unclosed POST /:id/pod	ISSUE
+6791	fix : log JSON.parse errors in CachePublisher instead of silently swallowing them	ISSUE
+6789	fix : pass original event to DLQ handlers instead of DLQ wrapper in replayDeadLetters	ISSUE
+6788	fix : pass pre_data to CausalImpact so pre-intervention baseline is not ignored	ISSUE
+6787	fix : correct variable name in confirm-otp handler so amount_inr is not NaN	ISSUE
+6724	[CRITICAL SECURITY] BYPASS_AUTH environment variable can be set in production	ISSUE
+6692	[BUG] Malware scanner timeout doesn't clean up spawned process	ISSUE
+6686	[PERFORMANCE] reputation.js exponential backoff can cause thundering herd	ISSUE
+6684	[BUG] locationServer heartbeat timer not cleared on graceful shutdown	ISSUE
+6683	[BUG] Idempotency middleware in-memory store grows unbounded under Redis outage	ISSUE
+6672	fix : add fallback role check when req.user is undefined in requireRole	ISSUE
+6668	fix : add type validation check to isValidCachedProfile in profileCache	ISSUE
+6527	fix : replace Math.random() with crypto.randomInt() in weighStationService bypass decision	ISSUE
+6410	bug : add fix const redeclaration of order in confirm-otp handler in orderRoutes	ISSUE
+6408	bug : add remove duplicate getEscrowBooking and markEscrowBookingStarted functions in escrow	ISSUE
+6402	[Feature] Customer app has no Google sign-in — phone OTP is the only way in	ISSUE
+6229	bug: KYC upload buffers files before authentication and has no upload limits	ISSUE
+6185	[BUG] LocationService refactoring incomplete - verification logic misplaced	ISSUE
+6175	fix : use UTC hour in anomalyDetectionService detectUnusualTime to match the claimed UTC timezone	ISSUE
+6172	fix : add missing markEscrowBookingStarted wrapper to escrow.js for orderMilestoneService	ISSUE
+6168	[CRITICAL] Bug: Success panel shown when payment/UPI intent fails	ISSUE
+6167	[CRITICAL] Bug: POST /api/auth/verify-otp returns 501 Not Implemented	ISSUE
+6020	[Bug] Debug console.log in orderValidationService.js exposes load offer data	ISSUE
+6010	ML-KEM decapsulation derives shared secret from wrong point: kyber_core.py handshakes fail to agree on a key	ISSUE
+5910	test : add unit tests for pricing.js calculateDistanceAndDuration	ISSUE
+5908	fix : add missing redisClient import to truckRoutes.js	ISSUE
+5554	feat(flutter): integrate Leaflet.js / OSM for live tracking map in Customer App	ISSUE
+5549	feat(api): integrate Firebase Admin SDK for user authentication & token verification	ISSUE
+5503	fix: root endpoint uses single quotes instead of backticks for template literal	ISSUE
+5502	fix: webhook HMAC signature verification broken due to JSON.stringify non-determinism	ISSUE
+5500	fix: undefined variable 'page' crashes GET /api/orders/history with ReferenceError	ISSUE
+5493	test : add unit tests for voiceService.js getBookingContext	ISSUE
+5492	test : add unit tests for weighStationService.js checkBypassEligibility	ISSUE
+5491	test : add unit tests for requestContext.js AsyncLocalStorage helper	ISSUE
+5490	fix : add error field checking for supabase queries in voiceService.js	ISSUE
+5489	fix : replace console.log with structured logger in orderValidationService.js	ISSUE
+5465	fix : add error logging to bare catch in kafkaHealth.js	ISSUE
+5464	fix : replace undefined variable page with cursor in orderRoutes.js /history route	ISSUE
+5463	fix : remove duplicate declaration of sentryAlertHandler in rateLimiter.js	ISSUE
+5462	fix : remove duplicate import of userLimiter in authRoutes.js	ISSUE
+5461	fix : remove duplicate import of requestIdMiddleware in index.js	ISSUE
+5199	fix : restore correct test file content to fix ESLint parsing errors	ISSUE
+5198	fix : add cause option to thrown errors in voiceService.js	ISSUE
+5197	fix : add cause option to thrown errors in digilockerService.js	ISSUE
+5196	fix : resolve duplicate const and stale wallet in bidAcceptanceService.js acceptBid	ISSUE
+5195	fix : replace bare catch block in lookupRoutes.js	ISSUE
+5194	fix : replace bare catch block in documentExpiryService.js	ISSUE
+5193	fix : add cause to thrown error in notificationService.js	ISSUE
+5053	Feature: Implement Cancellation and Mid-Trip Change Flow — Flutter UI, API Endpoints, Smart Contract Adjustment	ISSUE
+5052	Feature: Add OSRM Self-Hosted Route Engine — Docker Config, India OSM Setup Guide, FastAPI Client	ISSUE
+5051	Feature: Add Driver Earnings Dashboard — Trip Breakdown, Weekly Chart, Fuel Cost Estimator	ISSUE
+5050	Bug: Live Tracking Map Truck Marker Is Static — WebSocket GPS Events Not Applied to Flutter Map	ISSUE
+5048	Feature: Build n8n Dispute Resolution Workflow — Freeze Payment, Package Evidence, Auto-Escalate in 24h	ISSUE
+5047	Feature: Integrate Digilocker API for RC Book and Driving Licence Verification with On-Chain Hashing	ISSUE
+5046	Bug: En-Route Loads Screen Shows Empty — FastAPI ML Deadhead Endpoint Not Wired to Flutter	ISSUE
+4974	bug: public tracking driver location lookup logs errors when no active location exists	ISSUE
+4968	bug: OPA policy evaluation uses a shared /tmp input file causing concurrent request races	ISSUE
+4966	bug: driver LocationService logs WebSocket URL with bearer token in query string	ISSUE
+4888	fix : add error logging when catch (e) swallows the caught error variable in tracker.js	ISSUE
+4861	[Feature]: Add load posting form for manufacturers with freight type, weight, and route details	ISSUE
+4687	fix : use ownership-safe Redis lock release in document expiry worker	ISSUE
+4663	[FEATURE] Add Redis Caching for Read-Only API Routes	ISSUE
+4583	fix : replace .safe() with .safeInteger() in withdrawSchema (Zod validation)	ISSUE
+4121	bug: orderRoutes.js references undefined redisClient — load offers endpoints crash with ReferenceError	ISSUE
+3806	timingSafeEqual throws RangeError on mismatched webhook signature lengths	ISSUE
+3785	pricing variable block-scoped inside try block — ReferenceError on every order creation	ISSUE
+3767	fix(customer): truck search crashes on dynamic map rows	ISSUE
+3610	fix(kafka): resetConsumerOffsets can leave admin client connected on errors	ISSUE
+3609	fix(kafka): read model stats uses unsupported Supabase groupBy call	ISSUE
+3443	feat: no GitHub Actions CI workflow exists for the Flutter apps — PRs can introduce build-breaking changes that only surface on reviewer's local machine	ISSUE
+3442	feat: GPS tracking logs are written to MongoDB with no TTL index — the telemetry collection will grow unbounded and degrade query performance over time	ISSUE
+3441	security: JWT_SECRET defaults to "secret" in .env.example — if contributors accidentally deploy without changing it, all tokens are trivially forgeable	ISSUE
+3440	feat: ML matching engine has no fallback strategy when FastAPI inference service is unreachable — booking flow silently fails or times out for users	ISSUE
+3094	orderRoutes.js has duplicate import/const declarations and broken merge artifacts — cannot be loaded	ISSUE
+3092	accept_bid_tx missing auth.uid() check — any authenticated user can accept any bid	ISSUE
+3002	fix(driver): move dart:io usage out of the web ApiClient import path	ISSUE
+2615	bug: supportRoutes.js has no logger import — all catch blocks silently swallow errors	ISSUE
+2614	bug: uuidParamSchema referenced but not imported in supportRoutes.js — ReferenceError at startup	ISSUE
+2612	[BUG]: Race condition in Escrow payout when driver and customer complete trip simultaneously	ISSUE
+2376	feat: add GET /api/trucks/types endpoint	ISSUE
+2372	feat: support profile verification status validation	ISSUE
+2370	feat: implement distance unit conversion helper in pricing lib	ISSUE
+2368	feat: support dynamic toll rate factor in pricing calculations	ISSUE
+2364	feat: include process memory usage in health check endpoint	ISSUE
+2361	feat: add GET /api/devices/platforms endpoint to list unique registered platforms	ISSUE
+2360	feat: add GET /api/devices/platforms endpoint to list unique registered platforms	ISSUE
+2358	feat: support custom metadata object in device registration	ISSUE
+2349	Backend test suite is currently red with 13 failed tests and 2 failed suites	ISSUE
+2347	`.gitignore` contains literal shell commands instead of ignoring Dart define env files	ISSUE
+2346	ML service Docker entrypoint and tests reference `app.main`, but the FastAPI app is in top-level `main.py`	ISSUE
+2344	OTP notification body includes the raw delivery OTP	ISSUE
+2341	Bid acceptance endpoint returns 500 because `bidAcceptanceService` is never instantiated	ISSUE
+2281	fix : normalize tripRoutes error responses to use {error} key instead of {message}	ISSUE
+2277	fix(escrowRefundReconciliation): processes refunds without distributed lock when Redis is down — duplicate txs	ISSUE
+2274	fix(marketplace_repository): wrong variable in cast — decoded used instead of body, throws on Map response	ISSUE
+2273	fix(index): authLimiter rate limiter applied twice to auth routes — triple rate limiting	ISSUE
+2271	fix(orderRoutes): OTP state cleared before verification completes — defeats lockout protection	ISSUE
+2270	fix: inconsistent OTP length — 6-digit delivery vs 4-digit login OTP with no centralized config	ISSUE
+2233	test : add unit tests for escrowRefundReconciliation.js	ISSUE
+2165	fix(driver): truck_repository queries wrong column driver_id instead of owner_id	ISSUE
+2164	fix(api): orderRoutes.js premature clearOtpState defeats brute-force lockout	ISSUE
+2161	fix(api): healthRoutes.js duplicate /ready route handler	ISSUE
+2104	fix : move guardMlApiKey function definition outside the if block in ml.js	ISSUE
+2079	Complete Escrow ABI/Function Signature Mismatch — All On-Chain Escrow Operations Non-Functional	ISSUE
+2015	[bug] : Flutter apps have no `--dart-define` environment separation — `flutter run` points to production Supabase/Firebase during development, risking production data corruption	ISSUE
+2014	[docs] : FastAPI ML engine has no OpenAPI schema export, no `/health` endpoint, and no request/response contracts — breaking changes between ML and Node.js API are invisible	ISSUE
+2013	[security] : Solidity smart contracts in `blockchain/` have no test suite, no testnet deployment docs, and no exported ABI — financial bugs are undetectable before mainnet	ISSUE
+2012	[housekeeping] : `.metadata` Flutter IDE artifact is tracked in git — should be gitignored alongside other generated files	ISSUE
+2004	bug: JWT access token is stored in Flutter `SharedPreferences` (localStorage equivalent) — tokens are accessible to any code running in the app context and should use Flutter Secure Storage instead	ISSUE
+1971	[Critical][Backend] WebSocket location namespace has no booking ownership validation - any driver can spoof GPS for any booking	ISSUE
+1970	[Critical][Security] JWT tokens stored in Flutter SharedPreferences - plaintext on-device exposure	ISSUE
+1969	[Critical][Blockchain] Escrow contract missing reentrancy guard on withdrawFunds() - funds drainable via re-entrant fallback	ISSUE
+1941	fix(orderRoutes): verifyDeliveryLimiter keys by IP instead of user ID — blocks all drivers on shared NAT	ISSUE
+1939	fix(truckRoutes): duplicate ilike filter on name causes incorrect query results	ISSUE
+1898	fix(driver trip_service): fetchTripStops and route points target unmapped routes	ISSUE
+1897	fix(driver trip_service): fetchTripItems targets unmapped /api/trips route	ISSUE
+1831	fix : replace pino positional args with structured object format in escrow release reconciliation	ISSUE
+1770	fix(backend): Swagger server URL hardcoded to localhost	ISSUE
+1738	SyntaxError: duplicate const limit/offset declarations in supportRoutes.js GET /tickets/:id/comments	ISSUE
+1633	[Bug]: Duplicate import of healthLimiter in healthRoutes.js	ISSUE
+1627	[Bug]: GET /tickets/:id/comments crashes with 500 error when given a non-UUID ID parameter	ISSUE
+1623	[Bug]: Duplicate declarations of limit and offset in supportRoutes.js	ISSUE
+1606	[BUG]: Flutter apps have zero Semantics widgets - screen readers can't navigate Customer or Driver app	ISSUE
+1605	escrowReleaseReconciliation.js: Empty catch block silently swallows Redis lock extension errors	ISSUE
+1601	escrowReleaseReconciliation.js: Duplicate import logger declaration causes SyntaxError - module fails to load	ISSUE
+1510	fix: reject malformed numeric strings in load price and distance query filters — parseFloat() silently accepts "100abc" as 100, allowing corrupt filter values into DB queries	ISSUE
+1498	fix : log error in osrm.js cache write failure path	ISSUE
+1497	fix : log caught error in tracker.js catch handlers	ISSUE
+1496	fix : replace console.log with structured logger in tracker.js	ISSUE
+1423	test : add unit tests for ProfileModel.js	ISSUE
+1418	fix : replace console.log with structured logger in tracker.js	ISSUE
+1417	fix : log caught error in tracker.js catch handlers	ISSUE
+1416	fix : log error in osrm.js cache write failure path	ISSUE
+1414	fix : add type guard in isValidCachedProfile	ISSUE
+1335	fix(deviceController): profile sync after response causes data inconsistency	ISSUE
+1317	fix : remove debug marker comments from profileService production code	ISSUE
+1316	fix : remove debug marker comments from profileService production code	ISSUE
+1285	chore(profileService): remove debug marker comments from production code	ISSUE
+1283	fix(loadSchemas): invalid error key in z.string options	ISSUE
+1281	fix(docker-compose): unnecessary depends_on: db references nonexistent service	ISSUE
+1280	fix(mid_trip_reoptimiser): import inside function body violates PEP 8	ISSUE
+1279	fix(deadhead_eliminator): import inside function body violates PEP 8	ISSUE
+1269	fix(ProfileModel): null profile crash in fromProfile	ISSUE
+1122	fix: duplicate imports in orderRoutes.js	ISSUE
+1113	fix : correct JSDoc @param type for isValidCachedProfile from {any} to {object|null|undefined}	ISSUE
+1111	fix : return safe fallback string from predictDemandLimiter keyGenerator instead of throwing	ISSUE
+1110	fix : use fire-and-forget for awardReputationPoints instead of blocking await	ISSUE
+1109	fix : add null guard for empty string env vars in readRateCard	ISSUE
+1059	feat: add driver statement and earnings report endpoint	ISSUE
+874	fix : remove duplicate updateProfileSchema declaration and imports	ISSUE
+862	confirm-deposit ignores the Supabase update result and can return false success	ISSUE
+822	⚙️ Build n8n Automation Workflows — Dispute Resolution & ML Retraining	ISSUE
+700	[Bug]: Non-admin users can close their own support tickets — status guard logic is inverted	ISSUE
+696	Add Production Release Signing Configuration	ISSUE
+591	[Bug] osrm.js uses bare catch {} block that silently swallows all exceptions — Redis cache write failures are never logged	ISSUE
+524	[BUG] Missing Dispute Expiration Timelock in Escrow Smart Contract	ISSUE

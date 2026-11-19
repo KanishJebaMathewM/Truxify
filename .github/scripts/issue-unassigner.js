@@ -1,95 +1,112 @@
+
 'use strict';
 
-/**
- * Checks if a pull request exists in the issue's timeline or in PR search results.
- */
+const BASE_URL = 'https://api.github.com';
+const DAYS = 7;
+
 function hasLinkedPullRequest(issueNumber, timeline = [], searchItems = []) {
-  // Check 1: cross-referenced events in timeline
-  const inTimeline = timeline.some(event => {
-    return event.event === 'cross-referenced' &&
-      event.source &&
-      event.source.issue &&
-      Boolean(event.source.issue.pull_request);
-  });
+  const inTimeline = timeline.some(event =>
+    event.event === 'cross-referenced' &&
+    event.source?.issue?.pull_request
+  );
 
   if (inTimeline) return true;
 
-  // Check 2: search items explicitly mentioning the issue number
-  const issueRefPattern = new RegExp(`(?:#|issues/)${issueNumber}\\b`, 'i');
-  return searchItems.some(pr => {
-    const text = `${pr.title || ''}\n${pr.body || ''}`;
-    return issueRefPattern.test(text);
-  });
+  const pattern = new RegExp(
+    `(?:#|issues/)${issueNumber}(?!\\d)`,
+    'i'
+  );
+
+  return searchItems.some(pr =>
+    pattern.test(`${pr.title || ''}\n${pr.body || ''}`)
+  );
 }
 
-/**
- * Determines the timestamp of when the issue was last assigned.
- * Falls back to issue creation date if no assigned event is present.
- */
 function getAssignmentTimestamp(issue, timeline = []) {
-  const assignEvents = timeline
+  const events = timeline
     .filter(e => e.event === 'assigned' && e.created_at)
-    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    .map(e => new Date(e.created_at).getTime())
+    .filter(Number.isFinite);
 
-  if (assignEvents.length > 0) {
-    return new Date(assignEvents[assignEvents.length - 1].created_at).getTime();
-  }
+  // Do not guess the assignment date if history is unavailable.
+  if (events.length === 0) return null;
 
-  return new Date(issue.created_at).getTime();
+  return Math.max(...events);
 }
 
-/**
- * Checks if any assigned contributor posted a comment or activity in the last daysThreshold days.
- */
-function hasRecentContributorActivity(issue, timeline = [], now = Date.now(), daysThreshold = 7) {
-  const assigneeLogins = new Set((issue.assignees || []).map(a => a.login.toLowerCase()));
+function hasRecentContributorActivity(
+  issue,
+  timeline = [],
+  now = Date.now(),
+  daysThreshold = DAYS
+) {
+  const assignees = new Set(
+    (issue.assignees || []).map(a => a.login.toLowerCase())
+  );
 
   return timeline.some(event => {
-    const author = (event.actor && event.actor.login) ||
-                   (event.user && event.user.login);
-    if (!author || !assigneeLogins.has(author.toLowerCase())) return false;
+    const author =
+      event.actor?.login || event.user?.login;
 
-    // Count comments, reviews, or commits by contributor
-    if (event.event && !['commented', 'committed', 'reviewed', 'line-commented'].includes(event.event)) {
+    if (!author || !assignees.has(author.toLowerCase())) {
       return false;
     }
 
+    const allowedEvents = [
+      'commented',
+      'committed',
+      'reviewed',
+      'line-commented'
+    ];
+
+    if (!allowedEvents.includes(event.event)) return false;
+
     const eventTime = new Date(event.created_at).getTime();
-    const daysSinceEvent = (now - eventTime) / (1000 * 60 * 60 * 24);
-    return daysSinceEvent < daysThreshold;
+
+    if (!Number.isFinite(eventTime)) return false;
+
+    const days = (now - eventTime) / 86400000;
+
+    return days >= 0 && days < daysThreshold;
   });
 }
 
-/**
- * Evaluates whether an issue meets the criteria to be auto-unassigned.
- */
 function isEligibleForUnassign({
   issue,
   timeline = [],
   searchItems = [],
   now = Date.now(),
-  daysThreshold = 7
+  daysThreshold = DAYS
 }) {
-  if (!issue || issue.pull_request || !issue.assignees || issue.assignees.length === 0) {
+  if (
+    !issue ||
+    issue.pull_request ||
+    !issue.assignees ||
+    issue.assignees.length === 0
+  ) {
     return { eligible: false, reason: 'no-assignees-or-pr' };
   }
 
-  // 1. If assigned less than 1 week (daysThreshold), do NOT unassign
   const assignedAt = getAssignmentTimestamp(issue, timeline);
-  const daysSinceAssigned = (now - assignedAt) / (1000 * 60 * 60 * 24);
+
+  if (assignedAt === null) {
+    return {
+      eligible: false,
+      reason: 'assignment-date-unavailable'
+    };
+  }
+
+  const daysSinceAssigned = (now - assignedAt) / 86400000;
 
   if (daysSinceAssigned < daysThreshold) {
     return {
       eligible: false,
       reason: 'assigned-recently',
-      daysSinceAssigned,
-      daysThreshold
+      daysSinceAssigned
     };
   }
 
-  // 2. If a linked PR exists, do NOT unassign
-  const hasPR = hasLinkedPullRequest(issue.number, timeline, searchItems);
-  if (hasPR) {
+  if (hasLinkedPullRequest(issue.number, timeline, searchItems)) {
     return {
       eligible: false,
       reason: 'pr-exists',
@@ -97,12 +114,17 @@ function isEligibleForUnassign({
     };
   }
 
-  // 3. If contributor has commented or provided updates in the last daysThreshold days, do NOT unassign
-  const hasContributorComment = hasRecentContributorActivity(issue, timeline, now, daysThreshold);
-  if (hasContributorComment) {
+  if (
+    hasRecentContributorActivity(
+      issue,
+      timeline,
+      now,
+      daysThreshold
+    )
+  ) {
     return {
       eligible: false,
-      reason: 'recent-contributor-comment',
+      reason: 'recent-contributor-activity',
       daysSinceAssigned
     };
   }
@@ -114,87 +136,111 @@ function isEligibleForUnassign({
   };
 }
 
-/**
- * Main execution function run via GitHub Actions or CLI.
- */
 async function run({
   github,
   context,
   core = console,
   dryRun = false,
-  daysThreshold = 7,
-  mode = 'no_pr'
+  daysThreshold = DAYS
 }) {
   const { owner, repo } = context.repo;
 
-  core.info(`Running Issue Auto-Unassigner on ${owner}/${repo} (Mode: ${mode}, Threshold: ${daysThreshold} days, DryRun: ${dryRun})`);
+  if (!Number.isFinite(daysThreshold) || daysThreshold <= 0) {
+    throw new Error('daysThreshold must be a positive number.');
+  }
 
-  // Fetch all open issues in the repository
-  const openIssues = await github.paginate(github.rest.issues.listForRepo, {
-    owner,
-    repo,
-    state: 'open',
-    per_page: 100
-  });
-
-  const assignedIssues = openIssues.filter(
-    issue => !issue.pull_request && issue.assignees && issue.assignees.length > 0
+  core.info(
+    `Running Issue Auto-Unassigner on ${owner}/${repo}. Threshold: ${daysThreshold} days. DryRun: ${dryRun}`
   );
 
-  core.info(`Found ${assignedIssues.length} open assigned issue(s) to evaluate.`);
+  const issues = await github.paginate(
+    github.rest.issues.listForRepo,
+    {
+      owner,
+      repo,
+      state: 'open',
+      per_page: 100
+    }
+  );
+
+  const assignedIssues = issues.filter(
+    issue =>
+      !issue.pull_request &&
+      issue.assignees?.length > 0
+  );
 
   let unassignedCount = 0;
 
   for (const issue of assignedIssues) {
     try {
-      // 1. Fetch timeline events to find assignment date and cross-referenced PRs
-      let timeline = [];
+      // Fetch timeline
+      let timeline;
+
       try {
-        timeline = await github.paginate(github.rest.issues.listEventsForTimeline, {
-          owner,
-          repo,
-          issue_number: issue.number,
-          per_page: 100
-        });
-      } catch (err) {
-        core.warning(`Could not fetch timeline for #${issue.number}: ${err.message}`);
+        timeline = await github.paginate(
+          github.rest.issues.listEventsForTimeline,
+          {
+            owner,
+            repo,
+            issue_number: issue.number,
+            per_page: 100
+          }
+        );
+      } catch (error) {
+        core.warning(
+          `Could not fetch timeline for #${issue.number}: ${error.message}`
+        );
+        continue;
       }
 
-      // 2. Query search API for PRs mentioning this issue
-      let searchItems = [];
+      // Search for linked pull requests
+      let searchItems;
+
       try {
-        const searchRes = await github.rest.search.issuesAndPullRequests({
-          q: `repo:${owner}/${repo} is:pr ${issue.number}`
-        });
-        searchItems = (searchRes && searchRes.data && searchRes.data.items) || [];
-      } catch (err) {
-        core.debug(`Search API query failed for #${issue.number}: ${err.message}`);
+        const result =
+          await github.rest.search.issuesAndPullRequests({
+            q: `repo:${owner}/${repo} is:pr ${issue.number}`
+          });
+
+        searchItems = result.data.items || [];
+      } catch (error) {
+        core.warning(
+          `Could not search PRs for #${issue.number}: ${error.message}`
+        );
+        continue;
       }
 
+      // Evaluate issue
       const evaluation = isEligibleForUnassign({
         issue,
         timeline,
         searchItems,
         now: Date.now(),
-        daysThreshold,
-        mode
+        daysThreshold
       });
 
       if (!evaluation.eligible) {
-        core.info(`Skipping #${issue.number}: ${evaluation.reason} (assigned: ${evaluation.daysSinceAssigned ? evaluation.daysSinceAssigned.toFixed(1) : 0}d, updated: ${evaluation.daysSinceUpdate ? evaluation.daysSinceUpdate.toFixed(1) : 0}d ago)`);
+        core.info(
+          `Skipping #${issue.number}: ${evaluation.reason}`
+        );
         continue;
       }
 
       const assignees = evaluation.assignees;
-      core.info(`Issue #${issue.number} assigned to @${assignees.join(', @')} has had no PR or updates within ${daysThreshold} days.`);
+
+      core.info(
+        `Issue #${issue.number} is eligible for unassignment.`
+      );
 
       if (dryRun) {
-        core.info(`[Dry Run] Would unassign @${assignees.join(', @')} from issue #${issue.number}`);
+        core.info(
+          `[Dry Run] Would unassign @${assignees.join(', @')} from #${issue.number}`
+        );
         unassignedCount++;
         continue;
       }
 
-      // 3. Remove assignees
+      // Remove assignees
       await github.rest.issues.removeAssignees({
         owner,
         repo,
@@ -202,11 +248,16 @@ async function run({
         assignees
       });
 
-      // 4. Remove 'assigned' label if present
-      const hasAssignedLabel = (issue.labels || []).some(
-        l => (typeof l === 'string' ? l : l.name).toLowerCase() === 'assigned'
+      // Remove assigned label if present
+      const hasLabel = (issue.labels || []).some(
+        label =>
+          (typeof label === 'string'
+            ? label
+            : label.name
+          ).toLowerCase() === 'assigned'
       );
-      if (hasAssignedLabel) {
+
+      if (hasLabel) {
         try {
           await github.rest.issues.removeLabel({
             owner,
@@ -214,96 +265,143 @@ async function run({
             issue_number: issue.number,
             name: 'assigned'
           });
-        } catch (err) {
-          core.debug(`Could not remove 'assigned' label from #${issue.number}: ${err.message}`);
+        } catch (error) {
+          core.warning(
+            `Could not remove assigned label from #${issue.number}: ${error.message}`
+          );
         }
       }
 
-      // 5. Post notification comment
-      const mentionText = assignees.map(u => `@${u}`).join(', ');
-      const commentBody = `⚠️ ${mentionText} This issue has been automatically unassigned because there were no pull requests or updates in the last ${daysThreshold} days. It is now open for other contributors to claim!`;
+      // Notify contributors
+      const mention = assignees.map(a => `@${a}`).join(', ');
+
+      const comment =
+        `⚠️ ${mention} This issue has been automatically unassigned because there were no linked pull requests or recent updates in the last ${daysThreshold} days. It is now open for other contributors to claim!`;
 
       await github.rest.issues.createComment({
         owner,
         repo,
         issue_number: issue.number,
-        body: commentBody
+        body: comment
       });
 
-      core.info(`Successfully unassigned @${assignees.join(', @')} from issue #${issue.number}`);
+      core.info(
+        `Successfully unassigned issue #${issue.number}.`
+      );
+
       unassignedCount++;
-    } catch (err) {
-      core.error(`Failed processing issue #${issue.number}: ${err.message}`);
+
+    } catch (error) {
+      core.error(
+        `Failed processing issue #${issue.number}: ${error.message}`
+      );
     }
   }
 
-  core.info(`Issue Auto-Unassigner finished. Total issues unassigned: ${unassignedCount}`);
+  core.info(
+    `Issue Auto-Unassigner finished. Total issues processed for unassignment: ${unassignedCount}`
+  );
+
   return { unassignedCount };
 }
 
-/**
- * Creates a lightweight Octokit-compatible wrapper around native fetch for CLI usage.
- */
+// Native fetch wrapper for standalone execution
 function createFetchOctokit(token) {
   const headers = {
     Authorization: `Bearer ${token}`,
     Accept: 'application/vnd.github+json',
+    'Content-Type': 'application/json',
     'User-Agent': 'Truxify-Issue-Unassigner'
   };
 
   async function request(url, options = {}) {
-    const res = await fetch(url, { ...options, headers: { ...headers, ...options.headers } });
-    if (!res.ok) {
-      const text = await res.text();
-      const err = new Error(`GitHub API HTTP ${res.status}: ${text}`);
-      err.status = res.status;
-      throw err;
+    const response = await fetch(url, {
+      ...options,
+      headers: { ...headers, ...options.headers }
+    });
+
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(
+        `GitHub API HTTP ${response.status}: ${message}`
+      );
     }
-    return res.json();
+
+    // DELETE requests may return HTTP 204 with no body.
+    const text = await response.text();
+
+    return text ? JSON.parse(text) : null;
   }
 
   return {
     paginate: async (method, params) => {
+      const results = [];
       let page = 1;
-      let results = [];
+
       while (true) {
-        const items = await method({ ...params, page, per_page: params.per_page || 100 });
+        const items = await method({
+          ...params,
+          page,
+          per_page: params.per_page || 100
+        });
+
         if (!items || items.length === 0) break;
-        results = results.concat(items);
+
+        results.push(...items);
+
         if (items.length < (params.per_page || 100)) break;
+
         page++;
       }
+
       return results;
     },
+
     rest: {
       issues: {
-        listForRepo: async ({ owner, repo, state, page, per_page }) => {
-          return request(`https://api.github.com/repos/${owner}/${repo}/issues?state=${state}&page=${page}&per_page=${per_page}`);
-        },
-        listEventsForTimeline: async ({ owner, repo, issue_number, page, per_page }) => {
-          return request(`https://api.github.com/repos/${owner}/${repo}/issues/${issue_number}/timeline?page=${page}&per_page=${per_page}`);
-        },
-        removeAssignees: async ({ owner, repo, issue_number, assignees }) => {
-          return request(`https://api.github.com/repos/${owner}/${repo}/issues/${issue_number}/assignees`, {
-            method: 'DELETE',
-            body: JSON.stringify({ assignees })
-          });
-        },
-        removeLabel: async ({ owner, repo, issue_number, name }) => {
-          return request(`https://api.github.com/repos/${owner}/${repo}/issues/${issue_number}/labels/${encodeURIComponent(name)}`, {
-            method: 'DELETE'
-          });
-        },
-        createComment: async ({ owner, repo, issue_number, body }) => {
-          return request(`https://api.github.com/repos/${owner}/${repo}/issues/${issue_number}/comments`, {
-            method: 'POST',
-            body: JSON.stringify({ body })
-          });
-        }
+        listForRepo: params =>
+          request(
+            `${BASE_URL}/repos/${params.owner}/${params.repo}/issues?state=${params.state}&page=${params.page}&per_page=${params.per_page}`
+          ),
+
+        listEventsForTimeline: params =>
+          request(
+            `${BASE_URL}/repos/${params.owner}/${params.repo}/issues/${params.issue_number}/timeline?page=${params.page}&per_page=${params.per_page}`
+          ),
+
+        removeAssignees: params =>
+          request(
+            `${BASE_URL}/repos/${params.owner}/${params.repo}/issues/${params.issue_number}/assignees`,
+            {
+              method: 'DELETE',
+              body: JSON.stringify({
+                assignees: params.assignees
+              })
+            }
+          ),
+
+        removeLabel: params =>
+          request(
+            `${BASE_URL}/repos/${params.owner}/${params.repo}/issues/${params.issue_number}/labels/${encodeURIComponent(params.name)}`,
+            { method: 'DELETE' }
+          ),
+
+        createComment: params =>
+          request(
+            `${BASE_URL}/repos/${params.owner}/${params.repo}/issues/${params.issue_number}/comments`,
+            {
+              method: 'POST',
+              body: JSON.stringify({ body: params.body })
+            }
+          )
       },
+
       search: {
         issuesAndPullRequests: async ({ q }) => {
-          const data = await request(`https://api.github.com/search/issues?q=${encodeURIComponent(q)}`);
+          const data = await request(
+            `${BASE_URL}/search/issues?q=${encodeURIComponent(q)}`
+          );
+
           return { data };
         }
       }
@@ -311,21 +409,35 @@ function createFetchOctokit(token) {
   };
 }
 
-// Standalone CLI execution support
+// Standalone CLI execution
 if (require.main === module) {
   (async () => {
-    const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+    const token =
+      process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+
     if (!token) {
-      console.error('Error: GITHUB_TOKEN or GH_TOKEN environment variable is required to run locally.');
-      console.error('Usage: GITHUB_TOKEN=xxx [DRY_RUN=true] [DAYS_THRESHOLD=7] node .github/scripts/issue-unassigner.js');
-      process.exit(1);
+      throw new Error(
+        'GITHUB_TOKEN or GH_TOKEN environment variable is required.'
+      );
     }
 
-    const repoSlug = process.env.GITHUB_REPOSITORY || 'KanishJebaMathewM/Truxify';
+    const repoSlug =
+      process.env.GITHUB_REPOSITORY ||
+      'KanishJebaMathewM/Truxify';
+
     const [owner, repo] = repoSlug.split('/');
-    const dryRun = process.env.DRY_RUN === 'true' || process.argv.includes('--dry-run');
-    const daysThreshold = parseFloat(process.env.DAYS_THRESHOLD || '7');
-    const mode = process.env.MODE || 'no_pr_or_inactive';
+
+    if (!owner || !repo) {
+      throw new Error('Invalid repository name.');
+    }
+
+    const dryRun =
+      process.env.DRY_RUN === 'true' ||
+      process.argv.includes('--dry-run');
+
+    const daysThreshold = Number(
+      process.env.DAYS_THRESHOLD || DAYS
+    );
 
     const github = createFetchOctokit(token);
 
@@ -334,12 +446,11 @@ if (require.main === module) {
       context: { repo: { owner, repo } },
       core: console,
       dryRun,
-      daysThreshold,
-      mode
+      daysThreshold
     });
-  })().catch(err => {
-    console.error(err);
-    process.exit(1);
+  })().catch(error => {
+    console.error(error.message);
+    process.exitCode = 1;
   });
 }
 
@@ -351,3 +462,4 @@ module.exports = {
   createFetchOctokit,
   run
 };
+

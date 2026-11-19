@@ -1,3 +1,7 @@
+
+# Android release signing configuration
+# Replace these placeholders with your actual keystore details.
+
 keyAlias=YOUR_KEY_ALIAS
 keyPassword=YOUR_KEY_PASSWORD
 storeFile=upload-keystore.jks

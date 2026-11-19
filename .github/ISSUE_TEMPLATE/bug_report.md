@@ -1,48 +1,62 @@
 
----
 name: Bug report
 about: Create a report to help us identify and fix a bug
 title: "bug: "
 labels: "type: bug"
 assignees: ""
----
 
-## Describe the bug
+body:
+  - type: textarea
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of the bug.
+    validations:
+      required: true
 
-A clear and concise description of what the bug is.
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Go to '...'
+        2. Click on '...'
+        3. Perform the following action
+        4. Observe the error
+    validations:
+      required: true
 
-## Steps to reproduce
+  - type: textarea
+    attributes:
+      label: Expected behavior
+      description: Describe what you expected to happen.
+    validations:
+      required: true
 
-Steps to reproduce the behavior:
+  - type: textarea
+    attributes:
+      label: Actual behavior
+      description: Describe what actually happened.
+    validations:
+      required: true
 
-1. Go to '...'
-2. Click on '...'
-3. Perform the following action: '...'
-4. Observe the error.
+  - type: textarea
+    attributes:
+      label: Screenshots
+      description: Add screenshots or screen recordings if applicable.
 
-## Expected behavior
+  - type: textarea
+    attributes:
+      label: Environment
+      description: Complete the following information.
+      placeholder: |
+        - Operating System:
+        - OS Version:
+        - App/Project Version:
+        - Browser:
+        - Browser Version:
+        - Device:
 
-A clear and concise description of what you expected to happen.
-
-## Actual behavior
-
-A clear description of what actually happened.
-
-## Screenshots
-
-If applicable, add screenshots or screen recordings to help explain the problem.
-
-## Environment
-
-Please complete the following information:
-
-- **Operating System:** [e.g. Windows 11, macOS, Linux]
-- **OS Version:**
-- **App/Project Version:**
-- **Browser:** [e.g. Chrome, Firefox, Safari]
-- **Browser Version:**
-- **Device:** [e.g. Desktop, Laptop, Smartphone]
-
-## Additional context
-
-Add any other context about the problem here.
+  - type: textarea
+    attributes:
+      label: Additional context
+      description: Add any other context about the bug.

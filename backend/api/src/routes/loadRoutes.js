@@ -55,6 +55,7 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
+import { parseStrictNumber } from '../lib/queryParams.js';
 import { loadFilterQuerySchema, createLoadSchema } from '../validation/loadSchemas.js';
 import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
 import { paramIdSchema } from '../validation/requestSchemas.js';
@@ -625,19 +626,38 @@ router.get('/:id/profit-estimate', authenticate, userLimiter, requirePolicy('loa
       return res.status(404).json({ error: 'Load offer not found or no longer available.' });
     }
 
-    // Resolve distance: explicit query param > load's extra_distance_km > 0
-    const distanceKm =
-      parseFloat(req.query.distance_km) ||
-      parseFloat(load.extra_distance_km) ||
-      0;
+    // Resolve distance: explicit query param > load's extra_distance_km > 0.
+    // Reject malformed query values instead of letting parseFloat accept a
+    // numeric prefix such as "100abc" and silently run a different filter.
+    let distanceKm;
+    if (req.query.distance_km !== undefined) {
+      const parsedDistance = parseStrictNumber(req.query.distance_km, { min: 0 });
+      if (parsedDistance === null) {
+        return res.status(400).json({ error: 'distance_km must be a non-negative number' });
+      }
+      distanceKm = parsedDistance;
+    } else {
+      distanceKm = parseStrictNumber(load.extra_distance_km, { min: 0 }) ?? 0;
+    }
 
     const freightAmountInr = (Number(load.freight_value) || 0) / 100;
 
     const configOverrides = {};
-    if (req.query.fuel_price_per_litre)  configOverrides.fuelPricePerLitre = parseFloat(req.query.fuel_price_per_litre);
-    if (req.query.truck_km_per_litre)    configOverrides.truckKmPerLitre   = parseFloat(req.query.truck_km_per_litre);
-    if (req.query.toll_rate_per_km)      configOverrides.tollRatePerKm     = parseFloat(req.query.toll_rate_per_km);
-    if (req.query.other_cost_per_km)     configOverrides.otherCostPerKm    = parseFloat(req.query.other_cost_per_km);
+    const numericOverrides = [
+      ['fuel_price_per_litre', 'fuelPricePerLitre'],
+      ['truck_km_per_litre', 'truckKmPerLitre'],
+      ['toll_rate_per_km', 'tollRatePerKm'],
+      ['other_cost_per_km', 'otherCostPerKm'],
+    ];
+
+    for (const [queryKey, configKey] of numericOverrides) {
+      if (req.query[queryKey] === undefined) continue;
+      const parsed = parseStrictNumber(req.query[queryKey], { min: 0 });
+      if (parsed === null) {
+        return res.status(400).json({ error: `${queryKey} must be a non-negative number` });
+      }
+      configOverrides[configKey] = parsed;
+    }
 
     const breakdown = estimateTripProfit({
       freightAmountInr,

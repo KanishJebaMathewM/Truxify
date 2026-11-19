@@ -668,6 +668,47 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                 ),
               ),
             ),
+            const SizedBox(height: 16),
+
+            // Theme Preference Card
+            Card(
+              elevation: 4,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Theme — Light / Dark / System',
+                      style: GoogleFonts.dmSans(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Select dark mode for night and truck cab driving to reduce eye strain.',
+                      style: GoogleFonts.dmSans(
+                        fontSize: 13,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Consumer<ThemeProvider>(
+                      builder: (context, themeProvider, _) {
+                        return Center(
+                          child: ThemeSegmentedControl(provider: themeProvider),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
       ),

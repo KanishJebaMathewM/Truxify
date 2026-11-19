@@ -1,6 +1,7 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:truxify_shared/truxify_shared.dart';
 import 'utils/support_ticket_parser.dart';
 
 /// Backend connection settings, injected at build time via --dart-define.
@@ -28,24 +29,49 @@ void main() {
   runApp(const AdminDashboardApp());
 }
 
-class AdminDashboardApp extends StatelessWidget {
+class AdminDashboardApp extends StatefulWidget {
   const AdminDashboardApp({super.key});
+
+  @override
+  State<AdminDashboardApp> createState() => _AdminDashboardAppState();
+}
+
+class _AdminDashboardAppState extends State<AdminDashboardApp> {
+  final ThemeProvider _themeProvider = ThemeProvider();
+
+  @override
+  void initState() {
+    super.initState();
+    _themeProvider.addListener(_onThemeChanged);
+  }
+
+  @override
+  void dispose() {
+    _themeProvider.removeListener(_onThemeChanged);
+    _themeProvider.dispose();
+    super.dispose();
+  }
+
+  void _onThemeChanged() {
+    setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Truxify Admin Dashboard',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueGrey),
-        useMaterial3: true,
-      ),
-      home: const DashboardShell(),
+      theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
+      themeMode: _themeProvider.themeMode,
+      home: DashboardShell(themeProvider: _themeProvider),
     );
   }
 }
 
 class DashboardShell extends StatefulWidget {
-  const DashboardShell({super.key});
+  const DashboardShell({super.key, required this.themeProvider});
+
+  final ThemeProvider themeProvider;
 
   @override
   State<DashboardShell> createState() => _DashboardShellState();
@@ -54,18 +80,28 @@ class DashboardShell extends StatefulWidget {
 class _DashboardShellState extends State<DashboardShell> {
   int _selectedIndex = 0;
 
-  final List<Widget> _pages = const [
-    UsersView(),
-    TrucksView(),
-    SupportTicketsView(),
-  ];
+  late final List<Widget> _pages;
+
+  @override
+  void initState() {
+    super.initState();
+    _pages = [
+      const UsersView(),
+      const TrucksView(),
+      const SupportTicketsView(),
+      AdminSettingsView(themeProvider: widget.themeProvider),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Truxify Admin Panel'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        actions: [
+          ThemeToggle(provider: widget.themeProvider),
+          const SizedBox(width: 8),
+        ],
       ),
       body: Row(
         children: [
@@ -93,11 +129,57 @@ class _DashboardShellState extends State<DashboardShell> {
                 selectedIcon: Icon(Icons.support_agent),
                 label: Text('Tickets'),
               ),
+              NavigationRailDestination(
+                icon: Icon(Icons.settings_outlined),
+                selectedIcon: Icon(Icons.settings),
+                label: Text('Settings'),
+              ),
             ],
           ),
           const VerticalDivider(thickness: 1, width: 1),
           Expanded(
             child: _pages[_selectedIndex],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class AdminSettingsView extends StatelessWidget {
+  const AdminSettingsView({super.key, required this.themeProvider});
+
+  final ThemeProvider themeProvider;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Settings', style: Theme.of(context).textTheme.headlineMedium),
+          const SizedBox(height: 24),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Theme Preference',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Choose how Truxify Admin looks to you. Select Light, Dark, or follow System settings.',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                  const SizedBox(height: 16),
+                  ThemeSegmentedControl(provider: themeProvider),
+                ],
+              ),
+            ),
           ),
         ],
       ),

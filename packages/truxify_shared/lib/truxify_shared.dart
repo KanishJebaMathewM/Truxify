@@ -18,8 +18,13 @@ export 'src/services/resilient_websocket.dart';
 export 'src/services/connectivity_service.dart';
 export 'src/services/offline_queue.dart';
 
+// ── Theme & Providers ───────────────────────────────────────────────
+export 'src/theme/app_theme.dart';
+export 'src/providers/theme_provider.dart';
+
 // ── Widgets ─────────────────────────────────────────────────────────
 export 'src/widgets/truxify_error_widget.dart';
+export 'src/widgets/theme_toggle.dart';
 
 // ── Models ──────────────────────────────────────────────────────────
 export 'src/models/faq.dart';

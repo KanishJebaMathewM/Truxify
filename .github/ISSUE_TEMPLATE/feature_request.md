@@ -1,6 +1,6 @@
 
 name: Feature Request
-about: Suggest an idea or improvement for this project
+description: Suggest an idea or improvement for this project
 title: "feat: "
 labels: ["enhancement"]
 assignees: []
@@ -10,13 +10,13 @@ body:
     attributes:
       value: |
         ## Feature Request
-        Thank you for suggesting an improvement!
+        Thank you for suggesting an improvement! Please provide the details below.
 
   - type: textarea
     id: problem
     attributes:
       label: Is your feature request related to a problem?
-      description: Describe the problem clearly.
+      description: Describe the problem or limitation you are facing.
       placeholder: "I'm always frustrated when..."
     validations:
       required: true

@@ -299,30 +299,6 @@ function requireDriverRole(req, res, next) {
   }
   next();
 }
-router.get('/driver/:id/earnings', authenticate, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { period = 'week' } = req.query;
-
-    // Calculate date filter based on period
-    const startDate = getStartDateForPeriod(period);
-
-    const { data: trips, error } = await supabase
-      .from('trips')
-      .select('*, route_details, gross_payment, estimated_fuel_cost, deadhead_saved, tx_hash')
-      .eq('driver_id', id)
-      .gte('completed_at', startDate.toISOString())
-      .order('completed_at', { ascending: false });
-
-    if (error) throw error;
-
-    const summary = computeEarningsSummary(trips);
-
-    return res.status(200).json({ success: true, period, summary, trips });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
 function parseIntegerQuery(value) {
   if (value === undefined) return undefined;
   if (!/^\d+$/.test(String(value))) return NaN;
@@ -470,13 +446,6 @@ router.put('/online', authenticate, userLimiter, requirePolicy('driver:toggle-on
   } catch (err) {
     logger.error({ event: 'DRIVER_ONLINE_STATUS_UPDATE_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver online status update error');
     res.status(500).json({ error: 'Internal Server Error' });
-    // backend/api/src/routes/driverRoutes.js (Excerpt from earnings report handler)
-
-// BEFORE:
-// const avg_earning_per_km = totalKm > 0 ? (totalNetEarnings / 100.0) / totalKm : 0;
-
-// FIXED (Per issue #8818 - keeping units consistent in paisa):
-const avg_earning_per_km = totalKm > 0 ? totalNetEarnings / totalKm : 0;
   }
 });
 

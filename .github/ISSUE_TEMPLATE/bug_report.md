@@ -1,48 +1,73 @@
+name: Bug Report
+about: Report an issue to help us improve the project
+title: "[Bug]: "
+labels: ["type: bug"]
+assignees: []
 
 ---
-name: Bug report
-about: Create a report to help us identify and fix a bug
-title: "bug: "
-labels: "type: bug"
-assignees: ""
----
 
-## Describe the bug
+## 🐞 Bug Summary
 
-A clear and concise description of what the bug is.
+Provide a clear and concise description of the issue you encountered.
 
-## Steps to reproduce
+## 📋 Steps to Reproduce
 
-Steps to reproduce the behavior:
+Please describe the steps required to reproduce the issue.
 
 1. Go to '...'
 2. Click on '...'
-3. Perform the following action: '...'
-4. Observe the error.
+3. Perform the action '...'
+4. Notice the unexpected behavior.
 
-## Expected behavior
+## ✅ Expected Behavior
 
-A clear and concise description of what you expected to happen.
+Describe what you expected to happen.
 
-## Actual behavior
+## ❌ Actual Behavior
 
-A clear description of what actually happened.
+Describe what actually happened instead.
 
-## Screenshots
+## 📸 Screenshots or Recordings
 
-If applicable, add screenshots or screen recordings to help explain the problem.
+If applicable, attach screenshots, GIFs, or screen recordings that help demonstrate the issue.
 
-## Environment
+## 💻 Environment
 
-Please complete the following information:
+Please provide the following details:
 
-- **Operating System:** [e.g. Windows 11, macOS, Linux]
+- **Operating System:** (e.g., Windows 11, macOS Sonoma, Ubuntu 24.04)
 - **OS Version:**
-- **App/Project Version:**
-- **Browser:** [e.g. Chrome, Firefox, Safari]
+- **Application/Project Version:**
+- **Browser:** (e.g., Chrome, Firefox, Edge, Safari)
 - **Browser Version:**
-- **Device:** [e.g. Desktop, Laptop, Smartphone]
+- **Device:** (Desktop, Laptop, Mobile, Tablet)
 
-## Additional context
+## 📄 Logs or Console Output
 
-Add any other context about the problem here.
+If available, include any relevant error messages, logs, or console output.
+
+<details>
+<summary>Paste logs here</summary>
+
+```text
+Paste logs or stack traces here.
+```
+
+</details>
+
+## 🔍 Possible Cause (Optional)
+
+If you have an idea of what might be causing the issue, please describe it here.
+
+## ✔️ Checklist
+
+Before submitting, please confirm the following:
+
+- [ ] I have searched for existing issues before creating this report.
+- [ ] I can consistently reproduce the issue.
+- [ ] I have included all relevant information and screenshots (if applicable).
+- [ ] I have tested using the latest version of the project.
+
+## 📝 Additional Information
+
+Add any extra details or context that may help us investigate and resolve the issue.

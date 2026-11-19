@@ -1,3 +1,4 @@
+
 name: Assign PR
 
 on:
@@ -8,20 +9,22 @@ jobs:
   assign-author:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    
+
     permissions:
       pull-requests: write
-      
+
     steps:
-      - name: 'Auto-assign PR to creator'
+      - name: Auto-assign PR to creator
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
         with:
-        
           script: |
-            github.rest.issues.addAssignees({
-              issue_number: context.issue.number,
+            const author = context.payload.pull_request.user.login;
+
+            await github.rest.issues.addAssignees({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              assignees: [context.payload.pull_request.user.login]
-            })
+              issue_number: context.issue.number,
+              assignees: [author]
+            });
+
             

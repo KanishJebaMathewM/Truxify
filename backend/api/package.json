@@ -39,7 +39,7 @@
     "connect-timeout": "^1.9.1",
     "cors": "^2.8.5",
     "dompurify": "^3.4.17",
-    "dotenv": "^17.4.2",
+    "dotenv": "^18.0.10",
     "ethers": "6.17.0",
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.2",

@@ -66,6 +66,7 @@ dev_dependencies:
   sqflite_common_ffi: ^2.3.4
   flutter_test:
     sdk: flutter
+  mocktail: ^1.0.4  
   firebase_core_platform_interface: any
   mockito: ^5.4.4
   build_runner: ^2.4.8

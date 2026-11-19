@@ -139,11 +139,11 @@ describe('setHstsHeader', () => {
     expect(result).toBe(false);
   });
 
-  it('includes preload by default when SECURE_HSTS_PRELOAD is not set', () => {
-    // !preload is true when env var is undefined, so includePreload defaults to true
+  it('omits preload by default when SECURE_HSTS_PRELOAD is not set', () => {
+    // Preload is a one-way commitment and must be explicitly opted into.
     const res = mockRes();
     setHstsHeader(res);
-    expect(res.getHeader('Strict-Transport-Security')).toContain('preload');
+    expect(res.getHeader('Strict-Transport-Security')).not.toContain('preload');
   });
 
   it('omits preload when SECURE_HSTS_PRELOAD is false', () => {

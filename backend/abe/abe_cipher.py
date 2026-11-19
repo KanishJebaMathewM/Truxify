@@ -1,11 +1,10 @@
-
 import base64
 import binascii
 import json
 import os
 import re
 
-from typing import Dict, Optional, Set
+from typing import Dict, Optional, Set, Any
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes
@@ -14,10 +13,6 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from policy_builder import CpAbePolicyBuilder
 
-
-# --------------------------------------------------
-# CRYPTOGRAPHIC CONFIGURATION
-# --------------------------------------------------
 
 NONCE_SIZE = 12
 TAG_SIZE = 16
@@ -56,48 +51,42 @@ class CpAbeCipherEngine:
     def __init__(self, policy_builder=None):
 
         self.policy_builder = (
-            policy_builder or CpAbePolicyBuilder()
+            policy_builder if policy_builder is not None
+            else CpAbePolicyBuilder()
         )
 
-    # --------------------------------------------------
-    # VALIDATION
-    # --------------------------------------------------
-
     @staticmethod
-    def _validate_policy(policy_str: str) -> str:
-
-        if not isinstance(policy_str, str):
+    def _validate_policy(policy: str) -> str:
+        if not isinstance(policy, str):
             raise TypeError("Policy must be a string.")
 
-        policy_str = policy_str.strip()
+        policy = policy.strip()
 
-        if not policy_str:
+        if not policy:
             raise ValueError("Access policy cannot be empty.")
 
-        if len(policy_str) > MAX_POLICY_LENGTH:
+        if len(policy) > MAX_POLICY_LENGTH:
             raise ValueError("Access policy is too long.")
 
-        return policy_str
+        return policy
 
     @staticmethod
     def _validate_document_id(
         document_id: Optional[str]
     ) -> Optional[str]:
-
         if document_id is None:
             return None
 
         if not isinstance(document_id, str):
             raise TypeError("Document ID must be a string.")
 
-        if not document_id or len(document_id) > 256:
+        if not document_id.strip() or len(document_id) > 256:
             raise ValueError("Invalid document ID.")
 
         return document_id
 
     @staticmethod
     def _validate_key_id(key_id: str) -> str:
-
         if not isinstance(key_id, str):
             raise TypeError("Key ID must be a string.")
 
@@ -150,62 +139,49 @@ class CpAbeCipherEngine:
         master_secret = os.environ.get(env_name)
 
         if not master_secret and key_id == DEFAULT_KEY_ID:
-            master_secret = os.environ.get(
-                "ABE_MASTER_SECRET"
-            )
+            master_secret = os.environ.get("ABE_MASTER_SECRET")
 
         if not master_secret:
             raise RuntimeError(
-                f"Master encryption key '{key_id}' "
-                "is not configured."
+                f"Master encryption key '{key_id}' is not configured."
             )
 
         secret_bytes = master_secret.encode("utf-8")
 
         if len(secret_bytes) < KEY_SIZE:
             raise RuntimeError(
-                "Master secret must contain at least "
-                "32 bytes."
+                "Master secret must contain at least 32 bytes."
             )
 
         return secret_bytes
 
-    # --------------------------------------------------
-    # AUTHENTICATED METADATA
-    # --------------------------------------------------
-
     @staticmethod
     def _build_aad(
-        policy_str: str,
+        policy: str,
         key_id: str,
-        document_id: Optional[str],
+        document_id: Optional[str]
     ) -> bytes:
 
         metadata = {
             "version": ENVELOPE_VERSION,
             "algorithm": ALGORITHM,
-            "policy": policy_str,
+            "policy": policy,
             "key_id": key_id,
-            "document_id": document_id,
+            "document_id": document_id
         }
 
         return json.dumps(
             metadata,
             sort_keys=True,
             separators=(",", ":"),
-            ensure_ascii=False,
+            ensure_ascii=False
         ).encode("utf-8")
-
-    # --------------------------------------------------
-    # KEY DERIVATION
-    # --------------------------------------------------
 
     def _derive_key(
         self,
         nonce: bytes,
         key_id: str,
     ) -> bytes:
-
         if len(nonce) != NONCE_SIZE:
             raise ValueError("Invalid nonce length.")
 
@@ -221,45 +197,42 @@ class CpAbeCipherEngine:
             ).encode("utf-8"),
         ).derive(master_secret)
 
-    # --------------------------------------------------
-    # ENCRYPT DOCUMENT
-    # --------------------------------------------------
-
     def encrypt_document(
         self,
         plaintext_bytes: bytes,
         policy_str: str,
         document_id: Optional[str] = None,
-        key_id: str = DEFAULT_KEY_ID,
-    ) -> Dict:
+        key_id: str = DEFAULT_KEY_ID
+    ) -> Dict[str, Any]:
 
         self._validate_plaintext(plaintext_bytes)
 
         policy_str = self._validate_policy(policy_str)
 
-        document_id = self._validate_document_id(
-            document_id
-        )
+        if len(plaintext_bytes) > MAX_CIPHERTEXT_SIZE:
+            raise ValueError("Document exceeds maximum size.")
 
+        policy = self._validate_policy(policy_str)
+        document_id = self._validate_document_id(document_id)
         key_id = self._validate_key_id(key_id)
 
         nonce = os.urandom(NONCE_SIZE)
 
         key = self._derive_key(
             nonce,
-            key_id,
+            key_id
         )
 
         aad = self._build_aad(
-            policy_str,
+            policy,
             key_id,
-            document_id,
+            document_id
         )
 
-        ciphertext = AESGCM(key).encrypt(
+        encrypted_data = AESGCM(key).encrypt(
             nonce,
             plaintext_bytes,
-            aad,
+            aad
         )
 
         encrypted = nonce + ciphertext
@@ -268,16 +241,12 @@ class CpAbeCipherEngine:
             "version": ENVELOPE_VERSION,
             "algorithm": ALGORITHM,
             "key_id": key_id,
-            "policy": policy_str,
+            "policy": policy,
             "document_id": document_id,
             "ciphertext_b64": base64.b64encode(
                 encrypted
-            ).decode("ascii"),
+            ).decode("ascii")
         }
-
-    # --------------------------------------------------
-    # DECRYPT DOCUMENT
-    # --------------------------------------------------
 
     def decrypt_document(
         self,
@@ -343,7 +312,7 @@ class CpAbeCipherEngine:
         try:
             encrypted = base64.b64decode(
                 ciphertext_b64,
-                validate=True,
+                validate=True
             )
         except (ValueError, TypeError, binascii.Error):
             raise ValueError(
@@ -363,11 +332,9 @@ class CpAbeCipherEngine:
         # --------------------------------------------------
 
         try:
-            authorized = (
-                self.policy_builder.evaluate_user_attributes(
-                    user_attributes,
-                    policy_str,
-                )
+            authorized = self.policy_builder.evaluate_user_attributes(
+                user_attributes,
+                policy
             )
         except Exception:
             raise ValueError(
@@ -389,33 +356,28 @@ class CpAbeCipherEngine:
 
         key = self._derive_key(
             nonce,
-            key_id,
+            key_id
         )
 
         aad = self._build_aad(
-            policy_str,
+            policy,
             key_id,
-            document_id,
+            document_id
         )
 
         try:
             plaintext = AESGCM(key).decrypt(
                 nonce,
                 ciphertext,
-                aad,
+                aad
             )
 
             return plaintext
 
         except InvalidTag:
             raise ValueError(
-                "Decryption failed: authentication "
-                "verification failed."
+                "Decryption failed: authentication verification failed."
             ) from None
 
-
-# --------------------------------------------------
-# SHARED ENGINE INSTANCE
-# --------------------------------------------------
 
 abe_cipher = CpAbeCipherEngine()

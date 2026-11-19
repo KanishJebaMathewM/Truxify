@@ -1,237 +1,103 @@
 
 [
   {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "string",
-        "name": "bookingId",
-        "type": "string"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "customer",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
-      }
-    ],
-    "name": "CustomerRefunded",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "string",
-        "name": "bookingId",
-        "type": "string"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "customer",
-        "type": "address"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "driver",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
-      }
-    ],
-    "name": "EscrowFunded",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "string",
-        "name": "bookingId",
-        "type": "string"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "driver",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
-      }
-    ],
-    "name": "PaymentReleased",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "string",
-        "name": "bookingId",
-        "type": "string"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "customer",
-        "type": "address"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "driver",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
-      }
-    ],
+    "type": "event",
     "name": "EscrowCreated",
-    "type": "event"
+    "anonymous": false,
+    "inputs": [
+      { "name": "bookingId", "type": "string", "indexed": true },
+      { "name": "customer", "type": "address", "indexed": true },
+      { "name": "driver", "type": "address", "indexed": true },
+      { "name": "amount", "type": "uint256", "indexed": false }
+    ]
   },
   {
+    "type": "event",
+    "name": "EscrowFunded",
+    "anonymous": false,
     "inputs": [
-      {
-        "internalType": "string",
-        "name": "bookingId",
-        "type": "string"
-      },
-      {
-        "internalType": "address payable",
-        "name": "driver",
-        "type": "address"
-      }
-    ],
+      { "name": "bookingId", "type": "string", "indexed": true },
+      { "name": "customer", "type": "address", "indexed": true },
+      { "name": "driver", "type": "address", "indexed": true },
+      { "name": "amount", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "PaymentReleased",
+    "anonymous": false,
+    "inputs": [
+      { "name": "bookingId", "type": "string", "indexed": true },
+      { "name": "driver", "type": "address", "indexed": true },
+      { "name": "amount", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "CustomerRefunded",
+    "anonymous": false,
+    "inputs": [
+      { "name": "bookingId", "type": "string", "indexed": true },
+      { "name": "customer", "type": "address", "indexed": true },
+      { "name": "amount", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "function",
     "name": "createEscrow",
-    "outputs": [],
     "stateMutability": "payable",
-    "type": "function"
+    "inputs": [
+      { "name": "bookingId", "type": "string" },
+      { "name": "driver", "type": "address" }
+    ],
+    "outputs": []
   },
   {
-    "inputs": [
-      {
-        "internalType": "string",
-        "name": "bookingId",
-        "type": "string"
-      }
-    ],
+    "type": "function",
     "name": "confirmDeliveryAndRelease",
-    "outputs": [],
     "stateMutability": "nonpayable",
-    "type": "function"
+    "inputs": [
+      { "name": "bookingId", "type": "string" }
+    ],
+    "outputs": []
   },
   {
-    "inputs": [
-      {
-        "internalType": "string",
-        "name": "bookingId",
-        "type": "string"
-      }
-    ],
+    "type": "function",
     "name": "refundCustomer",
-    "outputs": [],
     "stateMutability": "nonpayable",
-    "type": "function"
+    "inputs": [
+      { "name": "bookingId", "type": "string" }
+    ],
+    "outputs": []
   },
   {
-    "inputs": [
-      {
-        "internalType": "string",
-        "name": "bookingId",
-        "type": "string"
-      }
-    ],
+    "type": "function",
     "name": "getOrderDetails",
-    "outputs": [
-      {
-        "internalType": "address",
-        "name": "customer",
-        "type": "address"
-      },
-      {
-        "internalType": "address",
-        "name": "driver",
-        "type": "address"
-      },
-      {
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
-      },
-      {
-        "internalType": "bool",
-        "name": "isCompleted",
-        "type": "bool"
-      },
-      {
-        "internalType": "bool",
-        "name": "isRefunded",
-        "type": "bool"
-      }
-    ],
     "stateMutability": "view",
-    "type": "function"
+    "inputs": [
+      { "name": "bookingId", "type": "string" }
+    ],
+    "outputs": [
+      { "name": "customer", "type": "address" },
+      { "name": "driver", "type": "address" },
+      { "name": "amount", "type": "uint256" },
+      { "name": "isCompleted", "type": "bool" },
+      { "name": "isRefunded", "type": "bool" }
+    ]
   },
   {
-    "inputs": [
-      {
-        "internalType": "string",
-        "name": "bookingId",
-        "type": "string"
-      }
-    ],
+    "type": "function",
     "name": "orders",
-    "outputs": [
-      {
-        "internalType": "address payable",
-        "name": "customer",
-        "type": "address"
-      },
-      {
-        "internalType": "address payable",
-        "name": "driver",
-        "type": "address"
-      },
-      {
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
-      },
-      {
-        "internalType": "bool",
-        "name": "isCompleted",
-        "type": "bool"
-      },
-      {
-        "internalType": "bool",
-        "name": "isRefunded",
-        "type": "bool"
-      }
-    ],
     "stateMutability": "view",
-    "type": "function"
+    "inputs": [
+      { "name": "bookingId", "type": "string" }
+    ],
+    "outputs": [
+      { "name": "customer", "type": "address" },
+      { "name": "driver", "type": "address" },
+      { "name": "amount", "type": "uint256" },
+      { "name": "isCompleted", "type": "bool" },
+      { "name": "isRefunded", "type": "bool" }
+    ]
   }
 ]

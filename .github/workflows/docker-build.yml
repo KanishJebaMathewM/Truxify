@@ -1,5 +1,8 @@
+
+# Build, smoke test, and publish API and ML Docker images
 name: Build and Push Docker Images
 
+# Trigger on main branch changes, version tags, and workflow changes
 on:
   push:
     branches:
@@ -11,24 +14,30 @@ on:
       - "backend/ml/**"
       - ".github/workflows/docker-build.yml"
 
+# Cancel outdated builds for the same Git reference
 concurrency:
   group: truxify-docker-${{ github.ref }}
   cancel-in-progress: true
 
+# Grant permission to read repository contents and publish packages
 permissions:
   contents: read
   packages: write
 
 jobs:
+  # Build, smoke test, and publish the API Docker image
   api:
     name: Build and smoke test API image
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
     steps:
+      # Checkout the current repository
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
 
+      # Authenticate with GitHub Container Registry
       - name: Log in to GHCR
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550
         with:
@@ -36,9 +45,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Configure Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
 
+      # Checkout the previous commit for canary comparison
       - name: Checkout previous commit for canary
         if: ${{ github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -47,6 +58,7 @@ jobs:
           path: previous
           persist-credentials: false
 
+      # Build and publish the previous API version as a canary image
       - name: Build and push API canary (previous ref)
         if: ${{ github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000' }}
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
@@ -57,6 +69,7 @@ jobs:
           tags: |
             ghcr.io/kanishjebamathewm/truxify-api:canary
 
+      # Build the current API image locally for smoke testing
       - name: Build API image for smoke test
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
         with:
@@ -65,10 +78,12 @@ jobs:
           load: true
           tags: truxify-api:ci-${{ github.sha }}
 
+      # Start the API container and verify its health endpoint
       - name: Smoke test API container
         shell: bash
         run: |
           set -euo pipefail
+
           docker run -d --name truxify-api-smoke -p 5000:5000 \
             -e PORT=5000 \
             -e NODE_ENV=test \
@@ -89,28 +104,36 @@ jobs:
           docker logs truxify-api-smoke
           exit 1
 
+      # Tag and publish the validated API image
       - name: Push API image
         shell: bash
         run: |
           set -euo pipefail
+
           docker tag truxify-api:ci-${{ github.sha }} ghcr.io/kanishjebamathewm/truxify-api:latest
           docker tag truxify-api:ci-${{ github.sha }} ghcr.io/kanishjebamathewm/truxify-api:${{ github.sha }}
+
           docker push ghcr.io/kanishjebamathewm/truxify-api:latest
           docker push ghcr.io/kanishjebamathewm/truxify-api:${{ github.sha }}
 
+      # Remove the API smoke-test container regardless of job outcome
       - name: Cleanup API smoke container
         if: always()
         run: docker rm -f truxify-api-smoke || true
 
+  # Build, smoke test, and publish the ML Docker image
   ml:
     name: Build and smoke test ML image
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
     steps:
+      # Checkout the current repository
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
 
+      # Authenticate with GitHub Container Registry
       - name: Log in to GHCR
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550
         with:
@@ -118,9 +141,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Configure Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
 
+      # Build the current ML image locally for smoke testing
       - name: Build ML image for smoke test
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
         with:
@@ -128,10 +153,12 @@ jobs:
           load: true
           tags: truxify-ml:ci-${{ github.sha }}
 
+      # Start the ML container and verify its health endpoint
       - name: Smoke test ML container
         shell: bash
         run: |
           set -euo pipefail
+
           docker run -d --name truxify-ml-smoke -p 8001:8001 \
             -e ML_API_KEY=ci-test-ml-key \
             truxify-ml:ci-${{ github.sha }}
@@ -147,15 +174,19 @@ jobs:
           docker logs truxify-ml-smoke
           exit 1
 
+      # Tag and publish the validated ML image
       - name: Push ML image
         shell: bash
         run: |
           set -euo pipefail
+
           docker tag truxify-ml:ci-${{ github.sha }} ghcr.io/kanishjebamathewm/truxify-ml:latest
           docker tag truxify-ml:ci-${{ github.sha }} ghcr.io/kanishjebamathewm/truxify-ml:${{ github.sha }}
+
           docker push ghcr.io/kanishjebamathewm/truxify-ml:latest
           docker push ghcr.io/kanishjebamathewm/truxify-ml:${{ github.sha }}
 
+      # Remove the ML smoke-test container regardless of job outcome
       - name: Cleanup ML smoke container
         if: always()
         run: docker rm -f truxify-ml-smoke || true

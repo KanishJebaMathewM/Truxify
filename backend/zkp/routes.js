@@ -1,5 +1,6 @@
 import express from 'express';
 import zkpService from './zkp.service.js';
+import { zkRatingService } from './rating_proof.js';
 import logger from '../api/src/middleware/logger.js';
 
 const router = express.Router();
@@ -134,6 +135,87 @@ router.get('/zkp/stats', async (req, res) => {
     } catch (error) {
         logger.error('Stats error:', error);
         res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// ============ Zero-Knowledge Rating & Nullifier Replay Defense Routes ============
+
+// Generate ZK 1-of-5 Range Rating Proof
+router.post('/zkp/rating/generate', (req, res) => {
+    try {
+        const { driverAddress, ratingStars, tripSecret, customerId, tripId, blindingFactor } = req.body;
+        if (!driverAddress || !ratingStars || !tripSecret || !customerId) {
+            return res.status(400).json({
+                success: false,
+                error: 'driverAddress, ratingStars (1..5), tripSecret, and customerId are required'
+            });
+        }
+        const proofPacket = zkRatingService.generateZkProof(
+            driverAddress,
+            ratingStars,
+            tripSecret,
+            customerId,
+            tripId,
+            blindingFactor
+        );
+        return res.json({ success: true, data: proofPacket });
+    } catch (error) {
+        logger.error('ZKP rating proof generate error:', error);
+        return res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Verify ZK Rating Proof without revealing rating
+router.post('/zkp/rating/verify', (req, res) => {
+    try {
+        const { proofPacket } = req.body;
+        if (!proofPacket) {
+            return res.status(400).json({ success: false, error: 'proofPacket is required' });
+        }
+        const result = zkRatingService.verifyZkProof(proofPacket);
+        return res.json({ success: result.valid, data: result });
+    } catch (error) {
+        logger.error('ZKP rating proof verify error:', error);
+        return res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Submit Verified ZK Rating Proof (Enforces Nullifier Anti-Replay Defense)
+router.post('/zkp/rating/submit', (req, res) => {
+    try {
+        const { proofPacket, actualRatingForLedger } = req.body;
+        if (!proofPacket) {
+            return res.status(400).json({ success: false, error: 'proofPacket is required' });
+        }
+        const result = zkRatingService.submitVerifiedRating(proofPacket, actualRatingForLedger);
+        return res.json({ success: true, data: result });
+    } catch (error) {
+        logger.error('ZKP rating proof submit error:', error);
+        return res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Get Driver Aggregate Anonymous Reputation
+router.get('/zkp/rating/driver/:driverAddress', (req, res) => {
+    try {
+        const { driverAddress } = req.params;
+        const rep = zkRatingService.getDriverReputation(driverAddress);
+        return res.json({ success: true, data: rep });
+    } catch (error) {
+        logger.error('ZKP get driver reputation error:', error);
+        return res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Check if Nullifier has been spent (Anti-Replay)
+router.get('/zkp/rating/nullifier/:nullifierHash', (req, res) => {
+    try {
+        const { nullifierHash } = req.params;
+        const spent = zkRatingService.isNullifierSpent(nullifierHash);
+        return res.json({ success: true, data: { nullifierHash, spent } });
+    } catch (error) {
+        logger.error('ZKP check rating nullifier error:', error);
+        return res.status(500).json({ success: false, error: error.message });
     }
 });
 

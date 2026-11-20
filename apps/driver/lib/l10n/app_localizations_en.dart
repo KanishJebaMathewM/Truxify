@@ -528,7 +528,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String resendOtpIn(int seconds) {
-    return 'Resend in $secondss';
+    return 'Resend in ${seconds}s';
   }
 
   @override

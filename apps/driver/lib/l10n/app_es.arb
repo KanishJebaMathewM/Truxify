@@ -1,0 +1,737 @@
+{
+  "@@locale": "es",
+  "appTitle": "Truxify Driver",
+  "@appTitle": {
+    "description": "The title of the driver application"
+  },
+  "loadingText": "Cargando...",
+  "@loadingText": {
+    "description": "General loading indicator text"
+  },
+  "retry": "Reintentar",
+  "@retry": {
+    "description": "Button label to retry a failed action"
+  },
+  "error": "Error",
+  "@error": {
+    "description": "Generic error title"
+  },
+  "cancel": "Cancelar",
+  "@cancel": {
+    "description": "Button label to cancel an action"
+  },
+  "save": "Guardar",
+  "@save": {
+    "description": "Button label to save changes"
+  },
+  "close": "Cerrar",
+  "@close": {
+    "description": "Button label to close a dialog or screen"
+  },
+  "apply": "Aplicar",
+  "@apply": {
+    "description": "Button label to apply a selection or setting"
+  },
+  "reset": "Restablecer",
+  "@reset": {
+    "description": "Button label to reset filters or form fields"
+  },
+  "search": "Buscar",
+  "@search": {
+    "description": "Placeholder text for search input fields"
+  },
+  "welcomeDriver": "¡Bienvenido, conductor!",
+  "@welcomeDriver": {
+    "description": "Greeting on the login screen"
+  },
+  "logInToStartEarning": "Inicia sesión para empezar a ganar",
+  "@logInToStartEarning": {
+    "description": "Subtitle on the login screen encouraging sign-in"
+  },
+  "phoneNumber": "Número de teléfono",
+  "@phoneNumber": {
+    "description": "Label for the phone number input field"
+  },
+  "sendOtp": "Enviar código",
+  "@sendOtp": {
+    "description": "Button label to send a one-time password"
+  },
+  "sending": "Enviando...",
+  "@sending": {
+    "description": "Status text while an OTP is being sent"
+  },
+  "verificationFailed": "Error de verificación",
+  "@verificationFailed": {
+    "description": "Error message when login verification fails"
+  },
+  "pleaseEnterPhone": "Introduce tu número de teléfono",
+  "@pleaseEnterPhone": {
+    "description": "Validation message when phone field is empty"
+  },
+  "enterValidPhone": "Introduce un número de teléfono válido",
+  "@enterValidPhone": {
+    "description": "Validation message for invalid phone format"
+  },
+  "phoneMustBeExactDigits": "El número de teléfono debe tener exactamente {digitCount} dígitos",
+  "@phoneMustBeExactDigits": {
+    "description": "Validation message for incorrect phone number length",
+    "placeholders": {
+      "digitCount": {
+        "type": "int",
+        "example": "10"
+      }
+    }
+  },
+  "phoneMustBeDigits": "El número de teléfono solo puede contener dígitos",
+  "@phoneMustBeDigits": {
+    "description": "Validation message when phone contains non-digit characters"
+  },
+  "autoVerificationFailed": "La verificación automática ha fallado. Introduce el código manualmente.",
+  "@autoVerificationFailed": {
+    "description": "Message shown when automatic OTP detection fails"
+  },
+  "protectedDriverAccess": "Esta sección está restringida a los conductores registrados.",
+  "@protectedDriverAccess": {
+    "description": "Message indicating driver-only access"
+  },
+  "verifyOtp": "Verificar código",
+  "@verifyOtp": {
+    "description": "Title of the OTP verification screen"
+  },
+  "enterOtp": "Introduce el código enviado a tu teléfono",
+  "@enterOtp": {
+    "description": "Instruction text on the OTP screen"
+  },
+  "sentTo": "Enviado a {phoneNumber}",
+  "@sentTo": {
+    "description": "Text showing which phone number the OTP was sent to",
+    "placeholders": {
+      "phoneNumber": {
+        "type": "String",
+        "example": "+91 98765 43210"
+      }
+    }
+  },
+  "invalidOtp": "Código no válido. Inténtalo de nuevo.",
+  "@invalidOtp": {
+    "description": "Error message for incorrect OTP entry"
+  },
+  "codeExpired": "El código ha caducado. Solicita uno nuevo.",
+  "@codeExpired": {
+    "description": "Message when the OTP code has expired"
+  },
+  "verificationFailedMsg": "La verificación ha fallado. Inténtalo de nuevo.",
+  "@verificationFailedMsg": {
+    "description": "General verification failure message on OTP screen"
+  },
+  "couldNotVerifyOtp": "No se ha podido verificar el código. Inténtalo de nuevo.",
+  "@couldNotVerifyOtp": {
+    "description": "Error message when OTP verification request fails"
+  },
+  "verifying": "Verificando...",
+  "@verifying": {
+    "description": "Status text while OTP is being verified"
+  },
+  "home": "Inicio",
+  "@home": {
+    "description": "Navigation label for the Home tab"
+  },
+  "trips": "Viajes",
+  "@trips": {
+    "description": "Navigation label for the Trips tab"
+  },
+  "earnings": "Ingresos",
+  "@earnings": {
+    "description": "Navigation label for the Earnings tab"
+  },
+  "profile": "Perfil",
+  "@profile": {
+    "description": "Navigation label for the Profile tab"
+  },
+  "offlineUsingCachedData": "No tienes conexión. Se están usando los datos de la caché.",
+  "@offlineUsingCachedData": {
+    "description": "Banner text when app is in offline mode"
+  },
+  "newLoadAvailable": "¡Nueva carga disponible!",
+  "@newLoadAvailable": {
+    "description": "Notification text when a new load appears"
+  },
+  "view": "Ver",
+  "@view": {
+    "description": "Button label to view details"
+  },
+  "navigationActive": "Navegación activa",
+  "@navigationActive": {
+    "description": "Status text when GPS navigation is active"
+  },
+  "headingTo": "En dirección a {destination}",
+  "@headingTo": {
+    "description": "Text showing the current trip destination",
+    "placeholders": {
+      "destination": {
+        "type": "String",
+        "example": "Warehouse A, Nairobi"
+      }
+    }
+  },
+  "locating": "Buscando tu ubicación...",
+  "@locating": {
+    "description": "Status text while GPS is determining position"
+  },
+  "locationUnavailable": "Ubicación no disponible",
+  "@locationUnavailable": {
+    "description": "Error text when GPS cannot determine position"
+  },
+  "currentLocation": "Ubicación actual",
+  "@currentLocation": {
+    "description": "Label for the driver's current GPS location"
+  },
+  "tapToRefresh": "Toca para actualizar",
+  "@tapToRefresh": {
+    "description": "Instruction text to pull-to-refresh"
+  },
+  "fetchingLocation": "Obteniendo tu ubicación...",
+  "@fetchingLocation": {
+    "description": "Status text while location is being fetched"
+  },
+  "whereAreYouHeading": "¿Adónde te diriges?",
+  "@whereAreYouHeading": {
+    "description": "Prompt for destination input"
+  },
+  "onlineAndReady": "Conectado y disponible",
+  "@onlineAndReady": {
+    "description": "Status text when driver is online and available"
+  },
+  "offline": "Sin conexión",
+  "@offline": {
+    "description": "Status text when driver is offline"
+  },
+  "offlineGoOnline": "No tienes conexión. Conéctate para recibir cargas.",
+  "@offlineGoOnline": {
+    "description": "Message encouraging driver to go online"
+  },
+  "radarActiveFetching": "Radar activo: buscando cargas cercanas...",
+  "@radarActiveFetching": {
+    "description": "Status text while radar is scanning for loads"
+  },
+  "radarActiveLooking": "Radar activo: buscando cargas cerca de ti.",
+  "@radarActiveLooking": {
+    "description": "Status text when radar is actively searching"
+  },
+  "todayPay": "Ingresos de hoy",
+  "@todayPay": {
+    "description": "Label for today's earnings display"
+  },
+  "shiftHours": "Horas del turno",
+  "@shiftHours": {
+    "description": "Label for hours worked display"
+  },
+  "rating": "Valoración",
+  "@rating": {
+    "description": "Label for driver rating display"
+  },
+  "metricsUnavailable": "Estadísticas no disponibles",
+  "@metricsUnavailable": {
+    "description": "Text when dashboard metrics cannot be loaded"
+  },
+  "noDestinationAvailable": "No se ha establecido un destino",
+  "@noDestinationAvailable": {
+    "description": "Text when no destination has been entered"
+  },
+  "currentLocationUnavailable": "Ubicación actual no disponible",
+  "@currentLocationUnavailable": {
+    "description": "Error text when current GPS location is unavailable"
+  },
+  "unableToOpenGoogleMaps": "No se puede abrir Google Maps",
+  "@unableToOpenGoogleMaps": {
+    "description": "Error message when Google Maps launch fails"
+  },
+  "failedToGenerateRoute": "No se ha podido generar la ruta",
+  "@failedToGenerateRoute": {
+    "description": "Error message when route generation fails"
+  },
+  "enRoute": "En ruta",
+  "@enRoute": {
+    "description": "Status label when driver is en route to destination"
+  },
+  "assignedLoad": "Carga asignada",
+  "@assignedLoad": {
+    "description": "Label for the currently assigned load"
+  },
+  "distance": "Distancia",
+  "@distance": {
+    "description": "Label for trip distance"
+  },
+  "estDuration": "Duración estimada",
+  "@estDuration": {
+    "description": "Label for estimated trip duration"
+  },
+  "estPayout": "Pago estimado",
+  "@estPayout": {
+    "description": "Label for estimated trip payout"
+  },
+  "slideToCompleteTrip": "Desliza para completar el viaje",
+  "@slideToCompleteTrip": {
+    "description": "Instruction on the slide-to-confirm button to complete"
+  },
+  "slideToStartTrip": "Desliza para iniciar el viaje",
+  "@slideToStartTrip": {
+    "description": "Instruction on the slide-to-confirm button to start"
+  },
+  "cancelAssignment": "Cancelar asignación",
+  "@cancelAssignment": {
+    "description": "Button label to cancel a trip assignment"
+  },
+  "tripCompletedNetEarnings": "¡Viaje completado! Ingresos netos: {amount}",
+  "@tripCompletedNetEarnings": {
+    "description": "Success message after trip completion with earnings",
+    "placeholders": {
+      "amount": {
+        "type": "String",
+        "example": "KES 2,500"
+      }
+    }
+  },
+  "failedToCompleteTrip": "No se ha podido completar el viaje",
+  "@failedToCompleteTrip": {
+    "description": "Error message when trip completion fails"
+  },
+  "failedToStartTrip": "No se ha podido iniciar el viaje",
+  "@failedToStartTrip": {
+    "description": "Error message when trip start fails"
+  },
+  "tripCompleted": "Viaje completado",
+  "@tripCompleted": {
+    "description": "Title or status for a completed trip"
+  },
+  "pleaseGoOnline": "Conéctate primero",
+  "@pleaseGoOnline": {
+    "description": "Prompt asking the driver to go online before proceeding"
+  },
+  "noDestinationAvailable2": "No hay ningún destino disponible. Establece un destino.",
+  "@noDestinationAvailable2": {
+    "description": "Message when no destination is set for navigation"
+  },
+  "locationPermissionRequired": "Se necesita el permiso de ubicación",
+  "@locationPermissionRequired": {
+    "description": "Error message when location permission has not been granted"
+  },
+  "locationAccessDenied": "Acceso a la ubicación denegado",
+  "@locationAccessDenied": {
+    "description": "Error message when location access is denied by user"
+  },
+  "locationPermDenied": "El permiso de ubicación se ha denegado permanentemente. Actívalo en los ajustes.",
+  "@locationPermDenied": {
+    "description": "Error message when location permission is permanently denied"
+  },
+  "openSettings": "Abrir ajustes",
+  "@openSettings": {
+    "description": "Button label to open device settings"
+  },
+  "editProfile": "Editar perfil",
+  "@editProfile": {
+    "description": "Title or button label to edit the driver profile"
+  },
+  "fullNames": "Nombre completo",
+  "@fullNames": {
+    "description": "Label for the full name input field"
+  },
+  "phoneNumbers": "Número de teléfono",
+  "@phoneNumbers": {
+    "description": "Label for the phone number display"
+  },
+  "emailAddress": "Correo electrónico",
+  "@emailAddress": {
+    "description": "Label for the email address input field"
+  },
+  "vehicleRegistrationNumber": "Matrícula del vehículo",
+  "@vehicleRegistrationNumber": {
+    "description": "Label for the vehicle registration input field"
+  },
+  "saveChanges": "Guardar cambios",
+  "@saveChanges": {
+    "description": "Button label to save profile changes"
+  },
+  "profileUpdatedSuccessfully": "Perfil actualizado correctamente",
+  "@profileUpdatedSuccessfully": {
+    "description": "Success message after profile update"
+  },
+  "selectLanguage": "Seleccionar idioma",
+  "@selectLanguage": {
+    "description": "Title or label for language selection"
+  },
+  "applyLanguage": "Aplicar idioma",
+  "@applyLanguage": {
+    "description": "Button label to confirm language change"
+  },
+  "languageSwitched": "Idioma cambiado correctamente",
+  "@languageSwitched": {
+    "description": "Success message after language change"
+  },
+  "polygonWalletAddress": "Dirección de la cartera de Polygon",
+  "@polygonWalletAddress": {
+    "description": "Label for the Polygon wallet address field"
+  },
+  "saveWalletAddress": "Guardar dirección de la cartera",
+  "@saveWalletAddress": {
+    "description": "Button label to save the wallet address"
+  },
+  "walletAddressUpdated": "Dirección de la cartera actualizada",
+  "@walletAddressUpdated": {
+    "description": "Success message after wallet address update"
+  },
+  "failedToUpdateWallet": "No se ha podido actualizar la dirección de la cartera",
+  "@failedToUpdateWallet": {
+    "description": "Error message when wallet address update fails"
+  },
+  "helpSupport": "Ayuda y soporte",
+  "@helpSupport": {
+    "description": "Section title for help and support"
+  },
+  "browseFAQs": "Consultar preguntas frecuentes",
+  "@browseFAQs": {
+    "description": "Button label to view frequently asked questions"
+  },
+  "instantAnswers": "Obtén respuestas inmediatas a las preguntas más habituales",
+  "@instantAnswers": {
+    "description": "Subtitle describing the FAQ section"
+  },
+  "aboutTruxifyDriverApp": "Acerca de Truxify Driver",
+  "@aboutTruxifyDriverApp": {
+    "description": "Section title for app about information"
+  },
+  "truxifyDescription": "Truxify es una plataforma de logística de camiones que conecta a conductores con cargas en toda África Oriental.",
+  "@truxifyDescription": {
+    "description": "Description of the Truxify application"
+  },
+  "documents": "Documentos",
+  "@documents": {
+    "description": "Section title for driver documents"
+  },
+  "driverLicensePermitPapers": "Permiso de conducir y autorizaciones",
+  "@driverLicensePermitPapers": {
+    "description": "Label for driver license and permit document section"
+  },
+  "notifications": "Notificaciones",
+  "@notifications": {
+    "description": "Section title for notifications settings"
+  },
+  "viewTripAlerts": "Ver avisos de viajes",
+  "@viewTripAlerts": {
+    "description": "Label for trip notification alerts toggle"
+  },
+  "walletAddress": "Dirección de la cartera",
+  "@walletAddress": {
+    "description": "Label for wallet address display"
+  },
+  "notSet": "Sin establecer",
+  "@notSet": {
+    "description": "Placeholder text when a value has not been set"
+  },
+  "languageLabel": "Idioma",
+  "@languageLabel": {
+    "description": "Label for the current language setting"
+  },
+  "helpAndSupport247": "Ayuda y soporte (24/7)",
+  "@helpAndSupport247": {
+    "description": "Label indicating round-the-clock support availability"
+  },
+  "versionAndAppInfo": "Versión e información de la app",
+  "@versionAndAppInfo": {
+    "description": "Label for app version information section"
+  },
+  "logout": "Cerrar sesión",
+  "@logout": {
+    "description": "Button label to log out of the application"
+  },
+  "logoutFailed": "No se ha podido cerrar sesión. Inténtalo de nuevo.",
+  "@logoutFailed": {
+    "description": "Error message when logout fails"
+  },
+  "myTrips": "Mis viajes",
+  "@myTrips": {
+    "description": "Title of the trips screen"
+  },
+  "marketplace": "Mercado de cargas",
+  "@marketplace": {
+    "description": "Title or tab for the load marketplace"
+  },
+  "sortTrips": "Ordenar viajes",
+  "@sortTrips": {
+    "description": "Label for the trip sorting option"
+  },
+  "newestFirst": "Más recientes primero",
+  "@newestFirst": {
+    "description": "Sort option to show newest trips first"
+  },
+  "oldestFirst": "Más antiguos primero",
+  "@oldestFirst": {
+    "description": "Sort option to show oldest trips first"
+  },
+  "highestEarnings": "Mayores ingresos",
+  "@highestEarnings": {
+    "description": "Sort option to show highest-earning trips first"
+  },
+  "lowestEarnings": "Menores ingresos",
+  "@lowestEarnings": {
+    "description": "Sort option to show lowest-earning trips first"
+  },
+  "byStatus": "Por estado",
+  "@byStatus": {
+    "description": "Sort or filter option to group trips by status"
+  },
+  "totalTrips": "Total de viajes",
+  "@totalTrips": {
+    "description": "Label for total number of trips"
+  },
+  "totalEarned": "Total ganado",
+  "@totalEarned": {
+    "description": "Label for total earnings amount"
+  },
+  "completion": "Finalización",
+  "@completion": {
+    "description": "Label for trip completion percentage"
+  },
+  "all": "Todos",
+  "@all": {
+    "description": "Filter option to show all trips"
+  },
+  "active2": "Activos",
+  "@active2": {
+    "description": "Filter option to show active trips"
+  },
+  "completed2": "Completados",
+  "@completed2": {
+    "description": "Filter option to show completed trips"
+  },
+  "cancelled2": "Cancelados",
+  "@cancelled2": {
+    "description": "Filter option to show cancelled trips"
+  },
+  "failedToLoadTrips": "No se han podido cargar los viajes",
+  "@failedToLoadTrips": {
+    "description": "Error message when trips list fails to load"
+  },
+  "pullDownToRetry": "Desliza hacia abajo para reintentar",
+  "@pullDownToRetry": {
+    "description": "Instruction text for pull-to-refresh gesture"
+  },
+  "noTripsFound": "No se han encontrado viajes",
+  "@noTripsFound": {
+    "description": "Empty state text when no trips match filters"
+  },
+  "deliveryStops": "Paradas de entrega",
+  "@deliveryStops": {
+    "description": "Label for the number of delivery stops on a trip"
+  },
+  "markCurrentStopCompleted": "Marcar la parada actual como completada",
+  "@markCurrentStopCompleted": {
+    "description": "Button label to mark the current delivery stop as done"
+  },
+  "activeStatus": "Activo",
+  "@activeStatus": {
+    "description": "Status badge text for an active trip"
+  },
+  "completedStatus": "Completado",
+  "@completedStatus": {
+    "description": "Status badge text for a completed trip"
+  },
+  "cancelledStatus": "Cancelado",
+  "@cancelledStatus": {
+    "description": "Status badge text for a cancelled trip"
+  },
+  "enRouteOpportunities": "Oportunidades en ruta",
+  "@enRouteOpportunities": {
+    "description": "Section title for loads available along current route"
+  },
+  "pickupNearbyLoads": "Recoger cargas cercanas",
+  "@pickupNearbyLoads": {
+    "description": "Label for nearby load pickup section"
+  },
+  "marketplaceLoads": "Cargas del mercado",
+  "@marketplaceLoads": {
+    "description": "Section title for marketplace load listings"
+  },
+  "availableLoadsYouCanBidFor": "Cargas disponibles por las que puedes ofertar",
+  "@availableLoadsYouCanBidFor": {
+    "description": "Subtitle describing available marketplace loads"
+  },
+  "couldNotLoadMarketplace": "No se ha podido cargar el mercado de cargas",
+  "@couldNotLoadMarketplace": {
+    "description": "Error message when marketplace data fails to load"
+  },
+  "pullToRefresh": "Desliza para actualizar",
+  "@pullToRefresh": {
+    "description": "Instruction text to refresh marketplace data"
+  },
+  "noLoadsAvailable": "No hay cargas disponibles",
+  "@noLoadsAvailable": {
+    "description": "Empty state text when no loads are available"
+  },
+  "bidSubmitted": "Oferta enviada correctamente",
+  "@bidSubmitted": {
+    "description": "Success message after submitting a bid"
+  },
+  "failedToSubmitBid": "No se ha podido enviar la oferta",
+  "@failedToSubmitBid": {
+    "description": "Error message when bid submission fails"
+  },
+  "thisLoadIsMissingId": "Esta carga no tiene ID",
+  "@thisLoadIsMissingId": {
+    "description": "Error message when a load record has no valid identifier"
+  },
+  "recommendedReturnLoads": "Cargas de retorno recomendadas",
+  "@recommendedReturnLoads": {
+    "description": "Section title for ML-powered return load recommendations"
+  },
+  "recommendedForYou": "Recomendadas para ti",
+  "@recommendedForYou": {
+    "description": "Label shown when a recommendation has no route"
+  },
+  "matchScore": "Puntuación de coincidencia",
+  "@matchScore": {
+    "description": "Label for ML match score percentage"
+  },
+  "bestMatch": "Mejor coincidencia",
+  "@bestMatch": {
+    "description": "Label for the top recommendation"
+  },
+  "noRecommendations": "No hay recomendaciones de cargas de retorno",
+  "@noRecommendations": {
+    "description": "Empty state when ML returns no recommendations"
+  },
+  "couldNotLoadRecommendations": "No se han podido cargar las recomendaciones",
+  "@couldNotLoadRecommendations": {
+    "description": "Error state when ML endpoint fails"
+  },
+  "noActiveTripForRecommendations": "Completa un viaje para ver sugerencias de cargas de retorno",
+  "@noActiveTripForRecommendations": {
+    "description": "Hint shown when driver has no active trip for recommendations"
+  },
+  "detourDistance": "Desvío",
+  "@detourDistance": {
+    "description": "Label for detour distance"
+  },
+  "bidOnLoad": "Ofertar",
+  "@bidOnLoad": {
+    "description": "Button label to place a bid on a load"
+  },
+  "updateBid": "Actualizar oferta",
+  "@updateBid": {
+    "description": "Button label to update an existing bid"
+  },
+  "placeYourBid": "Haz tu oferta",
+  "@placeYourBid": {
+    "description": "Title of the bid placement bottom sheet"
+  },
+  "bidAmount": "Importe de la oferta",
+  "@bidAmount": {
+    "description": "Label for the bid amount input field"
+  },
+  "submitBid": "Enviar oferta",
+  "@submitBid": {
+    "description": "Button label to submit a bid"
+  },
+  "enterValidBid": "Introduce un importe de oferta válido",
+  "@enterValidBid": {
+    "description": "Validation message for invalid bid input"
+  },
+  "unableToOpen": "No se puede abrir la notificación",
+  "@unableToOpen": {
+    "description": "Error message when a notification cannot be navigated to"
+  },
+  "withdraw": "Retirar",
+  "@withdraw": {
+    "description": "Button label to withdraw funds from wallet"
+  },
+  "withdrawFunds": "Retirar fondos",
+  "@withdrawFunds": {
+    "description": "Title of the withdrawal bottom sheet"
+  },
+  "availableBalance": "Saldo disponible",
+  "@availableBalance": {
+    "description": "Label for the confirmed wallet balance in the withdrawal sheet"
+  },
+  "enterAmount": "Introduce el importe",
+  "@enterAmount": {
+    "description": "Label for the amount input field in the withdrawal sheet"
+  },
+  "amountRequired": "El importe es obligatorio",
+  "@amountRequired": {
+    "description": "Validation error when amount field is empty"
+  },
+  "enterValidAmount": "Introduce un importe válido",
+  "@enterValidAmount": {
+    "description": "Validation error when amount is not a valid number"
+  },
+  "amountMustBePositive": "El importe debe ser mayor que cero",
+  "@amountMustBePositive": {
+    "description": "Validation error when amount is zero or negative"
+  },
+  "insufficientBalance": "Saldo insuficiente",
+  "@insufficientBalance": {
+    "description": "Validation error when amount exceeds confirmed balance"
+  },
+  "max": "Máx.",
+  "@max": {
+    "description": "Label for the quick-fill button that sets the maximum withdrawal amount"
+  },
+  "withdrawalSuccessful": "Retirada realizada correctamente",
+  "@withdrawalSuccessful": {
+    "description": "Success message after a successful withdrawal"
+  },
+  "networkError": "Error de red. Comprueba tu conexión.",
+  "@networkError": {
+    "description": "Error message when network connection fails"
+  },
+  "theme": "Tema",
+  "@theme": {
+    "description": "Label for the theme selection setting"
+  },
+  "system": "Sistema",
+  "@system": {
+    "description": "System theme option label"
+  },
+  "light": "Claro",
+  "@light": {
+    "description": "Light theme option label"
+  },
+  "dark": "Oscuro",
+  "@dark": {
+    "description": "Dark theme option label"
+  },
+  "otpResent": "Código reenviado correctamente",
+  "@otpResent": {
+    "description": "Snackbar message shown when the OTP is resent to the driver's phone."
+  },
+  "resendOtpIn": "Reenviar en {seconds}s",
+  "@resendOtpIn": {
+    "description": "Countdown label shown while the resend cooldown timer is running.",
+    "placeholders": {
+      "seconds": {
+        "type": "int",
+        "description": "Number of seconds remaining before the resend button becomes active."
+      }
+    }
+  },
+  "resendOtp": "Reenviar código",
+  "@resendOtp": {
+    "description": "Label for the button that resends the OTP to the driver's phone."
+  },
+  "language": "Idioma",
+  "@language": {
+    "description": "Language selection setting"
+  },
+  "english": "Inglés",
+  "@english": {
+    "description": "English language name"
+  },
+  "hindi": "Hindi",
+  "@hindi": {
+    "description": "Hindi language name"
+  },
+  "tamil": "Tamil",
+  "@tamil": {
+    "description": "Tamil language name"
+  }
+}

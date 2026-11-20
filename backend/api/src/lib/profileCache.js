@@ -9,7 +9,31 @@ import {
 
 let _publishFn = null;
 let _pubSubChecked = false;
+/**
+ * Validates whether a cached profile object is well-formed and active.
+ * 
+ * @param {object|null|undefined} cachedProfile - The profile object retrieved from cache.
+ * @returns {boolean} True if valid and active, false otherwise.
+ */
+export function isValidCachedProfile(cachedProfile) {
+  if (!cachedProfile || typeof cachedProfile !== 'object' || Array.isArray(cachedProfile)) {
+    return false;
+  }
+  return cachedProfile.isActive === true;
+}
 
+/**
+ * Validates whether a cached Supabase profile object is well-formed.
+ * 
+ * @param {object|null|undefined} cachedProfile - The Supabase profile object retrieved from cache.
+ * @returns {boolean} True if valid, false otherwise.
+ */
+export function isValidCachedSupabaseProfile(cachedProfile) {
+  if (!cachedProfile || typeof cachedProfile !== 'object' || Array.isArray(cachedProfile)) {
+    return false;
+  }
+  return Boolean(cachedProfile.id);
+}
 async function _publishProfileInvalidation(eventOpts) {
   if (!_pubSubChecked) {
     _pubSubChecked = true;

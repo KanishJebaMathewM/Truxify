@@ -6,7 +6,17 @@ import {
   customerStatsKey,
   driverDetailsKey,
 } from "../cache/profileCacheKeys.js";
+// backend/api/src/lib/profileCache.js (Excerpt)
 
+export function isValidCachedProfile(profile) {
+  // FIX: Verify typeof profile === 'object' && profile !== null per issue #6668
+  if (!profile || typeof profile !== 'object' || Array.isArray(profile)) {
+    return false;
+  }
+
+  // Validate required profile properties safely
+  return typeof profile.id === 'string' && typeof profile.role === 'string';
+}
 let _publishFn = null;
 let _pubSubChecked = false;
 

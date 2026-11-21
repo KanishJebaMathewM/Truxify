@@ -107,6 +107,26 @@ describe('Request Timeout Middleware Unit & Integration Tests', () => {
       expect(response.body).toEqual({ custom: 'Database connection failed' });
     });
 
+    it('should not rewrite a downstream 503 as a client timeout', async () => {
+      const testApp = express();
+
+      testApp.get('/upstream-503', (req, res, next) => {
+        const upstreamError = new Error('Payment gateway unavailable');
+        upstreamError.status = 503;
+        next(upstreamError);
+      });
+      testApp.use(timeoutErrorHandler);
+      testApp.use((err, req, res, next) => {
+        res.status(err.status || 500).json({ error: err.message });
+      });
+
+      const response = await request(testApp).get('/upstream-503');
+
+      expect(response.status).toBe(503);
+      expect(response.body).toEqual({ error: 'Payment gateway unavailable' });
+      expect(response.headers['retry-after']).toBeUndefined();
+    });
+
     it('should not write to headers if headers are already sent', () => {
       const mockReq = { timedout: true, originalUrl: '/test' };
       const mockRes = {

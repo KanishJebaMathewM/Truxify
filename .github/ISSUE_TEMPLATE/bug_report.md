@@ -1,15 +1,14 @@
-
 ---
 name: Bug report
 about: Create a report to help us identify and fix a bug
 title: "bug: "
-labels: "type: bug"
+labels: ["type: bug"]
 assignees: ""
 ---
 
 ## Describe the bug
 
-A clear and concise description of what the bug is.
+Provide a clear and concise description of the bug.
 
 ## Steps to reproduce
 
@@ -22,11 +21,11 @@ Steps to reproduce the behavior:
 
 ## Expected behavior
 
-A clear and concise description of what you expected to happen.
+Describe what you expected to happen.
 
 ## Actual behavior
 
-A clear description of what actually happened.
+Describe what actually happened.
 
 ## Screenshots
 
@@ -44,5 +43,7 @@ Please complete the following information:
 - **Device:** [e.g. Desktop, Laptop, Smartphone]
 
 ## Additional context
+
+Add any other context about the problem here.
 
 Add any other context about the problem here.

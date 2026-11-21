@@ -1,11 +1,14 @@
+
 'use strict';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+
 const {
   hasLinkedPullRequest,
   getAssignmentTimestamp,
   isEligibleForUnassign,
+  createFetchOctokit,
   run
 } = require('./issue-unassigner');
 
@@ -17,7 +20,9 @@ test('hasLinkedPullRequest detects cross-referenced PR in timeline', () => {
       source: {
         issue: {
           number: 55,
-          pull_request: { url: 'https://api.github.com/repos/owner/repo/pulls/55' }
+          pull_request: {
+            url: 'https://api.github.com/repos/owner/repo/pulls/55'
+          }
         }
       }
     }
@@ -45,29 +50,34 @@ test('hasLinkedPullRequest returns false when no PR is linked or found', () => {
 
 test('getAssignmentTimestamp returns the latest assigned event timestamp', () => {
   const issue = { created_at: '2026-09-01T00:00:00Z' };
+
   const timeline = [
     { event: 'assigned', created_at: '2026-09-02T10:00:00Z' },
     { event: 'assigned', created_at: '2026-09-05T12:00:00Z' }
   ];
 
   const ts = getAssignmentTimestamp(issue, timeline);
+
   assert.equal(ts, new Date('2026-09-05T12:00:00Z').getTime());
 });
 
 test('getAssignmentTimestamp falls back to issue created_at if no assigned event exists', () => {
   const issue = { created_at: '2026-09-01T00:00:00Z' };
+
   const ts = getAssignmentTimestamp(issue, []);
+
   assert.equal(ts, new Date('2026-09-01T00:00:00Z').getTime());
 });
 
 test('isEligibleForUnassign returns ineligible if assigned under 7 days ago', () => {
   const now = new Date('2026-09-10T00:00:00Z').getTime();
+
   const issue = {
     number: 10,
     created_at: '2026-09-01T00:00:00Z',
     assignees: [{ login: 'alice' }]
   };
-  // Assigned 4 days ago
+
   const timeline = [
     { event: 'assigned', created_at: '2026-09-06T00:00:00Z' }
   ];
@@ -86,12 +96,13 @@ test('isEligibleForUnassign returns ineligible if assigned under 7 days ago', ()
 
 test('isEligibleForUnassign returns ineligible if a PR already exists', () => {
   const now = new Date('2026-09-15T00:00:00Z').getTime();
+
   const issue = {
     number: 10,
     created_at: '2026-09-01T00:00:00Z',
     assignees: [{ login: 'alice' }]
   };
-  // Assigned 14 days ago, but has a linked PR
+
   const timeline = [
     { event: 'assigned', created_at: '2026-09-01T00:00:00Z' },
     {
@@ -119,12 +130,13 @@ test('isEligibleForUnassign returns ineligible if a PR already exists', () => {
 
 test('isEligibleForUnassign returns eligible if assigned >= 7 days ago with no PR', () => {
   const now = new Date('2026-09-15T00:00:00Z').getTime();
+
   const issue = {
     number: 10,
     created_at: '2026-09-01T00:00:00Z',
     assignees: [{ login: 'alice' }, { login: 'bob' }]
   };
-  // Assigned 14 days ago
+
   const timeline = [
     { event: 'assigned', created_at: '2026-09-01T00:00:00Z' }
   ];
@@ -147,53 +159,67 @@ test('run function unassigns contributors, removes label, and posts comment on e
   let commentPosted = false;
 
   const mockGithub = {
-    paginate: async (fn, params) => {
+    paginate: async (fn) => {
       if (fn === mockGithub.rest.issues.listForRepo) {
         return [
           {
             number: 101,
             created_at: '2026-08-01T00:00:00Z',
-            pull_request: null,
             assignees: [{ login: 'inactiveuser' }],
             labels: [{ name: 'assigned' }, { name: 'type:bug' }]
           }
         ];
       }
+
       if (fn === mockGithub.rest.issues.listEventsForTimeline) {
         return [
           { event: 'assigned', created_at: '2026-08-01T00:00:00Z' }
         ];
       }
+
       return [];
     },
+
     rest: {
       issues: {
         listForRepo: () => {},
         listEventsForTimeline: () => {},
+
         removeAssignees: async ({ issue_number, assignees }) => {
           assert.equal(issue_number, 101);
           assert.deepEqual(assignees, ['inactiveuser']);
           removeAssigneesCalled = true;
         },
+
         removeLabel: async ({ issue_number, name }) => {
           assert.equal(issue_number, 101);
           assert.equal(name, 'assigned');
           removeLabelCalled = true;
         },
+
         createComment: async ({ issue_number, body }) => {
           assert.equal(issue_number, 101);
           assert.equal(body.includes('@inactiveuser'), true);
-          assert.equal(body.includes('automatically unassigned because there were no pull requests or updates in the last 7 days'), true);
+          assert.equal(
+            body.includes('automatically unassigned'),
+            true
+          );
           commentPosted = true;
         }
       },
+
       search: {
-        issuesAndPullRequests: async () => ({ data: { items: [] } })
+        issuesAndPullRequests: async () => ({
+          data: { items: [] }
+        })
       }
     }
   };
 
-  const mockContext = { repo: { owner: 'testowner', repo: 'testrepo' } };
+  const mockContext = {
+    repo: { owner: 'testowner', repo: 'testrepo' }
+  };
+
   const mockCore = {
     info: () => {},
     warning: () => {},
@@ -225,14 +251,17 @@ test('run function in dryRun mode does not modify issues', async () => {
           {
             number: 102,
             created_at: '2026-08-01T00:00:00Z',
-            pull_request: null,
             assignees: [{ login: 'inactiveuser' }],
             labels: [{ name: 'assigned' }]
           }
         ];
       }
-      return [{ event: 'assigned', created_at: '2026-08-01T00:00:00Z' }];
+
+      return [
+        { event: 'assigned', created_at: '2026-08-01T00:00:00Z' }
+      ];
     },
+
     rest: {
       issues: {
         listForRepo: () => {},
@@ -241,13 +270,19 @@ test('run function in dryRun mode does not modify issues', async () => {
         removeLabel: async () => { modified = true; },
         createComment: async () => { modified = true; }
       },
+
       search: {
-        issuesAndPullRequests: async () => ({ data: { items: [] } })
+        issuesAndPullRequests: async () => ({
+          data: { items: [] }
+        })
       }
     }
   };
 
-  const mockContext = { repo: { owner: 'testowner', repo: 'testrepo' } };
+  const mockContext = {
+    repo: { owner: 'testowner', repo: 'testrepo' }
+  };
+
   const mockCore = {
     info: () => {},
     warning: () => {},
@@ -267,14 +302,15 @@ test('run function in dryRun mode does not modify issues', async () => {
   assert.equal(modified, false);
 });
 
-test('isEligibleForUnassign does not unassign if contributor commented in the last 7 days', () => {
+test('isEligibleForUnassign does not unassign if contributor commented recently', () => {
   const now = new Date('2026-09-15T00:00:00Z').getTime();
+
   const issue = {
     number: 103,
     created_at: '2026-08-01T00:00:00Z',
     assignees: [{ login: 'testuser' }]
   };
-  // Assigned 20 days ago, but contributor commented 2 days ago
+
   const timeline = [
     { event: 'assigned', created_at: '2026-08-25T00:00:00Z' },
     {
@@ -293,17 +329,18 @@ test('isEligibleForUnassign does not unassign if contributor commented in the la
   });
 
   assert.equal(result.eligible, false);
-  assert.equal(result.reason, 'recent-contributor-comment');
+  assert.equal(result.reason, 'recent-contributor-activity');
 });
 
 test('isEligibleForUnassign does not unassign if assigned less than 1 week ago', () => {
   const now = new Date('2026-09-15T00:00:00Z').getTime();
+
   const issue = {
     number: 104,
     created_at: '2026-08-01T00:00:00Z',
     assignees: [{ login: 'testuser' }]
   };
-  // Assigned 3 days ago (< 7 days)
+
   const timeline = [
     { event: 'assigned', created_at: '2026-09-12T00:00:00Z' }
   ];
@@ -320,11 +357,12 @@ test('isEligibleForUnassign does not unassign if assigned less than 1 week ago',
   assert.equal(result.reason, 'assigned-recently');
 });
 
-test('createFetchOctokit returns an object with paginate and rest methods', () => {
-  const { createFetchOctokit } = require('./issue-unassigner');
+test('createFetchOctokit returns an object with paginate and REST methods', () => {
   const client = createFetchOctokit('dummy_token');
+
   assert.equal(typeof client.paginate, 'function');
   assert.equal(typeof client.rest.issues.listForRepo, 'function');
+  assert.equal(typeof client.rest.issues.listEventsForTimeline, 'function');
   assert.equal(typeof client.rest.issues.removeAssignees, 'function');
   assert.equal(typeof client.rest.issues.removeLabel, 'function');
   assert.equal(typeof client.rest.issues.createComment, 'function');

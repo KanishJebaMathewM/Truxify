@@ -1,7 +1,21 @@
+
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- The INTERNET permission is required for development. Specifically,
-         the Flutter tool needs it to communicate with the running application
-         to allow setting breakpoints, to provide hot reload, etc.
-    -->
-    <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- Network access for API requests, authentication and development tools. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Check network connectivity before attempting API requests. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application
+        android:label="Truxify"
+        android:usesCleartextTraffic="false">
+
+        <!-- Flutter embedding configuration. -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+
+    </application>
+
 </manifest>

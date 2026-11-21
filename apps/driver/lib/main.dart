@@ -77,6 +77,7 @@ Future<void> main() async {
       MultiProvider(
         providers: [
           ChangeNotifierProvider(create: (_) => TextScaleProvider()),
+          ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ],
         child: TruxifyApp(languageProvider: languageProvider),
       ),

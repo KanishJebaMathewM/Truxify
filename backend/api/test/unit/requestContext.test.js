@@ -1,53 +1,98 @@
-/**
- * Request Context Manager using AsyncLocalStorage
- */
-import { AsyncLocalStorage } from 'async_hooks';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-export const requestContext = new AsyncLocalStorage();
+const mockLogger = vi.hoisted(() => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
 
-/**
- * Retrieves the requestCache instance from the current AsyncLocalStorage store.
- * Returns null if outside a context or if no requestCache is found.
- * 
- * @returns {import('./requestCache.js').RequestCache | null}
- */
-export function getRequestCache() {
-  const store = requestContext.getStore();
-  if (!store || store.requestCache == null) {
-    return null;
-  }
-  return store.requestCache;
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: mockLogger,
+}));
+
+import { requestContext } from '../../src/middleware/requestContext.js';
+
+function makeRequest(overrides = {}) {
+  return {
+    headers: {},
+    ...overrides,
+  };
 }
 
-/**
- * Safely parses a JSON string with a fallback value.
- * Validates that the parsed result is a non-null plain object (not an array or primitive).
- * 
- * @param {string|any} input - The JSON string to parse.
- * @param {any} fallback - The fallback value to return if parsing fails or result is invalid.
- * @returns {any} The parsed object or fallback.
- */
-export function safeJsonParseWithFallback(input, fallback) {
-  if (input === null || input === undefined || input === '') {
-    return fallback;
-  }
+describe('requestContext middleware', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
-  try {
-    const parsed = JSON.parse(input);
-    
-    // Ensure the top-level parsed result is a valid non-null object and not an array
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return fallback;
-    }
+  it('keeps a valid session id from the request header', () => {
+    const req = makeRequest({ headers: { 'x-session-id': 'session-header' } });
+    const next = vi.fn();
 
-    return parsed;
-  } catch (err) {
-    return fallback;
-  }
-}
+    requestContext(req, {}, next);
 
-export default {
-  requestContext,
-  getRequestCache,
-  safeJsonParseWithFallback,
-};
+    expect(req.sessionId).toBe('session-header');
+    expect(req.context).toEqual({ sessionId: 'session-header' });
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(mockLogger.debug).not.toHaveBeenCalled();
+  });
+
+  it('falls back to req.sessionId when the header is absent', () => {
+    const req = makeRequest({ sessionId: 'session-property' });
+
+    requestContext(req, {}, vi.fn());
+
+    expect(req.sessionId).toBe('session-property');
+    expect(req.context.sessionId).toBe('session-property');
+  });
+
+  it('falls back to req.session.id when earlier sources are absent', () => {
+    const req = makeRequest({ session: { id: 'session-object' } });
+
+    requestContext(req, {}, vi.fn());
+
+    expect(req.sessionId).toBe('session-object');
+    expect(req.context.sessionId).toBe('session-object');
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['empty', ''],
+    ['blank', '   '],
+    ['non-string', 42],
+    ['object', {}],
+  ])('generates a fallback id for a %s session id', (_label, value) => {
+    const req = makeRequest({ sessionId: value });
+    const next = vi.fn();
+
+    requestContext(req, {}, next);
+
+    expect(req.sessionId).toMatch(/^fallback-[0-9a-f-]{36}$/);
+    expect(req.context.sessionId).toBe(req.sessionId);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(mockLogger.debug).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves existing request context fields', () => {
+    const req = makeRequest({
+      headers: { 'x-session-id': 'session-preserved' },
+      context: { traceId: 'trace-123', tenantId: 'tenant-9' },
+    });
+
+    requestContext(req, {}, vi.fn());
+
+    expect(req.context).toEqual({
+      traceId: 'trace-123',
+      tenantId: 'tenant-9',
+      sessionId: 'session-preserved',
+    });
+  });
+
+  it('does not log a fallback when the header is valid', () => {
+    const req = makeRequest({ headers: { 'x-session-id': 'session-clean' } });
+
+    requestContext(req, {}, vi.fn());
+
+    expect(mockLogger.debug).not.toHaveBeenCalled();
+  });
+});

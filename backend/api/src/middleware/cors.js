@@ -1,5 +1,25 @@
 import cors from "cors";
 
+function parseAllowedOrigins(value) {
+  return String(value || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => {
+      if (!origin) return false;
+      if (origin === "*") return true;
+      try {
+        const parsed = new URL(origin);
+        return parsed.protocol === "http:" || parsed.protocol === "https:";
+      } catch {
+        return false;
+      }
+    });
+}
+
+// ALLOWED_ORIGINS is the single source of truth for browser origins. Keeping
+// the parsed list at module scope prevents every CORS decision from rebuilding
+// it and, more importantly, avoids referencing the previously undefined global.
+export const allowedOrigins = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
 
 // Inside CORS origin validation logic:
 

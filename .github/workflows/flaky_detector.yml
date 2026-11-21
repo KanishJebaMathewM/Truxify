@@ -1,58 +1,106 @@
+
+# Detect flaky backend tests and identify potential failing commits
 name: Automated Flaky Test Detector & Bisect Runner
 
+# Run the workflow when pull requests target main or peer
 on:
   pull_request:
     branches: [main, peer]
 
+# Restrict permissions to repository read access
+permissions:
+  contents: read
+
 jobs:
+  # Repeatedly execute backend tests to detect inconsistent results
   detect-flaky-tests:
+    name: Detect Flaky Tests
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    permissions:
-      contents: read
+
     steps:
-      - name: Checkout Code
+      # Checkout the repository with full history for Git bisect
+      - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
           persist-credentials: false
 
+      # Configure Node.js 22
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 22
 
+      # Install backend dependencies
       - name: Install dependencies
+        working-directory: backend/api
         run: |
-          cd backend/api
-          npm install
+          npm ci --legacy-peer-deps
 
-      - name: Run Multi-Iteration Parallel Test Runner
+      # Run the backend tests repeatedly and record outcomes
+      - name: Run multi-iteration test runner
         id: run-tests
+        working-directory: backend/api
+        shell: bash
         run: |
-          cd backend/api
-          # Run test suites 50 times repeatedly to detect non-deterministic flaky outcomes
+          set -uo pipefail
+
           pass_count=0
           fail_count=0
-          for i in {1..50}; do
+          total_runs=50
+
+          # Execute the test suite 50 times
+          for i in $(seq 1 "$total_runs"); do
+            echo "Test iteration $i/$total_runs"
+
             if npm test; then
-              pass_count=$((pass_count+1))
+              pass_count=$((pass_count + 1))
             else
-              fail_count=$((fail_count+1))
+              fail_count=$((fail_count + 1))
             fi
           done
-          echo "Passes: $pass_count, Failures: $fail_count"
-          if [ $fail_count -gt 0 ] && [ $pass_count -gt 0 ]; then
+
+          echo "Passes: $pass_count"
+          echo "Failures: $fail_count"
+
+          # Identify mixed test outcomes
+          if [ "$pass_count" -gt 0 ] && [ "$fail_count" -gt 0 ]; then
             echo "flaky=true" >> "$GITHUB_OUTPUT"
           else
             echo "flaky=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Execute Git Bisect Runner
-        if: steps.run-tests.outputs.flaky == 'true'
+          # Identify consistently failing tests
+          if [ "$fail_count" -eq "$total_runs" ]; then
+            echo "consistently_failed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "consistently_failed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Save counts for workflow reporting
+          echo "pass_count=$pass_count" >> "$GITHUB_OUTPUT"
+          echo "fail_count=$fail_count" >> "$GITHUB_OUTPUT"
+
+      # Attempt Git bisect only when all test runs fail
+      - name: Execute Git bisect runner
+        if: steps.run-tests.outputs.consistently_failed == 'true'
+        shell: bash
         run: |
-          git bisect start
-          git bisect bad HEAD
-          git bisect good HEAD~10
-          git bisect run npm test
+          set -euo pipefail
+
+          # Use the pull request base commit as the known-good reference
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+
+          # Ensure both commits are available
+          git fetch origin "$BASE_SHA" "$HEAD_SHA"
+
+          # Start bisect using the base and current PR head
+          git bisect start "$HEAD_SHA" "$BASE_SHA"
+
+          # Run backend tests at each candidate commit
+          git bisect run bash -c 'cd backend/api && npm test'
+
+          # Reset bisect state
           git bisect reset

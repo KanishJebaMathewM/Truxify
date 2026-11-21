@@ -1,11 +1,10 @@
-
 import base64
 import binascii
 import json
 import os
 import re
 
-from typing import Dict, Optional, Set
+from typing import Dict, Optional, Set, Any
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes
@@ -14,10 +13,6 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from policy_builder import CpAbePolicyBuilder
 
-
-# --------------------------------------------------
-# CRYPTOGRAPHIC CONFIGURATION
-# --------------------------------------------------
 
 NONCE_SIZE = 12
 TAG_SIZE = 16
@@ -31,70 +26,71 @@ MAX_CIPHERTEXT_SIZE = 100 * 1024 * 1024
 
 DEFAULT_KEY_ID = "default"
 
+KEY_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
 
 class CpAbeCipherEngine:
     """
     Policy-gated document encryption engine.
 
-    Uses:
-        AES-256-GCM for authenticated encryption.
-        HKDF-SHA256 for per-document key derivation.
-        PolicyBuilder for attribute authorization.
+    AES-256-GCM:
+        Authenticated document encryption.
+
+    HKDF-SHA256:
+        Per-document key derivation.
+
+    CpAbePolicyBuilder:
+        Attribute-based authorization.
 
     IMPORTANT:
-        This implementation is not a standalone CP-ABE
-        cryptographic construction. Attribute-based access
-        is enforced by the policy authorization layer.
+        This is not a standalone cryptographic CP-ABE
+        implementation. Authorization is enforced by
+        the application policy layer.
     """
 
     def __init__(self, policy_builder=None):
+
         self.policy_builder = (
-            policy_builder or CpAbePolicyBuilder()
+            policy_builder if policy_builder is not None
+            else CpAbePolicyBuilder()
         )
 
-    # --------------------------------------------------
-    # VALIDATION
-    # --------------------------------------------------
-
     @staticmethod
-    def _validate_policy(policy_str: str) -> str:
-
-        if not isinstance(policy_str, str):
+    def _validate_policy(policy: str) -> str:
+        if not isinstance(policy, str):
             raise TypeError("Policy must be a string.")
 
-        policy_str = policy_str.strip()
+        policy = policy.strip()
 
-        if not policy_str:
+        if not policy:
             raise ValueError("Access policy cannot be empty.")
 
-        if len(policy_str) > MAX_POLICY_LENGTH:
+        if len(policy) > MAX_POLICY_LENGTH:
             raise ValueError("Access policy is too long.")
 
-        return policy_str
+        return policy
 
     @staticmethod
     def _validate_document_id(
         document_id: Optional[str]
     ) -> Optional[str]:
-
         if document_id is None:
             return None
 
         if not isinstance(document_id, str):
             raise TypeError("Document ID must be a string.")
 
-        if not document_id or len(document_id) > 256:
+        if not document_id.strip() or len(document_id) > 256:
             raise ValueError("Invalid document ID.")
 
         return document_id
 
     @staticmethod
     def _validate_key_id(key_id: str) -> str:
-
         if not isinstance(key_id, str):
             raise TypeError("Key ID must be a string.")
 
-        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", key_id):
+        if not KEY_ID_PATTERN.fullmatch(key_id):
             raise ValueError("Invalid key ID.")
 
         return key_id
@@ -105,107 +101,87 @@ class CpAbeCipherEngine:
     ) -> Set[str]:
 
         if not isinstance(user_attributes, set):
-            raise TypeError(
-                "User attributes must be a set."
-            )
+            raise TypeError("User attributes must be a set.")
 
-        if not all(
-            isinstance(attr, str) and attr.strip()
+        if any(
+            not isinstance(attr, str)
+            or not attr.strip()
             for attr in user_attributes
         ):
-            raise TypeError(
-                "User attributes must contain non-empty strings."
+            raise ValueError(
+                "Attributes must contain non-empty strings."
             )
 
-        return user_attributes
+        return {
+            attr.strip()
+            for attr in user_attributes
+        }
+
+    @staticmethod
+    def _validate_plaintext(plaintext_bytes: bytes):
+
+        if not isinstance(plaintext_bytes, bytes):
+            raise TypeError("Plaintext must be bytes.")
+
+        if len(plaintext_bytes) > MAX_CIPHERTEXT_SIZE:
+            raise ValueError(
+                "Document exceeds maximum encryption size."
+            )
 
     # --------------------------------------------------
     # MASTER KEY MANAGEMENT
     # --------------------------------------------------
 
     def _get_master_secret(self, key_id: str) -> bytes:
-        """
-        Retrieves a master secret using a key identifier.
-
-        Environment variables:
-            ABE_MASTER_SECRET_DEFAULT
-            ABE_MASTER_SECRET_PRODUCTION
-            ABE_MASTER_SECRET_BACKUP
-
-        Falls back to ABE_MASTER_SECRET for the default
-        key ID to preserve existing deployments.
-        """
 
         env_name = f"ABE_MASTER_SECRET_{key_id.upper()}"
 
         master_secret = os.environ.get(env_name)
 
         if not master_secret and key_id == DEFAULT_KEY_ID:
-            master_secret = os.environ.get(
-                "ABE_MASTER_SECRET"
-            )
+            master_secret = os.environ.get("ABE_MASTER_SECRET")
 
         if not master_secret:
             raise RuntimeError(
-                f"Master encryption key '{key_id}' "
-                "is not configured."
+                f"Master encryption key '{key_id}' is not configured."
             )
 
         secret_bytes = master_secret.encode("utf-8")
 
-        # Minimum input length. Use a randomly generated
-        # secret with at least 32 bytes of entropy.
         if len(secret_bytes) < KEY_SIZE:
             raise RuntimeError(
-                "Master secret must contain at least "
-                "32 bytes."
+                "Master secret must contain at least 32 bytes."
             )
 
         return secret_bytes
 
-    # --------------------------------------------------
-    # AUTHENTICATED METADATA
-    # --------------------------------------------------
-
     @staticmethod
     def _build_aad(
-        policy_str: str,
+        policy: str,
         key_id: str,
-        document_id: Optional[str],
+        document_id: Optional[str]
     ) -> bytes:
-        """
-        Binds encryption metadata to the ciphertext.
-
-        Changing the policy, key ID, document ID, or
-        envelope version invalidates authentication.
-        """
 
         metadata = {
             "version": ENVELOPE_VERSION,
             "algorithm": ALGORITHM,
-            "policy": policy_str,
+            "policy": policy,
             "key_id": key_id,
-            "document_id": document_id,
+            "document_id": document_id
         }
 
         return json.dumps(
             metadata,
             sort_keys=True,
             separators=(",", ":"),
-            ensure_ascii=False,
+            ensure_ascii=False
         ).encode("utf-8")
-
-    # --------------------------------------------------
-    # KEY DERIVATION
-    # --------------------------------------------------
 
     def _derive_key(
         self,
-        policy_str: str,
         nonce: bytes,
-        key_id: str = DEFAULT_KEY_ID,
+        key_id: str,
     ) -> bytes:
-
         if len(nonce) != NONCE_SIZE:
             raise ValueError("Invalid nonce length.")
 
@@ -216,118 +192,118 @@ class CpAbeCipherEngine:
             length=KEY_SIZE,
             salt=nonce,
             info=(
-                f"truxify-cpabe:v{ENVELOPE_VERSION}:"
-                f"{key_id}:{policy_str}"
+                f"truxify-document-encryption:"
+                f"v{ENVELOPE_VERSION}:{key_id}"
             ).encode("utf-8"),
         ).derive(master_secret)
-
-    # --------------------------------------------------
-    # ENCRYPT DOCUMENT
-    # --------------------------------------------------
 
     def encrypt_document(
         self,
         plaintext_bytes: bytes,
         policy_str: str,
         document_id: Optional[str] = None,
-        key_id: str = DEFAULT_KEY_ID,
-    ) -> Dict:
+        key_id: str = DEFAULT_KEY_ID
+    ) -> Dict[str, Any]:
 
-        if not isinstance(plaintext_bytes, bytes):
-            raise TypeError(
-                "Plaintext must be bytes."
-            )
+        self._validate_plaintext(plaintext_bytes)
 
         policy_str = self._validate_policy(policy_str)
 
-        document_id = self._validate_document_id(
+        if len(plaintext_bytes) > MAX_CIPHERTEXT_SIZE:
+            raise ValueError("Document exceeds maximum size.")
+
+        policy = self._validate_policy(policy_str)
+        document_id = self._validate_document_id(document_id)
+        key_id = self._validate_key_id(key_id)
+
+        nonce = os.urandom(NONCE_SIZE)
+
+        key = self._derive_key(
+            nonce,
+            key_id
+        )
+
+        aad = self._build_aad(
+            policy,
+            key_id,
             document_id
         )
 
-        key_id = self._validate_key_id(key_id)
-
-        if len(plaintext_bytes) > MAX_CIPHERTEXT_SIZE:
-            raise ValueError(
-                "Document exceeds maximum encryption size."
-            )
-
-        # Fresh cryptographically secure nonce.
-        nonce = os.urandom(NONCE_SIZE)
-
-        # Derive an independent document encryption key.
-        key = self._derive_key(
-            policy_str,
-            nonce,
-            key_id,
-        )
-
-        # Authenticate all security-relevant metadata.
-        aad = self._build_aad(
-            policy_str,
-            key_id,
-            document_id,
-        )
-
-        ciphertext = AESGCM(key).encrypt(
+        encrypted_data = AESGCM(key).encrypt(
             nonce,
             plaintext_bytes,
-            aad,
+            aad
         )
 
-        # Envelope:
-        # nonce (12 bytes) + ciphertext + authentication tag
         encrypted = nonce + ciphertext
 
         return {
             "version": ENVELOPE_VERSION,
             "algorithm": ALGORITHM,
             "key_id": key_id,
-            "policy": policy_str,
+            "policy": policy,
             "document_id": document_id,
             "ciphertext_b64": base64.b64encode(
                 encrypted
-            ).decode("ascii"),
+            ).decode("ascii")
         }
-
-    # --------------------------------------------------
-    # DECRYPT DOCUMENT
-    # --------------------------------------------------
 
     def decrypt_document(
         self,
-        ciphertext_b64: str,
-        policy_str: str,
+        envelope: Dict,
         user_attributes: Set[str],
-        document_id: Optional[str] = None,
-        key_id: str = DEFAULT_KEY_ID,
-        version: int = ENVELOPE_VERSION,
     ) -> bytes:
 
-        if not isinstance(ciphertext_b64, str):
-            raise TypeError(
-                "Ciphertext must be a string."
-            )
+        if not isinstance(envelope, dict):
+            raise TypeError("Envelope must be a dictionary.")
 
-        policy_str = self._validate_policy(policy_str)
+        required_fields = {
+            "version",
+            "algorithm",
+            "key_id",
+            "policy",
+            "document_id",
+            "ciphertext_b64",
+        }
+
+        if not required_fields.issubset(envelope):
+            raise ValueError("Incomplete encryption envelope.")
+
+        version = envelope["version"]
+
+        if (
+            isinstance(version, bool)
+            or version != ENVELOPE_VERSION
+        ):
+            raise ValueError("Unsupported envelope version.")
+
+        if envelope["algorithm"] != ALGORITHM:
+            raise ValueError("Unsupported encryption algorithm.")
+
+        policy_str = self._validate_policy(
+            envelope["policy"]
+        )
+
+        key_id = self._validate_key_id(
+            envelope["key_id"]
+        )
+
+        document_id = self._validate_document_id(
+            envelope["document_id"]
+        )
+
+        ciphertext_b64 = envelope["ciphertext_b64"]
+
+        if not isinstance(ciphertext_b64, str):
+            raise TypeError("Ciphertext must be a string.")
 
         user_attributes = self._validate_attributes(
             user_attributes
         )
 
-        document_id = self._validate_document_id(
-            document_id
-        )
-
-        key_id = self._validate_key_id(key_id)
-
-        if version != ENVELOPE_VERSION:
-            raise ValueError(
-                "Unsupported encryption envelope version."
-            )
-
-        # Reject oversized encoded input before decoding.
         max_encoded_size = 4 * (
-            (NONCE_SIZE + TAG_SIZE + MAX_CIPHERTEXT_SIZE + 2) // 3
+            (NONCE_SIZE + TAG_SIZE + MAX_CIPHERTEXT_SIZE + 2)
+            // 3
         )
 
         if len(ciphertext_b64) > max_encoded_size:
@@ -336,7 +312,7 @@ class CpAbeCipherEngine:
         try:
             encrypted = base64.b64decode(
                 ciphertext_b64,
-                validate=True,
+                validate=True
             )
         except (ValueError, TypeError, binascii.Error):
             raise ValueError(
@@ -344,9 +320,7 @@ class CpAbeCipherEngine:
             ) from None
 
         if len(encrypted) < NONCE_SIZE + TAG_SIZE:
-            raise ValueError(
-                "Ciphertext is too short."
-            )
+            raise ValueError("Ciphertext is too short.")
 
         if len(encrypted) > (
             NONCE_SIZE + TAG_SIZE + MAX_CIPHERTEXT_SIZE
@@ -354,18 +328,15 @@ class CpAbeCipherEngine:
             raise ValueError("Ciphertext is too large.")
 
         # --------------------------------------------------
-        # ATTRIBUTE-BASED AUTHORIZATION
+        # ATTRIBUTE AUTHORIZATION
         # --------------------------------------------------
 
         try:
-            authorized = (
-                self.policy_builder.evaluate_user_attributes(
-                    user_attributes,
-                    policy_str,
-                )
+            authorized = self.policy_builder.evaluate_user_attributes(
+                user_attributes,
+                policy
             )
         except Exception:
-            # Log the original exception internally.
             raise ValueError(
                 "Unable to evaluate access policy."
             ) from None
@@ -376,40 +347,37 @@ class CpAbeCipherEngine:
             )
 
         # --------------------------------------------------
-        # CRYPTOGRAPHIC DECRYPTION
+        # AUTHENTICATED DECRYPTION
         # --------------------------------------------------
 
         nonce = encrypted[:NONCE_SIZE]
+
         ciphertext = encrypted[NONCE_SIZE:]
 
         key = self._derive_key(
-            policy_str,
             nonce,
-            key_id,
+            key_id
         )
 
         aad = self._build_aad(
-            policy_str,
+            policy,
             key_id,
-            document_id,
+            document_id
         )
 
         try:
-            return AESGCM(key).decrypt(
+            plaintext = AESGCM(key).decrypt(
                 nonce,
                 ciphertext,
-                aad,
+                aad
             )
+
+            return plaintext
 
         except InvalidTag:
             raise ValueError(
-                "Decryption failed: authentication "
-                "verification failed."
+                "Decryption failed: authentication verification failed."
             ) from None
 
-
-# --------------------------------------------------
-# SHARED ENGINE INSTANCE
-# --------------------------------------------------
 
 abe_cipher = CpAbeCipherEngine()

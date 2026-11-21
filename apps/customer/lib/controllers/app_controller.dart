@@ -2,20 +2,29 @@ import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:truxify_shared/truxify_shared.dart';
 import '../models/app_models.dart';
 import '../core/offline/cache/cache_manager.dart';
 
 class TruxifyController extends ChangeNotifier {
-  static const String _themeModeKey = 'theme_mode';
+  final ThemeProvider themeProvider;
   int currentTab = 0;
   int ordersTabIndex = 0;
   RouteDraft? pendingRouteDraft;
-  ThemeMode _themeMode = ThemeMode.system;
   String? _globalError;
   bool _isInitialized = false;
   Locale _locale = const Locale('en');
 
-  ThemeMode get themeMode => _themeMode;
+  TruxifyController({ThemeProvider? themeProvider})
+      : themeProvider = themeProvider ?? ThemeProvider() {
+    this.themeProvider.addListener(_onThemeProviderChanged);
+  }
+
+  void _onThemeProviderChanged() {
+    notifyListeners();
+  }
+
+  ThemeMode get themeMode => themeProvider.themeMode;
   String? get globalError => _globalError;
   bool get isInitialized => _isInitialized;
   Locale get locale => _locale;
@@ -35,33 +44,19 @@ class TruxifyController extends ChangeNotifier {
   }
 
   Future<void> loadThemeMode() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final savedTheme = prefs.getString(_themeModeKey);
-      _themeMode = ThemeMode.values.firstWhere(
-        (mode) => mode.name == savedTheme,
-        orElse: () => ThemeMode.system,
-      );
-      _isInitialized = true;
-      notifyListeners();
-    } catch (e) {
-      _globalError = 'Failed to load theme: $e';
-      _isInitialized = true;
-      notifyListeners();
-    }
+    await themeProvider.loadThemeMode();
+    _isInitialized = true;
+    notifyListeners();
   }
 
   Future<void> setThemeMode(ThemeMode mode) async {
-    if (_themeMode == mode) return;
-    _themeMode = mode;
-    notifyListeners();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_themeModeKey, mode.name);
-    } catch (e) {
-      _globalError = 'Failed to save theme: $e';
-      notifyListeners();
-    }
+    await themeProvider.setThemeMode(mode);
+  }
+
+  @override
+  void dispose() {
+    themeProvider.removeListener(_onThemeProviderChanged);
+    super.dispose();
   }
 
   void setTab(int index) {

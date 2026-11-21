@@ -1,56 +1,93 @@
-// backend/api/test/unit/services/escrowHealth.test.js
+// backend/api/test/unit/services/health/checks/escrowHealth.test.js
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-import { describe, it, expect } from 'vitest';
-import { evaluateEscrowHealth, EscrowHealthStatus } from '../../../src/services/escrowHealth.js';
+vi.mock('../../../../../services/escrow.js', () => ({
+  checkEscrowHealth: vi.fn(),
+}));
 
-describe('escrowHealth Status Mapping Unit Tests (#9666)', () => {
+vi.mock('../../../../../services/health/HealthCheck.js', () => ({
+  HealthStatus: {
+    HEALTHY: 'healthy',
+    DEGRADED: 'degraded',
+    UNHEALTHY: 'unhealthy',
+  },
+  // Don't run the check here. Return what was passed in so the test can inspect it.
+  executeCheck: vi.fn((name, check, opts) => ({ name, check, opts })),
+}));
 
-  it('correctly maps active and recently locked escrows to HEALTHY status', () => {
-    const escrow = {
-      id: 'esc_001',
-      status: 'LOCKED',
-      lockedAt: new Date(Date.now() - 1000 * 60 * 30), // 30 minutes ago
-      disputeFlag: false,
-    };
+import { checkEscrowHealth } from '../../../../../services/escrow.js';
+import { HealthStatus, executeCheck } from '../../../../../services/health/HealthCheck.js';
+import escrowHealth from '../../../../../services/health/checks/escrowHealth.js';
 
-    const health = evaluateEscrowHealth(escrow);
-
-    expect(health.status).toBe(EscrowHealthStatus.HEALTHY);
-    expect(health.flags).toHaveLength(0);
+describe('escrowHealth', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it('flags stale or long-running locked escrows as WARNING', () => {
-    const escrow = {
-      id: 'esc_002',
-      status: 'LOCKED',
-      lockedAt: new Date(Date.now() - 1000 * 60 * 60 * 48), // 48 hours ago (> threshold)
-      disputeFlag: false,
-    };
+  describe('registration', () => {
+    it('registers the check under the name "escrow"', () => {
+      escrowHealth();
+      expect(executeCheck).toHaveBeenCalledTimes(1);
+      expect(executeCheck.mock.calls[0][0]).toBe('escrow');
+    });
 
-    const health = evaluateEscrowHealth(escrow);
+    it('is non-critical by default', () => {
+      escrowHealth();
+      expect(executeCheck.mock.calls[0][2]).toEqual({ critical: false });
+    });
 
-    expect(health.status).toBe(EscrowHealthStatus.WARNING);
-    expect(health.message).toContain('stale');
+    it('lets opts override critical and adds extra options', () => {
+      escrowHealth({ critical: true, timeoutMs: 500 });
+      expect(executeCheck.mock.calls[0][2]).toEqual({
+        critical: true,
+        timeoutMs: 500,
+      });
+    });
   });
 
-  it('escalates disputed or failed escrows to CRITICAL status', () => {
-    const escrow = {
-      id: 'esc_003',
-      status: 'DISPUTED',
-      lockedAt: new Date(Date.now() - 1000 * 60 * 60),
-      disputeFlag: true,
-    };
+  describe('check function', () => {
+    async function runCheck() {
+      const { check } = escrowHealth();
+      return check();
+    }
 
-    const health = evaluateEscrowHealth(escrow);
+    it('returns HEALTHY with chainId when connected', async () => {
+      checkEscrowHealth.mockResolvedValue({ status: 'connected', chainId: 8453 });
 
-    expect(health.status).toBe(EscrowHealthStatus.CRITICAL);
-    expect(health.flags).toContain('DISPUTE_ACTIVE');
-  });
+      expect(await runCheck()).toEqual({
+        status: HealthStatus.HEALTHY,
+        metadata: { chainId: 8453 },
+      });
+    });
 
-  it('handles malformed or missing escrow objects gracefully', () => {
-    expect(() => evaluateEscrowHealth(null)).not.toThrow();
-    
-    const health = evaluateEscrowHealth({});
-    expect(health.status).toBe(EscrowHealthStatus.UNKNOWN);
+    it('returns DEGRADED when not configured', async () => {
+      checkEscrowHealth.mockResolvedValue({ status: 'not_configured' });
+
+      expect(await runCheck()).toEqual({
+        status: HealthStatus.DEGRADED,
+        message: 'not_configured',
+      });
+    });
+
+    it('returns UNHEALTHY with the error message when there is an error', async () => {
+      checkEscrowHealth.mockResolvedValue({
+        status: 'error',
+        error: 'RPC timeout',
+      });
+
+      expect(await runCheck()).toEqual({
+        status: HealthStatus.UNHEALTHY,
+        message: 'RPC timeout',
+      });
+    });
+
+    it('falls back to status as the message when there is no error text', async () => {
+      checkEscrowHealth.mockResolvedValue({ status: 'disconnected' });
+
+      expect(await runCheck()).toEqual({
+        status: HealthStatus.UNHEALTHY,
+        message: 'disconnected',
+      });
+    });
   });
 });

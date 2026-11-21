@@ -48,6 +48,28 @@ describe('webhookRoutes', () => {
     expect(res.status).toBe(401);
   });
 
+  it('POST /webhook rejects requests when WEBHOOK_SECRET is not configured', async () => {
+    vi.stubEnv('WEBHOOK_SECRET', '');
+    const webhookRoutes = (await import('../../src/routes/webhookRoutes.js')).default;
+    const app2 = express();
+    app2.use('/api/webhooks', webhookRoutes);
+
+    const payload = Buffer.from(JSON.stringify({ event: 'legacy.probe' }));
+    const fallbackSignature = crypto
+      .createHmac('sha256', 'truxify_webhook_secret_key')
+      .update(payload)
+      .digest('hex');
+
+    const res = await request(app2)
+      .post('/api/webhooks/webhook')
+      .set('Content-Type', 'application/json')
+      .set('x-signature', fallbackSignature)
+      .send(payload);
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toMatch(/not configured/i);
+  });
+
   it('POST /escrow rejects request with invalid signature', async () => {
     const res = await request(app)
       .post('/api/webhooks/escrow')

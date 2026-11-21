@@ -1,97 +1,97 @@
 
-const fs = require('fs');
-const path = require('path');
+const fs = require("fs");
+const path = require("path");
 
-// Resolve the manifest directory relative to this script,
-// so the check works regardless of the current working directory.
-const dir = path.resolve(__dirname, '..', '..', 'k8s', 'istio');
+// Resolve manifest directory
+const dir = path.resolve(
+  __dirname,
+  "..",
+  "..",
+  "k8s",
+  "istio"
+);
 
 let failed = false;
 
+// Report validation errors
 function reportError(message) {
   console.error(`ERROR: ${message}`);
   failed = true;
 }
 
-// Check whether the manifest directory exists.
+// Check directory existence
 if (!fs.existsSync(dir)) {
   reportError(`Manifest directory does not exist: ${dir}`);
 } else {
   let files = [];
 
   try {
-    files = fs
-      .readdirSync(dir, { withFileTypes: true })
-      .filter(
-        (entry) =>
-          entry.isFile() && /\.(yaml|yml)$/i.test(entry.name)
+    files = fs.readdirSync(dir, { withFileTypes: true })
+      .filter(entry =>
+        entry.isFile() && /\.(yaml|yml)$/i.test(entry.name)
       )
-      .map((entry) => entry.name)
+      .map(entry => entry.name)
       .sort();
   } catch (error) {
-    reportError(`Unable to read manifest directory: ${error.message}`);
+    reportError(`Unable to read directory: ${error.message}`);
   }
 
   if (!failed && files.length === 0) {
     reportError(`No YAML manifests found in ${dir}`);
   }
 
+  // Validate each YAML file
   for (const file of files) {
     const full = path.join(dir, file);
     let content;
 
     try {
-      content = fs.readFileSync(full, 'utf8');
+      content = fs.readFileSync(full, "utf8");
     } catch (error) {
       reportError(`Unable to read ${full}: ${error.message}`);
       continue;
     }
 
-    // Check for UTF-8 BOM.
+    // Check UTF-8 BOM
     if (content.charCodeAt(0) === 0xfeff) {
-      reportError(`UTF-8 BOM detected at the start of ${full}`);
+      reportError(`UTF-8 BOM detected in ${full}`);
     }
 
     const lines = content.split(/\r?\n/);
 
-    // Detect document separators incorrectly attached to values.
+    // Check misplaced document separators
     lines.forEach((line, index) => {
       if (/\S---[ \t]*(?:#.*)?$/.test(line)) {
         reportError(
-          `Document separator "---" is not on its own line ` +
-          `at ${full}:${index + 1} — "${line.trim()}". ` +
-          'Every resource after this point may be lost.'
+          `Misplaced document separator at ${full}:${index + 1}`
         );
       }
     });
 
-    // Split documents using valid YAML document separator lines.
+    // Split YAML documents
     const documents = content
       .split(/^---[ \t]*(?:#.*)?$/m)
-      .filter((doc) => doc.trim().length > 0);
+      .filter(doc => doc.trim().length > 0);
 
+    // Check duplicate top-level keys
     documents.forEach((doc, documentIndex) => {
       const seen = new Set();
 
       for (const line of doc.split(/\r?\n/)) {
-        // Only inspect top-level mapping keys.
-        // Supports plain, single-quoted and double-quoted keys.
         const match = line.match(
           /^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[A-Za-z_][A-Za-z0-9_-]*)[ \t]*:/
         );
 
-        if (!match) {
-          continue;
-        }
+        if (!match) continue;
 
         let key = match[1];
 
-        // Normalize quoted keys before checking for duplicates.
+        // Normalize quoted keys
         if (key.startsWith('"')) {
           try {
             key = JSON.parse(key);
           } catch {
-            // Leave malformed quoted keys unchanged.
+            continue;
           }
         } else if (key.startsWith("'")) {
           key = key.slice(1, -1).replace(/''/g, "'");
@@ -99,8 +99,9 @@ if (!fs.existsSync(dir)) {
 
         if (seen.has(key)) {
           reportError(
-            `Duplicate top-level mapping key "${key}" ` +
-            `in document ${documentIndex + 1} of ${full}`
+            `Duplicate top-level key "${key}" in document ${
+              documentIndex + 1
+            } of ${full}`
           );
         } else {
           seen.add(key);
@@ -110,13 +111,15 @@ if (!fs.existsSync(dir)) {
   }
 }
 
+// Final validation result
 if (failed) {
-  console.error('\nIstio manifest validation failed.');
+  console.error("\nIstio manifest validation failed.");
   process.exitCode = 1;
 } else {
   console.log(
-    'All k8s/istio manifests look clean: ' +
-    'no BOM, no misplaced document separators, ' +
-    'and no duplicate top-level mapping keys.'
+    "All k8s/istio manifests look clean: " +
+    "no BOM, no misplaced document separators, " +
+    "and no duplicate top-level mapping keys."
   );
 }
+

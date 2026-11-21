@@ -128,29 +128,26 @@ describe('ProfileService', () => {
       expect(profileCacheRef.getCachedSupabaseProfile).not.toHaveBeenCalled();
     });
 
-    it('does not emit debug logs on cache hit', async () => {
-      const cachedData = { id: 'user-123', full_name: 'Cached User' };
-      profileCacheRef.getCachedSupabaseProfile.mockResolvedValueOnce(cachedData);
-      profileCacheRef.isValidCachedProfile.mockReturnValueOnce(true);
+    it('does not emit debug logs while reading the full profile', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: { id: 'user-123', full_name: 'DB User' },
+        error: null,
+      });
 
       await getProfile('user-123');
 
       expect(logger.debug).not.toHaveBeenCalled();
     });
 
-    it('reads the database independently of authentication cache availability', async () => {
-      // Keep the existing test implementation from the main branch here.
-      // Restore its original setup, database mocks, and assertions.
-    });
+    it('does not read the authentication cache for full profiles', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: { id: 'user-123', full_name: 'DB User' },
+        error: null,
+      });
 
-    it('falls back to database when cache throws an error', async () => {
-      profileCacheRef.getCachedSupabaseProfile.mockRejectedValueOnce(new Error('Redis connection error'));
-      const dbData = { id: 'user-123', full_name: 'DB User' };
-      mockMaybeSingle.mockResolvedValueOnce({ data: dbData, error: null });
+      await getProfile('user-123');
 
-      const result = await getProfile('user-123');
-      expect(result).toEqual(dbData);
-      expect(mockFrom).toHaveBeenCalledWith('profiles');
+      expect(profileCacheRef.getCachedSupabaseProfile).not.toHaveBeenCalled();
     });
 
     it('returns profile from database without overwriting the authentication cache', async () => {

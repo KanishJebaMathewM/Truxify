@@ -1,10 +1,13 @@
+
+
+ 
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as path;
 import 'package:sqflite/sqflite.dart';
 
 /// Unified local storage service for the customer application.
 ///
-/// Provides a common API for local persistence while keeping the
-/// platform-specific database implementation behind this abstraction.
+/// Provides a common API for local persistence using SQLite.
 abstract class LocalStorageService {
   Future<void> initialize();
 
@@ -45,26 +48,39 @@ abstract class LocalStorageService {
   Future<void> close();
 }
 
-/// Default implementation.
-///
-/// NOTE:
-/// This file defines the shared contract. Platform-specific implementations
-/// should be provided through conditional imports so that sqflite is never
-/// loaded by the Flutter Web runtime.
+/// SQLite implementation for mobile platforms.
 class LocalStorageServiceImpl implements LocalStorageService {
   Database? _database;
+  Future<Database>? _opening;
 
+  /// Initializes the local SQLite database.
   @override
   Future<void> initialize() async {
     if (kIsWeb) {
       throw UnsupportedError(
-        'Web storage implementation must be provided by '
-        'local_storage_web.dart.',
+        'SQLite storage is not supported by this implementation on Web. '
+        'Provide a separate web storage implementation.',
       );
     }
 
-    _database = await openDatabase(
-      'customer.db',
+    if (_database != null) return;
+
+    _opening ??= _openDatabase();
+
+    try {
+      _database = await _opening!;
+    } catch (_) {
+      _opening = null;
+      rethrow;
+    }
+  }
+
+  Future<Database> _openDatabase() async {
+    final directory = await getDatabasesPath();
+    final databasePath = path.join(directory, 'customer.db');
+
+    return openDatabase(
+      databasePath,
       version: 1,
       onCreate: (db, version) async {
         await db.execute('''
@@ -77,6 +93,7 @@ class LocalStorageServiceImpl implements LocalStorageService {
     );
   }
 
+  /// Returns the initialized database.
   Database get _db {
     final database = _database;
 
@@ -90,13 +107,26 @@ class LocalStorageServiceImpl implements LocalStorageService {
     return database;
   }
 
+  /// Validates table names before using them in SQL operations.
+  String _validateTable(String table) {
+    final validName = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$');
+
+    if (!validName.hasMatch(table)) {
+      throw ArgumentError.value(table, 'table', 'Invalid table name');
+    }
+
+    return table;
+  }
+
+  // ---------------- CRUD OPERATIONS ----------------
+
   @override
   Future<int> insert(
     String table,
     Map<String, dynamic> values,
   ) {
     return _db.insert(
-      table,
+      _validateTable(table),
       values,
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
@@ -110,8 +140,12 @@ class LocalStorageServiceImpl implements LocalStorageService {
     String? orderBy,
     int? limit,
   }) {
+    if (limit != null && limit < 0) {
+      throw ArgumentError.value(limit, 'limit');
+    }
+
     return _db.query(
-      table,
+      _validateTable(table),
       where: where,
       whereArgs: whereArgs,
       orderBy: orderBy,
@@ -127,7 +161,7 @@ class LocalStorageServiceImpl implements LocalStorageService {
     List<Object?>? whereArgs,
   }) {
     return _db.update(
-      table,
+      _validateTable(table),
       values,
       where: where,
       whereArgs: whereArgs,
@@ -141,7 +175,7 @@ class LocalStorageServiceImpl implements LocalStorageService {
     List<Object?>? whereArgs,
   }) {
     return _db.delete(
-      table,
+      _validateTable(table),
       where: where,
       whereArgs: whereArgs,
     );
@@ -149,8 +183,10 @@ class LocalStorageServiceImpl implements LocalStorageService {
 
   @override
   Future<void> clear(String table) async {
-    await _db.delete(table);
+    await _db.delete(_validateTable(table));
   }
+
+  // ---------------- KEY-VALUE STORAGE ----------------
 
   @override
   Future<void> setValue(String key, String value) async {
@@ -190,14 +226,20 @@ class LocalStorageServiceImpl implements LocalStorageService {
     );
   }
 
+  // ---------------- DATABASE CLEANUP ----------------
+
   @override
   Future<void> close() async {
-    final database = _database;
+    final opening = _opening;
+    Database? database = _database;
 
-    if (database != null && database.isOpen) {
-      await database.close();
+    if (database == null && opening != null) {
+      database = await opening;
     }
 
     _database = null;
+    _opening = null;
+
+    await database?.close();
   }
 }

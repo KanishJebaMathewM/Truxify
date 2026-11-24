@@ -69,16 +69,16 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.16",
+    "@electric-sql/pglite": "0.5.17",
     "@eslint/js": "^10.0.1",
-    "@vitest/coverage-v8": "^5.1.0",
+    "@vitest/coverage-v8": "^5.1.1",
     "eslint": "^10.15.0",
     "eslint-plugin-import": "^2.29.1",
     "globals": "^17.14.0",
     "nock": "^15.0.6",
     "nodemon": "^3.1.2",
     "supertest": "^7.3.2",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.1"
   },
   "keywords": [
     "express",

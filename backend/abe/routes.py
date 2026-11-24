@@ -1,9 +1,11 @@
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
-from typing import List, Dict, Any
-from datetime import datetime, timezone
 import logging
+
+from datetime import datetime, timezone
+from typing import Any
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from abe_core import (
     CPABE,
@@ -13,6 +15,7 @@ from abe_core import (
     AccessPolicy,
 )
 
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
@@ -20,9 +23,13 @@ router = APIRouter(
     tags=["Attribute-Based Encryption"],
 )
 
+
 # ------------------------------------------------------------------
 # Initialize ABE Systems
 # ------------------------------------------------------------------
+
+# These instances should be initialized through application lifespan
+# management in a larger production deployment.
 
 cp_abe = CPABE()
 kp_abe = KPABE()
@@ -54,9 +61,9 @@ class DecryptRequest(BaseModel):
     user_attributes: List[AttributeRequest] = Field(max_length=100)
 
 
-class KPDecryptRequest(BaseModel):
-    encrypted_data: Dict[str, Any]
-    user_key: Dict[str, Any]
+class KPDecryptRequest(ValidatedRequest):
+    encrypted_data: dict[str, Any]
+    user_key: dict[str, Any]
 
 
 class UserKeyRequest(BaseModel):
@@ -84,7 +91,9 @@ class IssueAttributeRequest(BaseModel):
 # Helper Functions
 # ------------------------------------------------------------------
 
-def success_response(data: Any) -> Dict[str, Any]:
+def success_response(data: Any) -> dict[str, Any]:
+    """Return a standardized API response."""
+
     return {
         "success": True,
         "data": data,
@@ -92,7 +101,32 @@ def success_response(data: Any) -> Dict[str, Any]:
     }
 
 
-def handle_exception(message: str, exc: Exception):
+def handle_exception(message: str, exc: Exception) -> None:
+    """
+    Convert internal exceptions into safe HTTP responses.
+
+    Internal exception details are logged but not exposed to clients.
+    """
+
+    if isinstance(exc, HTTPException):
+        raise exc
+
+    if isinstance(exc, PermissionError):
+        logger.warning("%s: access denied", message)
+
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied",
+        ) from exc
+
+    if isinstance(exc, ValueError):
+        logger.warning("%s: invalid operation input", message)
+
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid operation input",
+        ) from exc
+
     logger.exception("%s", message)
 
     raise HTTPException(
@@ -319,6 +353,11 @@ def get_abe_stats():
             "dabe": {
                 "total_authorities": len(dabe.authorities),
             },
+            "available_operations": [
+                "cp-abe",
+                "kp-abe",
+                "dabe",
+            ],
         }
 
         return success_response(stats)

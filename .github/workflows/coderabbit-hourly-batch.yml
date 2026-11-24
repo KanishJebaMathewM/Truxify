@@ -1,0 +1,131 @@
+name: CodeRabbit Hourly Batch Review
+
+on:
+  schedule:
+    # Runs at the top of every hour
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    inputs:
+      max_prs:
+        description: 'Maximum PRs to trigger (default: 5)'
+        required: false
+        default: '5'
+      dry_run:
+        description: 'Perform a dry run without posting comments or labels'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  batch-review:
+    name: Trigger reviews for largest open PRs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Select and Trigger Largest PRs
+        uses: actions/github-script@v7
+        with:
+          # Prefer a PAT/GitHub App token so GitHub App webhooks (CodeRabbit) are guaranteed to trigger.
+          # Falls back to standard GITHUB_TOKEN.
+          github-token: ${{ secrets.CODERABBIT_TRIGGER_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const maxPRs = parseInt('${{ github.event.inputs.max_prs || "5" }}', 10);
+            const isDryRun = '${{ github.event.inputs.dry_run }}' === 'true';
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            core.info(`Fetching open pull requests for ${owner}/${repo}...`);
+
+            // Fetch all open PRs
+            const prs = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: 'open',
+              per_page: 100
+            });
+
+            core.info(`Total open PRs found: ${prs.length}`);
+
+            const candidates = [];
+
+            for (const pr of prs) {
+              // 1. Skip draft PRs
+              if (pr.draft) {
+                continue;
+              }
+
+              // 2. Skip PRs already reviewed by CodeRabbit or tagged to skip
+              const labels = (pr.labels || []).map(l => l.name);
+              if (labels.includes('coderabbit:reviewed') || labels.includes('no-ai-review')) {
+                continue;
+              }
+
+              // 3. Fetch detailed PR to get additions + deletions metrics
+              const { data: detail } = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: pr.number
+              });
+
+              const changes = (detail.additions || 0) + (detail.deletions || 0);
+
+              candidates.push({
+                number: pr.number,
+                title: pr.title,
+                changes,
+                additions: detail.additions || 0,
+                deletions: detail.deletions || 0,
+                author: pr.user ? pr.user.login : 'unknown'
+              });
+            }
+
+            // 4. Sort descending by size (largest diff first)
+            candidates.sort((a, b) => b.changes - a.changes);
+
+            core.info(`Found ${candidates.length} candidate PRs awaiting review.`);
+            candidates.forEach(c => {
+              core.info(`- #${c.number} (${c.changes} changes: +${c.additions}/-${c.deletions}): "${c.title}" by @${c.author}`);
+            });
+
+            // 5. Select the top N largest PRs (default 5)
+            const selected = candidates.slice(0, maxPRs);
+            core.info(`\nSelecting top ${selected.length} largest PR(s) for this hour.`);
+
+            for (const pr of selected) {
+              core.info(`Processing PR #${pr.number} (+${pr.additions}/-${pr.deletions} lines changed)...`);
+              if (isDryRun) {
+                core.info(`[DRY RUN] Would comment '@coderabbitai review' and add label 'coderabbit:reviewed' on PR #${pr.number}`);
+                continue;
+              }
+
+              // Post trigger comment
+              try {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: pr.number,
+                  body: '@coderabbitai review'
+                });
+                core.info(`Trigger comment added to PR #${pr.number}`);
+              } catch (err) {
+                core.error(`Failed to post comment to PR #${pr.number}: ${err.message}`);
+              }
+
+              // Label PR to prevent re-triggering next hour
+              try {
+                await github.rest.issues.addLabels({
+                  owner,
+                  repo,
+                  issue_number: pr.number,
+                  labels: ['coderabbit:reviewed']
+                });
+                core.info(`Label 'coderabbit:reviewed' added to PR #${pr.number}`);
+              } catch (err) {
+                core.warning(`Failed to add label to PR #${pr.number}: ${err.message}`);
+              }
+            }

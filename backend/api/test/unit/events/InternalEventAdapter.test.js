@@ -1,60 +1,73 @@
-// backend/api/test/unit/events/InternalEventAdapter.test.js
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { InternalEventAdapter } from '../../../src/core/events/adapters/InternalEventAdapter.js';
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { InternalEventAdapter } from '../../../src/events/InternalEventAdapter.js';
-
-describe('InternalEventAdapter - Pub/Sub Lifecycle Unit Tests (#9681)', () => {
-  let eventAdapter;
+describe('InternalEventAdapter lifecycle', () => {
+  let adapter;
 
   beforeEach(() => {
-    eventAdapter = new InternalEventAdapter();
-    vi.clearAllMocks();
+    adapter = new InternalEventAdapter();
   });
 
-  it('successfully publishes and delivers events to registered subscribers', async () => {
+  afterEach(async () => {
+    await adapter.disconnect();
+  });
+
+  it('delivers the full event object to a subscriber', async () => {
     const listener = vi.fn();
-    const topic = 'trip:created';
-    const payload = { tripId: 'trip_123', driverId: 'drv_456' };
+    const event = {
+      eventType: 'trip:created',
+      payload: { tripId: 'trip_123', driverId: 'drv_456' },
+    };
 
-    eventAdapter.subscribe(topic, listener);
-    await eventAdapter.publish(topic, payload);
+    await adapter.subscribe('trip:created', listener);
+    await adapter.publish(event);
 
     expect(listener).toHaveBeenCalledTimes(1);
-    expect(listener).toHaveBeenCalledWith(payload);
+    expect(listener).toHaveBeenCalledWith(event);
   });
 
-  it('supports unsubscribing listeners to stop receiving events', async () => {
+  it('delivers an event to every listener for the topic', async () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const event = { eventType: 'location:update', lat: 13.08, lng: 80.27 };
+
+    await adapter.subscribe('location:update', first);
+    await adapter.subscribe('location:update', second);
+    await adapter.publish(event);
+
+    expect(first).toHaveBeenCalledWith(event);
+    expect(second).toHaveBeenCalledWith(event);
+  });
+
+  it('stops delivery after unsubscribe', async () => {
     const listener = vi.fn();
-    const topic = 'location:update';
 
-    const unsubscribe = eventAdapter.subscribe(topic, listener);
-    
-    // Publish before unsubscribe
-    await eventAdapter.publish(topic, { lat: 13.08, lng: 80.27 });
+    await adapter.subscribe('payment:processed', listener);
+    await adapter.publish({ eventType: 'payment:processed', amount: 500 });
     expect(listener).toHaveBeenCalledTimes(1);
 
-    // Unsubscribe and publish again
-    unsubscribe();
-    await eventAdapter.publish(topic, { lat: 13.09, lng: 80.28 });
-    
-    // Listener call count should remain 1
+    await adapter.unsubscribe('payment:processed', listener);
+    await adapter.publish({ eventType: 'payment:processed', amount: 600 });
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
-  it('handles subscriber errors gracefully without breaking event publication', async () => {
-    const faultyListener = vi.fn().mockImplementation(() => {
-      throw new Error('Subscriber failure');
-    });
-    const healthyListener = vi.fn();
-    const topic = 'payment:processed';
+  it('rejects publish and subscribe after disconnect', async () => {
+    await adapter.disconnect();
 
-    eventAdapter.subscribe(topic, faultyListener);
-    eventAdapter.subscribe(topic, healthyListener);
+    expect(adapter.isConnected).toBe(false);
+    await expect(adapter.publish({ eventType: 'trip:created' })).rejects.toThrow('Not connected');
+    await expect(adapter.subscribe('trip:created', vi.fn())).rejects.toThrow('Not connected');
+  });
 
-    // Publishing should not throw despite faulty subscriber
-    await expect(eventAdapter.publish(topic, { amount: 500 })).resolves.not.toThrow();
+  it('can reconnect and publish again', async () => {
+    const listener = vi.fn();
 
-    expect(faultyListener).toHaveBeenCalledTimes(1);
-    expect(healthyListener).toHaveBeenCalledTimes(1);
+    await adapter.disconnect();
+    await adapter.connect();
+    await adapter.subscribe('trip:created', listener);
+    await adapter.publish({ eventType: 'trip:created', payload: { tripId: 'trip-2' } });
+
+    expect(adapter.isConnected).toBe(true);
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 });

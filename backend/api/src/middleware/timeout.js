@@ -158,7 +158,7 @@ export function createSlowRequestsCollectionIndexes(db) {
  * { "error": "REQUEST_TIMEOUT", "message": "Request exceeded the time limit. Please try again.", "retryAfter": 5 }
  */
 export function timeoutErrorHandler(err, req, res, next) {
-  if (req?.timedout || err?.code === 'ETIMEDOUT' || err?.timeout || err?.status === 503) {
+  if (req?.timedout || err?.code === 'ETIMEDOUT' || err?.timeout) {
     if (res.headersSent) {
       return next(err);
     }

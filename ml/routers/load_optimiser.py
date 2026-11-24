@@ -75,7 +75,7 @@ class LoadItem(BaseModel):
 class LoadOptimiserInput(BaseModel):
     truck_payload_kg: float = Field(..., gt=0, allow_inf_nan=False)
     truck_volume_m3: float = Field(..., gt=0, allow_inf_nan=False)
-    available_loads: List[LoadItem]
+    available_loads: List[LoadItem] = Field(..., min_length=1, max_length=200)
     driver_location: List[float] = Field(
         ..., min_length=2, max_length=2
     )

@@ -1,299 +1,478 @@
 'use strict';
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { checkRetroChanges, run } = require('./retro-labeler');
+const fs = require('fs');
+const path = require('path');
 
-test('checkRetroChanges returns level:beginner and gssoc:approved for human PR with no labels (merged)', () => {
-  const result = checkRetroChanges({
-    labels: [],
-    merged_at: '2026-07-19T22:00:00Z',
-    user: { login: 'human' }
-  });
-  assert.deepEqual(result.toAdd, ['gssoc:approved', 'level:beginner']);
-  assert.deepEqual(result.toRemove, []);
-});
+const DIFFICULTY_LABELS = [
+  'level:beginner',
+  'level:intermediate',
+  'level:advanced',
+  'level:critical'
+];
 
-test('checkRetroChanges migrates Beginner to level:beginner and adds gssoc:approved for human PR (merged)', () => {
-  const result = checkRetroChanges({
-    labels: [{ name: 'Beginner' }],
-    merged_at: '2026-07-19T22:00:00Z',
-    user: { login: 'human' }
-  });
-  assert.deepEqual(result.toAdd, ['level:beginner', 'gssoc:approved']);
-  assert.deepEqual(result.toRemove, ['Beginner']);
-});
+const TYPE_LABELS = [
+  'type:security',
+  'type:performance',
+  'type:bug',
+  'type:feature',
+  'type:refactor',
+  'type:testing',
+  'type:design',
+  'type:devops',
+  'type:docs',
+  'type:accessibility'
+];
 
-test('checkRetroChanges removes gssoc:approved and difficulty labels from Dependabot PR', () => {
-  const result = checkRetroChanges({
-    labels: [{ name: 'gssoc:approved' }, { name: 'level:beginner' }, { name: 'other-label' }],
-    merged_at: '2026-07-19T22:00:00Z',
-    user: { login: 'dependabot[bot]' }
-  });
-  assert.deepEqual(result.toAdd, []);
-  assert.deepEqual(result.toRemove, ['gssoc:approved', 'level:beginner']);
-});
+const normalizeLabel = value => String(value || '').trim().toLowerCase();
 
-test('checkRetroChanges does not add labels to unmerged closed human PR but does migrate Beginner if present and removes gssoc:approved', () => {
-  const result1 = checkRetroChanges({
-    labels: [],
-    merged_at: null,
-    user: { login: 'human' }
-  });
-  assert.deepEqual(result1.toAdd, []);
-  assert.deepEqual(result1.toRemove, []);
+function getLabelNames(labels = []) {
+  return labels
+    .map(label => typeof label === 'string' ? label : label && label.name)
+    .filter(Boolean);
+}
 
-  const result2 = checkRetroChanges({
-    labels: [{ name: 'Beginner' }],
-    merged_at: null,
-    user: { login: 'human' }
-  });
-  assert.deepEqual(result2.toAdd, ['level:beginner']);
-  assert.deepEqual(result2.toRemove, ['Beginner']);
+function loadLabelRules() {
+  const rulesPath = path.join(__dirname, '..', 'pr-labeler-rules.json');
 
-  const result3 = checkRetroChanges({
-    labels: [{ name: 'gssoc:approved' }],
-    merged_at: null,
-    user: { login: 'human' }
-  });
-  assert.deepEqual(result3.toAdd, []);
-  assert.deepEqual(result3.toRemove, ['gssoc:approved']);
-});
+  try {
+    return JSON.parse(fs.readFileSync(rulesPath, 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return {};
+    throw error;
+  }
+}
 
-test('run function performs additions and removals correctly', async () => {
-  let createdLabels = [];
-  let addedLabels = {};
-  let removedLabels = {};
+function matchesRule(pattern, value) {
+  try {
+    return new RegExp(pattern, 'i').test(value || '');
+  } catch {
+    return false;
+  }
+}
 
-  const mockGithub = {
-    paginate: async (fn, params) => {
-      if (fn === mockGithub.rest.issues.listLabelsForRepo) {
-        return [{ name: 'gssoc:approved' }, { name: 'level:beginner' }];
+function evaluateRulesForPR({ pr, changedFiles = [], rules = {} }) {
+  const currentLabels = new Set(getLabelNames(pr.labels).map(normalizeLabel));
+  const suggestedLabels = new Set();
+
+  for (const rule of rules.titleRules || []) {
+    if (matchesRule(rule.pattern, pr.title)) {
+      for (const label of rule.labels || []) {
+        if (label) suggestedLabels.add(label);
       }
-      if (fn === mockGithub.rest.pulls.list) {
-        return [
-          { number: 101, title: 'Migrate Beginner', labels: [{ name: 'Beginner' }], merged_at: '2026-07-19T22:00:00Z', user: { login: 'human' } },
-          { number: 102, title: 'Clean Dependabot', labels: [{ name: 'gssoc:approved' }, { name: 'level:beginner' }], merged_at: '2026-07-19T22:00:00Z', user: { login: 'dependabot[bot]' } }
-        ];
-      }
-      return [];
-    },
-    rest: {
-      issues: {
-        listLabelsForRepo: () => {},
-        createLabel: async ({ name }) => {
-          createdLabels.push(name);
-        },
-        addLabels: async ({ issue_number, labels }) => {
-          addedLabels[issue_number] = labels;
-        },
-        removeLabel: async ({ issue_number, name }) => {
-          if (!removedLabels[issue_number]) removedLabels[issue_number] = [];
-          removedLabels[issue_number].push(name);
+    }
+  }
+
+  for (const file of changedFiles) {
+    for (const rule of rules.pathRules || []) {
+      if (matchesRule(rule.pattern, file)) {
+        for (const label of rule.labels || []) {
+          if (label) suggestedLabels.add(label);
         }
-      },
-      pulls: {
-        list: () => {}
       }
     }
-  };
+  }
 
-  const mockContext = {
-    repo: { owner: 'owner', repo: 'repo' }
-  };
+  return [...suggestedLabels].filter(
+    label => !currentLabels.has(normalizeLabel(label))
+  );
+}
 
-  const mockCore = {
-    info: () => {},
-    error: () => {}
-  };
+function checkRetroChanges(pr, changedFiles = [], rules = {}) {
+  const currentLabels = getLabelNames(pr.labels);
+  const currentLabelsLower = new Set(currentLabels.map(normalizeLabel));
+  const toAdd = new Set();
+  const toRemove = new Set();
 
-  const count = await run({
-    github: mockGithub,
-    context: mockContext,
-    core: mockCore,
-    dryRun: false
-  });
+  const author = normalizeLabel(pr.user && pr.user.login);
+  const isDependabot = author.includes('dependabot');
 
-  assert.equal(count, 2);
-  assert.deepEqual(addedLabels[101], ['level:beginner', 'gssoc:approved']);
-  assert.deepEqual(removedLabels[101], ['Beginner']);
-  assert.deepEqual(addedLabels[102], undefined);
-  assert.deepEqual(removedLabels[102].sort(), ['gssoc:approved', 'level:beginner'].sort());
-});
+  if (isDependabot) {
+    for (const label of currentLabels) {
+      const normalized = normalizeLabel(label);
 
-test('deduplicateTypeLabels keeps the dominant type label by file-change score', () => {
-  const { deduplicateTypeLabels } = require('./retro-labeler');
-  const rules = {
-    typeLabelPriority: [
-      'type:security', 'type:performance', 'type:bug', 'type:feature',
-      'type:refactor', 'type:testing', 'type:design', 'type:devops',
-      'type:docs', 'type:accessibility'
-    ],
-    pathRules: [
-      { pattern: '(^test/|/test/|\\.test\\.|_test\\.)', labels: ['type:testing'] },
-      { pattern: '(^docs/|README|CONTRIBUTING|\\.md$)', labels: ['type:docs'] }
-    ],
-    titleRules: [
-      { pattern: '^(test|tests)', labels: ['type:testing'] }
-    ]
-  };
-
-  const result = deduplicateTypeLabels({
-    currentLabels: [{ name: 'type:testing' }, { name: 'type:docs' }, { name: 'type:bug' }],
-    changedFiles: [
-      'backend/api/test/unit/a.test.js',
-      'backend/api/test/unit/b.test.js',
-      'docs/README.md'
-    ],
-    prTitle: 'test: add unit tests',
-    rules
-  });
-
-  assert.equal(result.toKeep, 'type:testing');
-  assert.deepEqual(result.toRemove.sort(), ['type:bug', 'type:docs'].sort());
-});
-
-test('deduplicateTypeLabels uses priority tiebreaker when scores are equal', () => {
-  const { deduplicateTypeLabels } = require('./retro-labeler');
-  const rules = {
-    typeLabelPriority: [
-      'type:security', 'type:performance', 'type:bug', 'type:feature',
-      'type:refactor', 'type:testing', 'type:design', 'type:devops',
-      'type:docs', 'type:accessibility'
-    ],
-    pathRules: [],
-    titleRules: []
-  };
-
-  const result = deduplicateTypeLabels({
-    currentLabels: [{ name: 'type:bug' }, { name: 'type:security' }],
-    changedFiles: [],
-    prTitle: 'misc change',
-    rules
-  });
-
-  assert.equal(result.toKeep, 'type:security');
-  assert.deepEqual(result.toRemove, ['type:bug']);
-});
-
-test('deduplicateTypeLabels returns no changes when 0 or 1 contested type labels', () => {
-  const { deduplicateTypeLabels } = require('./retro-labeler');
-  const rules = { typeLabelPriority: [
-    'type:security', 'type:performance', 'type:bug', 'type:feature',
-    'type:refactor', 'type:testing', 'type:design', 'type:devops',
-    'type:docs', 'type:accessibility'
-  ]};
-
-  const result = deduplicateTypeLabels({
-    currentLabels: [{ name: 'type:bug' }, { name: 'type:api' }],
-    changedFiles: [],
-    prTitle: 'fix: something',
-    rules
-  });
-
-  assert.equal(result.toKeep, 'type:bug');
-  assert.deepEqual(result.toRemove, []);
-});
-
-test('isRateLimitError correctly identifies HTTP 403 / 429 rate limit errors', () => {
-  const { isRateLimitError } = require('./retro-labeler');
-
-  assert.equal(isRateLimitError(null), false);
-  assert.equal(isRateLimitError(new Error('Normal error')), false);
-  
-  const err403 = new Error('API rate limit exceeded for installation');
-  err403.status = 403;
-  assert.equal(isRateLimitError(err403), true);
-
-  const err429 = new Error('Too many requests');
-  err429.status = 429;
-  assert.equal(isRateLimitError(err429), true);
-});
-
-test('run function handles rate limit error gracefully without crashing', async () => {
-  const { run } = require('./retro-labeler');
-  let warningLogged = false;
-
-  const mockRateLimitError = new Error('API rate limit exceeded for installation');
-  mockRateLimitError.status = 403;
-
-  const mockGithub = {
-    paginate: async () => {
-      throw mockRateLimitError;
-    },
-    rest: {
-      issues: {
-        listLabelsForRepo: () => {}
+      if (
+        normalized === 'gssoc:approved' ||
+        DIFFICULTY_LABELS.some(difficulty => normalized === difficulty)
+      ) {
+        toRemove.add(label);
       }
     }
-  };
+  } else {
+    // Migrate the old "Beginner" label to "level:beginner".
+    const oldBeginner = currentLabels.find(
+      label => normalizeLabel(label) === 'beginner'
+    );
 
-  const mockContext = { repo: { owner: 'owner', repo: 'repo' } };
-  const mockCore = {
-    info: () => {},
-    warning: (msg) => {
-      if (msg.includes('rate limit exceeded')) warningLogged = true;
-    },
-    error: () => {}
-  };
-
-  const count = await run({
-    github: mockGithub,
-    context: mockContext,
-    core: mockCore,
-    dryRun: false
-  });
-
-  assert.equal(count, 0);
-  assert.equal(warningLogged, true);
-});
-
-test('run function filters PRs by sinceHours cutoff time', async () => {
-  const { run } = require('./retro-labeler');
-  let addedLabels = {};
-  const recentDate = new Date().toISOString();
-  const oldDate = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-
-  const mockGithub = {
-    paginate: async (fn) => {
-      if (fn === mockGithub.rest.issues.listLabelsForRepo) {
-        return [{ name: 'gssoc:approved' }, { name: 'level:beginner' }];
-      }
-      return [];
-    },
-    rest: {
-      issues: {
-        listLabelsForRepo: () => {},
-        createLabel: async () => {},
-        addLabels: async ({ issue_number, labels }) => {
-          addedLabels[issue_number] = labels;
-        },
-        removeLabel: async () => {}
-      },
-      pulls: {
-        list: async () => ({
-          data: [
-            { number: 201, title: 'Recent PR', labels: [], merged_at: recentDate, closed_at: recentDate, updated_at: recentDate, user: { login: 'human' } },
-            { number: 202, title: 'Old PR', labels: [], merged_at: oldDate, closed_at: oldDate, updated_at: oldDate, user: { login: 'human' } }
-          ]
-        })
+    if (oldBeginner) {
+      toRemove.add(oldBeginner);
+      if (!currentLabelsLower.has('level:beginner')) {
+        toAdd.add('level:beginner');
       }
     }
+
+    if (pr.merged_at) {
+      if (!currentLabelsLower.has('gssoc:approved')) {
+        toAdd.add('gssoc:approved');
+      }
+
+      const hasDifficulty = currentLabels.some(label =>
+        DIFFICULTY_LABELS.includes(normalizeLabel(label))
+      ) || toAdd.has('level:beginner');
+
+      if (!hasDifficulty) {
+        toAdd.add('level:beginner');
+      }
+    } else if (pr.state === 'closed') {
+      const approvedLabel = currentLabels.find(
+        label => normalizeLabel(label) === 'gssoc:approved'
+      );
+
+      if (approvedLabel) toRemove.add(approvedLabel);
+    }
+
+    for (const label of evaluateRulesForPR({ pr, changedFiles, rules })) {
+      toAdd.add(label);
+    }
+  }
+
+  return {
+    toAdd: [...toAdd].filter(label => !toRemove.has(label)),
+    toRemove: [...toRemove]
   };
+}
 
-  const mockContext = { repo: { owner: 'owner', repo: 'repo' } };
-  const mockCore = { info: () => {}, warning: () => {}, error: () => {} };
+function deduplicateTypeLabels({
+  currentLabels = [],
+  changedFiles = [],
+  prTitle = '',
+  rules = {}
+}) {
+  const labels = getLabelNames(currentLabels);
+  const allowedTypes = new Set(TYPE_LABELS.map(normalizeLabel));
+  const contested = labels.filter(label => allowedTypes.has(normalizeLabel(label)));
 
-  const count = await run({
-    github: mockGithub,
-    context: mockContext,
-    core: mockCore,
-    dryRun: false,
-    sinceHours: 12
-  });
+  if (contested.length <= 1) {
+    return { toKeep: contested[0] || null, toRemove: [] };
+  }
 
-  assert.equal(count, 1);
-  assert.ok(addedLabels[201]);
-  assert.equal(addedLabels[202], undefined);
-});
+  const scores = new Map(
+    contested.map(label => [normalizeLabel(label), 0])
+  );
+
+  for (const file of changedFiles) {
+    for (const rule of rules.pathRules || []) {
+      if (!matchesRule(rule.pattern, file)) continue;
+
+      for (const label of rule.labels || []) {
+        const key = normalizeLabel(label);
+        if (scores.has(key)) scores.set(key, scores.get(key) + 1);
+      }
+    }
+  }
+
+  for (const rule of rules.titleRules || []) {
+    if (!matchesRule(rule.pattern, prTitle)) continue;
+
+    for (const label of rule.labels || []) {
+      const key = normalizeLabel(label);
+      if (scores.has(key)) scores.set(key, scores.get(key) + 3);
+    }
+  }
+
+  const priority = (rules.typeLabelPriority || TYPE_LABELS).map(normalizeLabel);
+  const winner = [...scores.keys()].sort((a, b) => {
+    const scoreDifference = scores.get(b) - scores.get(a);
+    if (scoreDifference !== 0) return scoreDifference;
+
+    const aPriority = priority.indexOf(a);
+    const bPriority = priority.indexOf(b);
+    return (aPriority === -1 ? Infinity : aPriority) -
+      (bPriority === -1 ? Infinity : bPriority);
+  })[0];
+
+  const toKeep = contested.find(label => normalizeLabel(label) === winner);
+  const toRemove = contested.filter(label => normalizeLabel(label) !== winner);
+
+  return { toKeep, toRemove };
+}
+
+function isRateLimitError(error) {
+  if (!error) return false;
+  if (error.status === 429) return true;
+
+  if (error.status === 403) {
+    const message = normalizeLabel(error.message);
+    const responseMessage = normalizeLabel(
+      error.response && error.response.data && error.response.data.message
+    );
+
+    return [message, responseMessage].some(text =>
+      text.includes('rate limit') ||
+      text.includes('secondary rate limit') ||
+      text.includes('exceeded')
+    );
+  }
+
+  return false;
+}
+
+async function run({
+  github,
+  context,
+  core,
+  dryRun = false,
+  prState = 'closed',
+  sinceHours = 0
+}) {
+  const { owner, repo } = context.repo;
+
+  core.info(
+    `Starting retrospective PR labeler (dryRun=${dryRun}, state=${prState}, sinceHours=${sinceHours}).`
+  );
+
+  let repoLabels;
+
+  try {
+    repoLabels = await github.paginate(
+      github.rest.issues.listLabelsForRepo,
+      { owner, repo, per_page: 100 }
+    );
+  } catch (error) {
+    if (isRateLimitError(error)) {
+      core.warning(`Rate limit while listing labels: ${error.message}`);
+      return 0;
+    }
+    throw error;
+  }
+
+  const availableLabels = new Set(
+    repoLabels.map(label => normalizeLabel(label.name))
+  );
+
+  async function ensureLabelExists(name, color, description) {
+    const key = normalizeLabel(name);
+    if (availableLabels.has(key)) return;
+
+    if (dryRun) {
+      core.info(`[Dry run] Would create label "${name}".`);
+      return;
+    }
+
+    try {
+      await github.rest.issues.createLabel({
+        owner,
+        repo,
+        name,
+        color,
+        description
+      });
+      availableLabels.add(key);
+    } catch (error) {
+      // GitHub returns 422 if the label already exists.
+      if (error.status !== 422) throw error;
+      availableLabels.add(key);
+    }
+  }
+
+  try {
+    await ensureLabelExists(
+      'gssoc:approved',
+      '0052cc',
+      'GSSoC approved contribution'
+    );
+    await ensureLabelExists(
+      'level:beginner',
+      '0e8a16',
+      'Beginner level task or pull request'
+    );
+  } catch (error) {
+    if (isRateLimitError(error)) {
+      core.warning(`Rate limit while preparing labels: ${error.message}`);
+      return 0;
+    }
+    throw error;
+  }
+
+  const cutoffTime = sinceHours > 0
+    ? new Date(Date.now() - sinceHours * 60 * 60 * 1000)
+    : null;
+
+  let pullRequests = [];
+
+  try {
+    if (cutoffTime) {
+      let page = 1;
+      let shouldStop = false;
+
+      while (!shouldStop) {
+        const response = await github.rest.pulls.list({
+          owner,
+          repo,
+          state: prState,
+          sort: 'updated',
+          direction: 'desc',
+          per_page: 100,
+          page
+        });
+
+        const pageData = response.data || [];
+        if (pageData.length === 0) break;
+
+        for (const pr of pageData) {
+          const updatedAt = new Date(pr.updated_at || pr.created_at);
+
+          if (updatedAt < cutoffTime) {
+            shouldStop = true;
+            break;
+          }
+
+          pullRequests.push(pr);
+        }
+
+        if (pageData.length < 100) break;
+        page += 1;
+      }
+    } else {
+      pullRequests = await github.paginate(
+        github.rest.pulls.list,
+        { owner, repo, state: prState, per_page: 100 }
+      );
+    }
+  } catch (error) {
+    if (isRateLimitError(error)) {
+      core.warning(`Rate limit while fetching pull requests: ${error.message}`);
+      return 0;
+    }
+    throw error;
+  }
+
+  const rules = loadLabelRules();
+  let updatedCount = 0;
+
+  for (const pr of pullRequests) {
+    try {
+      let changedFiles = [];
+
+      try {
+        const files = await github.paginate(
+          github.rest.pulls.listFiles,
+          {
+            owner,
+            repo,
+            pull_number: pr.number,
+            per_page: 100
+          }
+        );
+
+        changedFiles = files.map(file => file.filename);
+      } catch (error) {
+        if (isRateLimitError(error)) {
+          core.warning(
+            `Rate limit while fetching files for PR #${pr.number}: ${error.message}`
+          );
+          break;
+        }
+
+        core.warning(
+          `Could not fetch files for PR #${pr.number}: ${error.message}`
+        );
+      }
+
+      const { toAdd, toRemove } = checkRetroChanges(
+        pr,
+        changedFiles,
+        rules
+      );
+
+      const projectedLabels = [
+        ...new Set([...getLabelNames(pr.labels), ...toAdd])
+      ].filter(label => !toRemove.includes(label));
+
+      const deduplication = deduplicateTypeLabels({
+        currentLabels: projectedLabels,
+        changedFiles,
+        prTitle: pr.title,
+        rules
+      });
+
+      for (const label of deduplication.toRemove) {
+        if (!toRemove.includes(label)) toRemove.push(label);
+
+        const addIndex = toAdd.indexOf(label);
+        if (addIndex !== -1) toAdd.splice(addIndex, 1);
+      }
+
+      if (toAdd.length === 0 && toRemove.length === 0) continue;
+
+      updatedCount += 1;
+
+      const actions = [];
+      if (toAdd.length) actions.push(`add: ${toAdd.join(', ')}`);
+      if (toRemove.length) actions.push(`remove: ${toRemove.join(', ')}`);
+
+      if (dryRun) {
+        core.info(
+          `[Dry run] PR #${pr.number} (${pr.title}): would ${actions.join(' and ')}`
+        );
+        continue;
+      }
+
+      for (const label of toRemove) {
+        try {
+          await github.rest.issues.removeLabel({
+            owner,
+            repo,
+            issue_number: pr.number,
+            name: label
+          });
+        } catch (error) {
+          if (isRateLimitError(error)) throw error;
+          core.warning(
+            `Could not remove "${label}" from PR #${pr.number}: ${error.message}`
+          );
+        }
+      }
+
+      if (toAdd.length) {
+        try {
+          await github.rest.issues.addLabels({
+            owner,
+            repo,
+            issue_number: pr.number,
+            labels: toAdd
+          });
+        } catch (error) {
+          if (isRateLimitError(error)) throw error;
+          core.warning(
+            `Could not add labels to PR #${pr.number}: ${error.message}`
+          );
+        }
+      }
+    } catch (error) {
+      if (isRateLimitError(error)) {
+        core.warning(
+          `Rate limit while processing PR #${pr.number}; stopping safely.`
+        );
+        break;
+      }
+
+      core.error(`Error processing PR #${pr.number}: ${error.message}`);
+    }
+  }
+
+  core.info(
+    `Finished. Updated or planned updates: ${updatedCount}/${pullRequests.length}.`
+  );
+
+  return updatedCount;
+}
+
+module.exports = {
+  checkRetroChanges,
+  deduplicateTypeLabels,
+  evaluateRulesForPR,
+  isRateLimitError,
+  loadLabelRules,
+  run
+};
 

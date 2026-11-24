@@ -1,11 +1,14 @@
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:io';
-import '../../config.dart';
+
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:http/http.dart' as http;
-import 'package:supabase_flutter/supabase_flutter.dart'; // ✅ IMPORT SUPABASE
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../../config.dart';
 import '../conflict/conflict_resolver.dart';
 import '../db/offline_event_db.dart';
 import '../models/trip_event.dart';
@@ -14,9 +17,6 @@ enum SyncUploadOutcome {
   success,
   retryableFailure,
   permanentFailure,
-  /// The batch could not be uploaded because the device is offline or the
-  /// network is unreachable. This must NOT consume the application-level retry
-  /// budget: events stay queued and are re-attempted once connectivity returns.
   networkUnavailable,
 }
 
@@ -31,49 +31,81 @@ class SyncEngine {
     Connectivity? connectivity,
     String? Function()? getCurrentToken,
     Future<String?> Function()? refreshAuthToken,
-  }) : resolver = resolver ?? ConflictResolver(), httpClient = httpClient ?? _defaultHttpClient, getCurrentToken = getCurrentToken ?? _defaultGetCurrentToken, refreshAuthToken = refreshAuthToken ?? _defaultRefreshAuthToken, _connectivity = connectivity ?? Connectivity();
+  })  : resolver = resolver ?? ConflictResolver(),
+        httpClient = httpClient ?? http.Client(),
+        _ownsHttpClient = httpClient == null,
+        getCurrentToken =
+            getCurrentToken ?? _defaultGetCurrentToken,
+        refreshAuthToken =
+            refreshAuthToken ?? _defaultRefreshAuthToken,
+        _connectivity = connectivity ?? Connectivity() {
+    if (maxRetries < 0) {
+      throw ArgumentError.value(maxRetries, 'maxRetries');
+    }
+
+    if (batchSize <= 0) {
+      throw ArgumentError.value(batchSize, 'batchSize');
+    }
+
+    if (apiBaseUrl.trim().isEmpty) {
+      throw ArgumentError.value(apiBaseUrl, 'apiBaseUrl');
+    }
+  }
 
   final OfflineEventDb db;
   final String apiBaseUrl;
   final ConflictResolver resolver;
+
   final int maxRetries;
   final int batchSize;
 
-  /// HTTP client used for batch uploads. Injected to keep the engine testable.
   final http.Client httpClient;
+  final bool _ownsHttpClient;
 
-  /// Returns the current Supabase access token, or null if the session is
-  /// missing/expired. Overridable so tests can stub auth state.
   final String? Function() getCurrentToken;
-
-  /// Attempts to refresh the auth session and returns the new access token, or
-  /// null if the refresh itself failed. Overridable so tests can stub refresh.
   final Future<String?> Function() refreshAuthToken;
 
-  static http.Client get _defaultHttpClient => http.Client();
-
-  static String? _defaultGetCurrentToken() =>
-      Supabase.instance.client.auth.currentSession?.accessToken;
-
-  static Future<String?> _defaultRefreshAuthToken() async {
-    final refreshed = await Supabase.instance.client.auth.refreshSession();
-    return refreshed.session?.accessToken;
-  }
-
-  bool _isSyncing = false;
-
-  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   final Connectivity _connectivity;
 
-  Future<void> startListening() async {
-    if (_connectivitySubscription != null) return;
+  bool _isSyncing = false;
+  bool _disposed = false;
 
-    _connectivitySubscription = _connectivity.onConnectivityChanged.listen((result) {
-      final hasNetwork = !result.contains(ConnectivityResult.none);
-      if (hasNetwork) {
-        unawaited(syncPending());
-      }
-    });
+  StreamSubscription<List<ConnectivityResult>>?
+      _connectivitySubscription;
+
+  static String? _defaultGetCurrentToken() {
+    return Supabase.instance.client.auth.currentSession?.accessToken;
+  }
+
+  static Future<String?> _defaultRefreshAuthToken() async {
+    final response =
+        await Supabase.instance.client.auth.refreshSession();
+
+    return response.session?.accessToken;
+  }
+
+  Future<void> startListening() async {
+    if (_disposed || _connectivitySubscription != null) return;
+
+    _connectivitySubscription =
+        _connectivity.onConnectivityChanged.listen(
+      (results) {
+        if (results.isNotEmpty &&
+            !results.contains(ConnectivityResult.none)) {
+          unawaited(syncPending());
+        }
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        developer.log(
+          '[SyncEngine] Connectivity listener error.',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      },
+    );
+
+    // Also attempt synchronization when listening starts.
+    unawaited(syncPending());
   }
 
   Future<void> stopListening() async {
@@ -81,11 +113,32 @@ class SyncEngine {
     _connectivitySubscription = null;
   }
 
+  Future<void> dispose() async {
+    if (_disposed) return;
+
+    _disposed = true;
+
+    await stopListening();
+
+    if (_ownsHttpClient) {
+      httpClient.close();
+    }
+  }
+
   Future<int> syncPending() async {
-    if (_isSyncing) return 0;
+    if (_disposed || _isSyncing) return 0;
+
     _isSyncing = true;
+
     try {
       return await _syncPendingInternal();
+    } catch (error, stackTrace) {
+      developer.log(
+        '[SyncEngine] Synchronization failed.',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      return 0;
     } finally {
       _isSyncing = false;
     }
@@ -93,82 +146,108 @@ class SyncEngine {
 
   Future<int> _syncPendingInternal() async {
     final pending = await db.pendingEvents(limit: batchSize);
-    if (pending.isEmpty) {
-      return 0;
-    }
 
-    // Events that exhausted their retry budget must never be silently dropped
-    // forever: mark them rejected with a stored reason the UI can surface.
+    if (pending.isEmpty) return 0;
+
+    // Reject events that have exhausted their retry budget.
     final exhausted = pending
         .where((event) => event.retryCount >= maxRetries)
         .toList();
-    if (exhausted.isNotEmpty) {
-      for (final event in exhausted) {
-        await db.markRejected(event.id, reason: 'retry budget exhausted');
-      }
-      developer.log(
-        '[SyncEngine] Rejected ${exhausted.length} offline event(s) that exhausted their retry budget.',
+
+    for (final event in exhausted) {
+      await db.markRejected(
+        event.id,
+        reason: 'Retry budget exhausted.',
       );
     }
 
-    final eligible =
-        pending.where((event) => event.retryCount < maxRetries).toList();
-    if (eligible.isEmpty) {
-      return 0;
+    if (exhausted.isNotEmpty) {
+      developer.log(
+        '[SyncEngine] Rejected ${exhausted.length} '
+        'event(s) after exhausting retries.',
+      );
     }
 
+    final eligible = pending
+        .where((event) => event.retryCount < maxRetries)
+        .toList();
+
+    if (eligible.isEmpty) return 0;
+
+    // Resolve duplicate and conflicting events.
     final resolution = resolver.resolveWithDetails(eligible);
+
     final resolved = resolution.resolved;
     final supersededIds = resolution.supersededIds;
 
-    // Clear superseded/deduplicated event IDs from SQLite to prevent orphan pending queue loops
+    // Mark superseded events as handled.
     for (final id in supersededIds) {
       await db.markSynced(id);
     }
 
-    if (resolved.isEmpty) {
-      return 0;
-    }
+    if (resolved.isEmpty) return 0;
 
+    // Mark events as syncing before uploading.
     await _markAsSyncing(resolved);
 
-    SyncUploadOutcome uploadOutcome;
+    SyncUploadOutcome outcome;
+
     try {
-      uploadOutcome = await _uploadBatch(resolved);
-    } catch (e) {
-      developer.log('[SyncEngine] Unexpected error during batch upload: $e');
-      // An unexpected error during upload must never leave events stuck in the
-      // transient `syncing` state; fall through to failure handling below so
-      // they are re-queued on a later sync pass.
-      uploadOutcome = SyncUploadOutcome.retryableFailure;
-    }
-    if (uploadOutcome == SyncUploadOutcome.success) {
-      for (final event in resolved) {
-        await db.markSynced(event.id);
-      }
-      return resolved.length;
+      outcome = await _uploadBatch(resolved);
+    } catch (error, stackTrace) {
+      developer.log(
+        '[SyncEngine] Unexpected batch upload error.',
+        error: error,
+        stackTrace: stackTrace,
+      );
+
+      outcome = SyncUploadOutcome.retryableFailure;
     }
 
-    if (uploadOutcome == SyncUploadOutcome.permanentFailure) {
-      for (final event in resolved) {
-        await db.markRejected(event.id, reason: 'Server rejected this offline event batch as non-retryable.');
-      }
-      return 0;
-    }
+    switch (outcome) {
+      case SyncUploadOutcome.success:
+        for (final event in resolved) {
+          await db.markSynced(event.id);
+        }
 
-    if (uploadOutcome == SyncUploadOutcome.networkUnavailable) {
-      // Re-queue without incrementing retryCount so the offline writes are not
-      // permanently discarded and are retried once the network is reachable.
-      for (final event in resolved) {
-        await db.markFailed(event.id, retryCount: event.retryCount);
-      }
-      return 0;
-    }
+        developer.log(
+          '[SyncEngine] Successfully synced ${resolved.length} events.',
+        );
 
-    for (final event in resolved) {
-      await db.markFailed(event.id, retryCount: event.retryCount + 1);
+        return resolved.length;
+
+      case SyncUploadOutcome.permanentFailure:
+        for (final event in resolved) {
+          await db.markRejected(
+            event.id,
+            reason: 'Server rejected the event as non-retryable.',
+          );
+        }
+
+        return 0;
+
+      case SyncUploadOutcome.networkUnavailable:
+        // Preserve retry count when connectivity or authentication
+        // is temporarily unavailable.
+        for (final event in resolved) {
+          await db.markFailed(
+            event.id,
+            retryCount: event.retryCount,
+          );
+        }
+
+        return 0;
+
+      case SyncUploadOutcome.retryableFailure:
+        for (final event in resolved) {
+          await db.markFailed(
+            event.id,
+            retryCount: event.retryCount + 1,
+          );
+        }
+
+        return 0;
     }
-    return 0;
   }
 
   Future<void> _markAsSyncing(List<TripEvent> events) async {
@@ -177,112 +256,199 @@ class SyncEngine {
     }
   }
 
-  Future<SyncUploadOutcome> _uploadBatch(List<TripEvent> events) async {
+  Future<SyncUploadOutcome> _uploadBatch(
+    List<TripEvent> events,
+  ) async {
     final body = jsonEncode({
       'events': events.map((event) => event.toJson()).toList(),
       'idempotencyKey': _idempotencyKeyFor(events),
     });
 
-    // Gate uploads on connectivity. When the device reports `none` we skip the
-    // HTTP attempt entirely so frequent offline GPS pings never burn the retry
-    // budget (issue #14734).
-    final connectivity = await _connectivity.checkConnectivity();
-    if (connectivity.contains(ConnectivityResult.none)) {
-      developer.log('[SyncEngine] No connectivity; skipping batch upload to preserve retry budget.');
-      return SyncUploadOutcome.networkUnavailable;
-    }
-
     try {
-      // 🚀 AUTH EXTRACTION (Issue #361/#362 Fix)
-      // Grab the fresh active Supabase JWT token from the local client session
-      final token = getCurrentToken();
+      final connectivity = await _connectivity.checkConnectivity();
 
-      if (token == null) {
-        developer.log('[SyncEngine] ⚠️ Cannot sync batch: User session token is null/expired.');
-        return SyncUploadOutcome.retryableFailure;
-      }
+      if (connectivity.isEmpty ||
+          connectivity.contains(ConnectivityResult.none)) {
+        developer.log(
+          '[SyncEngine] Device is offline. Upload skipped.',
+        );
 
-      final response = await _postBatch(body, token);
-
-      if (response.statusCode == 200 || response.statusCode == 202) {
-        return SyncUploadOutcome.success;
-      }
-
-      // 🔐 Issue #11487: a 401 means the access token expired. Refresh the
-      // session and retry ONCE with the new token instead of blindly retrying
-      // against a dead token. Only a failed refresh is terminal, so a merely
-      // expired token can never permanently discard queued trip events.
-      if (response.statusCode == 401) {
-        developer.log('[SyncEngine] 🚨 Auth rejected by server (401 Unauthorized). Refreshing token and retrying.');
-        final newToken = await refreshAuthToken();
-        if (newToken == null) {
-          developer.log('[SyncEngine] ❌ Token refresh failed; re-queuing batch as retryable (preserve data).');
-          // An auth-plumbing blip is not a server rejection: re-queue without
-          // burning the retry budget (issue #14734).
-          return SyncUploadOutcome.networkUnavailable;
-        }
-        final retry = await _postBatch(body, newToken);
-        if (retry.statusCode == 200 || retry.statusCode == 202) {
-          return SyncUploadOutcome.success;
-        }
-        // A refreshed token means the auth problem is solved; any remaining
-        // failure is a transport issue, not a permanent rejection. Only 4xx
-        // conflict/validation errors are terminal — everything else (429/5xx)
-        // must be re-queued so queued trip events are never silently lost.
-        if (retry.statusCode == 409 ||
-            retry.statusCode == 422 ||
-            retry.statusCode == 400) {
-          return SyncUploadOutcome.permanentFailure;
-        }
-        // The post-refresh failure is still an auth-cycle blip: preserve the
-        // retry budget (issue #14734).
         return SyncUploadOutcome.networkUnavailable;
       }
 
-      if (response.statusCode == 409 || response.statusCode == 422 || response.statusCode == 400) {
-        return SyncUploadOutcome.permanentFailure;
+      // Get the current Supabase access token.
+      String? token;
+
+      try {
+        token = getCurrentToken();
+      } catch (error) {
+        developer.log(
+          '[SyncEngine] Failed to read authentication token: $error',
+        );
+
+        return SyncUploadOutcome.networkUnavailable;
       }
 
-      if (response.statusCode == 429 || response.statusCode >= 500) {
-        await Future<void>.delayed(_backoffDelay(_maxRetryCount(events)));
-        return SyncUploadOutcome.retryableFailure;
+      if (token == null || token.isEmpty) {
+        developer.log(
+          '[SyncEngine] No active authentication token.',
+        );
+
+        return SyncUploadOutcome.networkUnavailable;
       }
 
-      return SyncUploadOutcome.retryableFailure;
-    } on SocketException catch (e) {
-      // A network transport failure (offline / captive portal) is not an
-      // application-level rejection, so it must not consume the retry budget.
-      developer.log('[SyncEngine] Network unreachable during batch upload: $e');
+      var response = await _postBatch(body, token);
+
+      // Refresh the token and retry once after HTTP 401.
+      if (response.statusCode == 401) {
+        developer.log(
+          '[SyncEngine] Access token expired. Refreshing session.',
+        );
+
+        String? newToken;
+
+        try {
+          newToken = await refreshAuthToken();
+        } catch (error, stackTrace) {
+          developer.log(
+            '[SyncEngine] Token refresh failed.',
+            error: error,
+            stackTrace: stackTrace,
+          );
+
+          return SyncUploadOutcome.networkUnavailable;
+        }
+
+        if (newToken == null || newToken.isEmpty) {
+          return SyncUploadOutcome.networkUnavailable;
+        }
+
+        response = await _postBatch(body, newToken);
+      }
+
+      return _classifyResponse(response, events);
+    } on SocketException catch (error) {
+      developer.log(
+        '[SyncEngine] Network unavailable: $error',
+      );
+
       return SyncUploadOutcome.networkUnavailable;
-    } catch (e) {
-      developer.log('[SyncEngine] Batch upload threw: $e');
-      await Future<void>.delayed(_backoffDelay(_maxRetryCount(events)));
+    } on TimeoutException catch (error) {
+      developer.log(
+        '[SyncEngine] Upload timed out: $error',
+      );
+
+      return SyncUploadOutcome.networkUnavailable;
+    } on http.ClientException catch (error) {
+      developer.log(
+        '[SyncEngine] HTTP client error: $error',
+      );
+
+      return SyncUploadOutcome.networkUnavailable;
+    } catch (error, stackTrace) {
+      developer.log(
+        '[SyncEngine] Batch upload failed.',
+        error: error,
+        stackTrace: stackTrace,
+      );
+
+      await Future<void>.delayed(
+        _backoffDelay(_maxRetryCount(events)),
+      );
+
       return SyncUploadOutcome.retryableFailure;
     }
   }
 
-  Future<http.Response> _postBatch(String body, String token) {
-    return httpClient.post(
-      Uri.parse('$apiBaseUrl/api/v1/trips/events/batch'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token', // ✅ INJECT ACCESS TOKEN
-      },
-      body: body,
-    ).timeout(AppConfig.syncTimeout);
+  SyncUploadOutcome _classifyResponse(
+    http.Response response,
+    List<TripEvent> events,
+  ) {
+    final status = response.statusCode;
+
+    if (status == 200 || status == 202) {
+      return SyncUploadOutcome.success;
+    }
+
+    if (status == 400 || status == 409 || status == 422) {
+      developer.log(
+        '[SyncEngine] Permanent server rejection: HTTP $status',
+      );
+
+      return SyncUploadOutcome.permanentFailure;
+    }
+
+    if (status == 401 || status == 403) {
+      developer.log(
+        '[SyncEngine] Authentication or authorization failed: '
+        'HTTP $status',
+      );
+
+      return SyncUploadOutcome.networkUnavailable;
+    }
+
+    if (status == 408 || status == 429 || status >= 500) {
+      developer.log(
+        '[SyncEngine] Temporary server failure: HTTP $status',
+      );
+
+      return SyncUploadOutcome.retryableFailure;
+    }
+
+    if (status >= 400 && status < 500) {
+      return SyncUploadOutcome.permanentFailure;
+    }
+
+    return SyncUploadOutcome.retryableFailure;
+  }
+
+  Future<http.Response> _postBatch(
+    String body,
+    String token,
+  ) {
+    final baseUrl = apiBaseUrl.replaceFirst(
+      RegExp(r'/+$'),
+      '',
+    );
+
+    final uri = Uri.parse(
+      '$baseUrl/api/v1/trips/events/batch',
+    );
+
+    return httpClient
+        .post(
+          uri,
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+          body: body,
+        )
+        .timeout(AppConfig.syncTimeout);
   }
 
   int _maxRetryCount(List<TripEvent> events) {
-    return events.map((event) => event.retryCount).reduce((value, element) => value > element ? value : element);
+    if (events.isEmpty) return 0;
+
+    return events
+        .map((event) => event.retryCount)
+        .reduce((a, b) => a > b ? a : b);
   }
 
   String _idempotencyKeyFor(List<TripEvent> events) {
     final ids = events.map((event) => event.id).toList()..sort();
+
     return ids.join(',');
   }
 
   Duration _backoffDelay(int retryCount) {
-    final delayMs = 250 * (1 << (retryCount.clamp(0, 5).toInt()));
-    return Duration(milliseconds: delayMs > 8000 ? 8000 : delayMs);
+    final exponent = retryCount.clamp(0, 5).toInt();
+    final delayMs = 250 * (1 << exponent);
+
+    return Duration(
+      milliseconds: delayMs.clamp(250, 8000).toInt(),
+    );
   }
 }
+

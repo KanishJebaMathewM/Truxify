@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "en-US"
+tone_instructions: "You are an experienced software engineer providing clear, actionable, and concise code reviews."
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+
+  # Disable automatic reviews so PRs are NOT auto-triggered on open or push.
+  auto_review:
+    enabled: false
+    drafts: false
+
+  # Filter out noisy and generated assets
+  path_filters:
+    - "!**/package-lock.json"
+    - "!**/yarn.lock"
+    - "!**/pnpm-lock.yaml"
+    - "!**/build/**"
+    - "!**/.dart_tool/**"
+    - "!**/node_modules/**"
+
+chat:
+  auto_reply: true

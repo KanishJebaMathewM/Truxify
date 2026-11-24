@@ -1,10 +1,16 @@
-
 {
   "programSignals": [
     "nsoc",
+    "nsoc26",
+    "national student open source contribution",
+    "national student open source"
+  ],
+
+  "programLabels": [
+    "nsoc",
     "nsoc26"
   ],
-  "programLabels": [],
+
   "inheritLabels": [
     "level:beginner",
     "level:intermediate",
@@ -12,17 +18,6 @@
     "level:critical",
     "quality:clean",
     "quality:exceptional",
-    "type:accessibility",
-    "type:api",
-    "type:bug",
-    "type:design",
-    "type:docs",
-    "type:feature",
-    "type:refactor",
-    "type:security",
-    "type:testing",
-    "type:performance",
-    "type:devops",
     "customer-app",
     "driver-app",
     "backend",
@@ -34,48 +29,54 @@
     "nsoc",
     "nsoc26"
   ],
+
   "titleRules": [
     {
-      "pattern": "^(fix|bug|hotfix)",
+      "pattern": "^(fix|bug|hotfix)(\\s*[:(]|\\s+)",
       "labels": ["type:bug"]
     },
     {
-      "pattern": "^(feat|feature)",
+      "pattern": "^(feat|feature)(\\s*[:(]|\\s+)",
       "labels": ["type:feature"]
     },
     {
-      "pattern": "^refactor",
+      "pattern": "^refactor(\\s*[:(]|\\s+)",
       "labels": ["type:refactor"]
     },
     {
-      "pattern": "^(test|tests)",
+      "pattern": "^(test|tests)(\\s*[:(]|\\s+)",
       "labels": ["type:testing"]
     },
     {
-      "pattern": "^(docs|doc|documentation)",
+      "pattern": "^(docs|doc|documentation)(\\s*[:(]|\\s+)",
       "labels": ["type:docs"]
     },
     {
-      "pattern": "(xss|csrf|ssrf|auth|vulnerability|security|secret|token)",
+      "pattern": "(^|[^a-z])(xss|csrf|ssrf|vulnerability|security|authentication|authorization|secret|token)([^a-z]|$)",
       "labels": ["type:security"]
     },
     {
-      "pattern": "^(perf|performance)",
+      "pattern": "^(perf|performance)(\\s*[:(]|\\s+)",
       "labels": ["type:performance"]
     },
     {
-      "pattern": "^(design|ui|ux)",
+      "pattern": "^(design|ui|ux)(\\s*[:(]|\\s+)",
       "labels": ["type:design"]
     },
     {
-      "pattern": "^(ci|cd|devops|build|infra)",
+      "pattern": "^(ci|cd|devops|build|infra)(\\s*[:(]|\\s+)",
       "labels": ["type:devops"]
     },
     {
-      "pattern": "^(a11y|accessibility)",
+      "pattern": "^(a11y|accessibility)(\\s*[:(]|\\s+)",
       "labels": ["type:accessibility"]
+    },
+    {
+      "pattern": "^(api)(\\s*[:(]|\\s+)",
+      "labels": ["type:api"]
     }
   ],
+
   "pathRules": [
     {
       "pattern": "^apps/customer/",
@@ -91,7 +92,11 @@
     },
     {
       "pattern": "^backend/ml/",
-      "labels": ["ml"]
+      "labels": ["backend", "ml"]
+    },
+    {
+      "pattern": "^backend/",
+      "labels": ["backend"]
     },
     {
       "pattern": "^blockchain/",
@@ -102,25 +107,32 @@
       "labels": ["automation"]
     },
     {
-      "pattern": "(^docs/|README|CONTRIBUTING|\\.md$)",
+      "pattern": "(^|/)(docs/|README|CONTRIBUTING)|\\.md$",
       "labels": ["type:docs"]
     },
     {
-      "pattern": "(^test/|/test/|\\.test\\.|_test\\.)",
+      "pattern": "(^|/)(test|tests)/|\\.test\\.|_test\\.",
       "labels": ["type:testing"]
     },
     {
-      "pattern": "(package-lock\\.json|pubspec\\.lock|dependabot\\.yml)",
+      "pattern": "(package-lock\\.json|pubspec\\.lock|dependabot\\.yml|yarn\\.lock|pnpm-lock\\.yaml)",
       "labels": ["dependencies"]
+    },
+    {
+      "pattern": "\\.(yaml|yml)$",
+      "labels": ["type:devops"]
     }
   ],
+
   "singleTypeLabel": true,
+
   "typeLabelPriority": [
     "type:security",
     "type:performance",
     "type:bug",
     "type:feature",
     "type:refactor",
+    "type:api",
     "type:testing",
     "type:design",
     "type:devops",

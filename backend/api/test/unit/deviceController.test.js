@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSupabaseMock } from '../helpers/supabaseMock.js';
+import notificationService from '../../src/services/notificationService.js';
 
 const supabaseMock = createSupabaseMock();
 
@@ -20,7 +21,8 @@ vi.mock('../../src/services/notificationService.js', () => ({
 }));
 
 let registerDeviceToken, registerDevice, unregisterDeviceToken,
-    unregisterDevice, updateLocation, unregisterAllDeviceTokens, getDevicePlatforms;
+    unregisterDevice, updateLocation, unregisterAllDeviceTokens, getDevicePlatforms,
+    pruneDevices;
 
 beforeAll(async () => {
   const mod = await import('../../src/controllers/deviceController.js');
@@ -31,6 +33,7 @@ beforeAll(async () => {
   updateLocation          = mod.updateLocation;
   unregisterAllDeviceTokens = mod.unregisterAllDeviceTokens;
   getDevicePlatforms      = mod.getDevicePlatforms;
+  pruneDevices            = mod.pruneDevices;
 });
 
 function makeResponse() {
@@ -554,6 +557,79 @@ describe('deviceController', () => {
           message: 'Database query error',
         })
       );
+    });
+  });
+
+  describe('pruneDevices', () => {
+    beforeEach(() => {
+      notificationService.pruneStaleDevices.mockReset();
+      notificationService.pruneStaleDevices.mockResolvedValue({ pruned: 0 });
+    });
+
+    it('uses the 30-day default when days is absent', async () => {
+      notificationService.pruneStaleDevices.mockResolvedValueOnce({ pruned: 4 });
+      const req = { query: {} };
+      const res = makeResponse();
+      const next = vi.fn();
+
+      await pruneDevices(req, res, next);
+
+      expect(notificationService.pruneStaleDevices).toHaveBeenCalledWith(30);
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        message: 'Successfully pruned 4 stale devices',
+        pruned: 4,
+      });
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it.each(['1', '7', '365'])('passes the explicit %s-day window through', async (days) => {
+      const req = { query: { days } };
+      const res = makeResponse();
+      const next = vi.fn();
+
+      await pruneDevices(req, res, next);
+
+      expect(notificationService.pruneStaleDevices).toHaveBeenCalledWith(Number(days));
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it.each(['0', '-1', '366', '1.5', '7days', '1e2', '0x10', '+7', '', ' '])(
+      'rejects the invalid retention value %j before pruning',
+      async (days) => {
+        const req = { query: { days } };
+        const res = makeResponse();
+        const next = vi.fn();
+
+        await pruneDevices(req, res, next);
+
+        expect(res.status).toHaveBeenCalledWith(400);
+        expect(res.json).toHaveBeenCalledWith({
+          success: false,
+          error: 'Days parameter must be between 1 and 365',
+        });
+        expect(notificationService.pruneStaleDevices).not.toHaveBeenCalled();
+        expect(next).not.toHaveBeenCalled();
+      }
+    );
+
+    it('forwards pruning failures as a 500 AppError', async () => {
+      notificationService.pruneStaleDevices.mockRejectedValueOnce(new Error('database unavailable'));
+      const req = { query: { days: '30' } };
+      const res = makeResponse();
+      const next = vi.fn();
+
+      await pruneDevices(req, res, next);
+
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Failed to prune stale devices',
+          statusCode: 500,
+        })
+      );
+      expect(res.status).not.toHaveBeenCalled();
     });
   });
 });

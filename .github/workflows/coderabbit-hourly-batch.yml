@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Select and Trigger Largest PRs
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           # Prefer a PAT/GitHub App token so GitHub App webhooks (CodeRabbit) are guaranteed to trigger.
           # Falls back to standard GITHUB_TOKEN.

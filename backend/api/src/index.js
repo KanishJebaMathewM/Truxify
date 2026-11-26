@@ -801,4 +801,21 @@ process.on('unhandledRejection', async (reason) => {
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
+const express = require('express');
+const ewayBillRoutes = require('./routes/ewayBillRoutes');
+const ewayExpiryWatcher = require('./workers/ewayExpiryWatcher');
+
+const app = express();
+app.use(express.json());
+
+// Mount GST e-Way Bill verification, extension, and QR audit routes
+app.use('/api/eway-bills', ewayBillRoutes);
+
+// Start background predictive expiry watcher
+ewayExpiryWatcher.start();
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Truxify API server running on port ${PORT}`);
+});
 export default app;

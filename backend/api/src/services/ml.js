@@ -1,4 +1,5 @@
 import logger from '../middleware/logger.js';
+import { getCorrelationId } from '../middleware/correlationId.js';
 import { mlMatchingGateway } from './mlMatchingGateway.js';
 import { validatePricePrediction, convertToPaisa } from '../lib/predictionValidator.js';
 import { LRUCache } from '../utils/cache.js';

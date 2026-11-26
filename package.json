@@ -12,6 +12,7 @@
     "backend/api",
     "blockchain"
   ],
+
   "overrides": {
     "lodash-es": "4.18.1",
     "undici": "^5.14.0",

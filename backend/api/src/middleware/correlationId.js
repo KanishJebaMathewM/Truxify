@@ -1,6 +1,12 @@
-import { AsyncLocalStorage } from 'async_hooks';
+// backend/api/src/middleware/correlationId.js
 import { randomUUID } from 'crypto';
+import axios from 'axios';
 import logger from './logger.js';
+import {
+  correlationContext,
+  getCorrelationId,
+  getCorrelationStore,
+} from '../lib/correlationContext.js';
 
 // Enforce safe character set and length cap matching requestId.js
 const SAFE_CORRELATION_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -29,11 +35,10 @@ export function runWithCorrelationId(correlationId, fn) {
  * Express middleware to attach or generate a correlation ID for request tracing.
  */
 export function correlationIdMiddleware(req, res, next) {
-  const headers = req?.headers || {};
   const rawHeader =
-    headers['x-correlation-id'] ??
-    headers['X-Correlation-ID'] ??
-    headers['x-correlation-ID'];
+    req.headers?.['x-correlation-id'] ??
+    req.headers?.['X-Correlation-ID'] ??
+    req.headers?.['x-correlation-ID'];
 
   const header = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
 
@@ -46,23 +51,28 @@ export function correlationIdMiddleware(req, res, next) {
     req.correlationId = correlationId;
   }
 
-  if (typeof res?.setHeader === 'function') {
+  if (res && typeof res.setHeader === 'function') {
     res.setHeader('X-Correlation-ID', correlationId);
   }
 
-  logger.debug(
-    {
-      event: 'CORRELATION_ID_SET',
-      correlationId,
-      requestId: req?.requestId || req?.id,
-    },
-    `Correlation ID ${correlationId} ${
-      isPropagated ? 'propagated from client' : 'generated'
-    }`
-  );
+  if (res?.locals) {
+    res.locals.correlationId = correlationId;
+  }
 
-  const store = { correlationId };
-  correlationContext.run(store, next);
+  if (logger && typeof logger.debug === 'function') {
+    logger.debug(
+      {
+        event: 'CORRELATION_ID_SET',
+        correlationId,
+        requestId: req?.requestId || req?.id,
+      },
+      `Correlation ID ${correlationId} ${
+        isPropagated ? 'propagated from client' : 'generated'
+      }`,
+    );
+  }
+
+  return correlationContext.run({ correlationId }, next);
 }
 
 export default correlationIdMiddleware;

@@ -1,22 +1,22 @@
-import os
-import sys
+import logging
+from fastapi import FastAPI, Request
 
-# Ensure repository root is on sys.path so 'import ml' resolves correctly
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from fastapi import FastAPI
-from routers.deadhead import router as deadhead_router
-
-try:
-    from routers.load_optimiser import router as load_optimiser_router
-except ImportError:
-    load_optimiser_router = None
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("ml_service")
 
 app = FastAPI(title="Truxify ML Engine", version="1.0.0")
 
-if load_optimiser_router:
-    app.include_router(load_optimiser_router)
-app.include_router(deadhead_router)
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    correlation_id = request.headers.get("x-correlation-id") or request.headers.get("X-Correlation-ID")
+    if correlation_id:
+        logger.info(f"Incoming request {request.method} {request.url.path} [correlationId={correlation_id}]")
+    else:
+        logger.info(f"Incoming request {request.method} {request.url.path}")
+    response = await call_next(request)
+    if correlation_id:
+        response.headers["X-Correlation-ID"] = correlation_id
+    return response
 
 # Mock or actual loaded models dictionary/list
 loaded_models = {
@@ -34,3 +34,4 @@ def health():
         "status": "ok",
         "models_loaded": len(loaded_models)
     }
+

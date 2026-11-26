@@ -42,6 +42,7 @@ APPS = {
 
 LOCALES = {
     "en": "English",
+    "es": "Spanish",
     "hi": "Hindi",
     "ta": "Tamil",
     "kn": "Kannada",
@@ -250,7 +251,7 @@ def dart_interpolated(value: str, placeholders) -> str:
     for name in placeholders:
         escaped = escaped.replace(
             "{" + name + "}",
-            "$" + name,
+            "${" + name + "}",
         )
 
     return escaped

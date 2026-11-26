@@ -59,25 +59,46 @@ class TruxifyController extends ChangeNotifier {
     await prefs.setBool(_autoAcceptKey, _autoAcceptOrders);
   }
 
-  Future<void> loadLocale() async {
+  // Set once the user picks a language, so a slower startup load of the
+  // saved language cannot overwrite that choice.
+  bool _localeSelected = false;
+
+  // Last language code known to be stored, so a pick whose save failed can
+  // be saved again when the user applies it a second time.
+  String? _savedLanguageCode;
+
+  /// Loads the saved language. Returns false if no language is saved, if the
+  /// user picked a language before the load finished (the saved value is then
+  /// ignored) or if the load failed.
+  Future<bool> loadLocale() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final savedCode = prefs.getString(_languageKey) ?? 'en';
+      final savedCode = prefs.getString(_languageKey);
+      if (savedCode == null || _localeSelected) return false;
+      _savedLanguageCode = savedCode;
       _locale = Locale(savedCode);
       notifyListeners();
+      return true;
     } catch (e) {
       developer.log('Failed to load language preference, falling back to English: $e');
+      return false;
     }
   }
 
   Future<void> setLocale(String languageCode) async {
-    if (_locale.languageCode == languageCode) return;
-    _locale = Locale(languageCode);
-    notifyListeners();
+    _localeSelected = true;
+    if (_locale.languageCode != languageCode) {
+      _locale = Locale(languageCode);
+      notifyListeners();
+    }
+    // Skip the save only when this language is already stored.
+    if (_savedLanguageCode == languageCode) return;
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_languageKey, languageCode);
+      if (await prefs.setString(_languageKey, languageCode)) {
+        _savedLanguageCode = languageCode;
+      }
     } catch (e) {
       developer.log('Failed to save language preference: $e');
     }

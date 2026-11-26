@@ -79,7 +79,10 @@ Future<void> main() async {
           ChangeNotifierProvider(create: (_) => TextScaleProvider()),
           ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ],
-        child: TruxifyApp(languageProvider: languageProvider),
+        child: LanguageProviderScope(
+          provider: languageProvider,
+          child: TruxifyApp(languageProvider: languageProvider),
+        ),
       ),
     );
   }, (error, stackTrace) {

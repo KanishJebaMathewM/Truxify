@@ -159,7 +159,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          docker run -d --name truxify-ml-smoke -p 8001:8001 \
+          docker run -d --name truxify-ml-smoke -p 8001:8000 \
             -e ML_API_KEY=ci-test-ml-key \
             truxify-ml:ci-${{ github.sha }}
 

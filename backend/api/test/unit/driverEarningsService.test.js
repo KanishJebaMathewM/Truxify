@@ -6,7 +6,25 @@ import driverEarningsService, {
   aggregateTripEarnings,
   calculateEarningsAggregation,
 } from '../../src/services/driverEarningsService.js';
+// backend/api/test/unit/driverEarningsService.test.js (Excerpt)
 
+describe('DriverEarningsService Edge Cases', () => {
+  it('should return zero earnings and metrics when given zero trips', () => {
+    const result = calculateDriverEarnings({ trips: [], bonuses: 0 });
+    expect(result.totalEarnings).toBe(0);
+    expect(result.tripCount).toBe(0);
+  });
+
+  it('should handle null or undefined input gracefully without throwing', () => {
+    const result = calculateDriverEarnings(null);
+    expect(result.totalEarnings).toBe(0);
+  });
+
+  it('should clamp or reject negative input bounds safely', () => {
+    const result = calculateDriverEarnings({ trips: [{ fare: -50, tips: -10 }], bonuses: 0 });
+    expect(result.totalEarnings).toBeGreaterThanOrEqual(0);
+  });
+});
 describe('driverEarningsService', () => {
   describe('toAmount', () => {
     it('coerces valid numbers and numeric strings to finite numbers', () => {

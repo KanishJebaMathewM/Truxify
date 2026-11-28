@@ -1,3 +1,11 @@
+
+services:
+  # Redis configuration
+  redis:
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
       - --auto-aof-rewrite-min-size
       - 64mb
       - --maxmemory
@@ -24,22 +32,27 @@
       N8N_HOST: ${N8N_HOST:?N8N_HOST is required}
       N8N_PORT: "5678"
       N8N_PROTOCOL: https
+
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?N8N_ENCRYPTION_KEY is required}
       N8N_USER_MANAGEMENT_JWT_SECRET: ${N8N_USER_MANAGEMENT_JWT_SECRET:?N8N_USER_MANAGEMENT_JWT_SECRET is required}
-      N8N_USER_MANAGEMENT_DISABLED: "false"
+
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: db
       DB_POSTGRESDB_PORT: "5432"
       DB_POSTGRESDB_DATABASE: truxify_n8n
       DB_POSTGRESDB_USER: n8n
       DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD:?N8N_DB_PASSWORD is required}
+
       EXECUTIONS_DATA_PRUNE: "true"
       EXECUTIONS_DATA_MAX_AGE: "336"
       N8N_METRICS: "true"
+
       BACKEND_API_URL: ${BACKEND_API_URL:?BACKEND_API_URL is required}
       ADMIN_ALERT_EMAIL: ${ADMIN_ALERT_EMAIL:?ADMIN_ALERT_EMAIL is required}
+
     volumes:
       - n8n_data:/home/node/.n8n
+
     deploy:
       resources:
         limits:
@@ -48,19 +61,29 @@
         reservations:
           cpus: "${N8N_CPU_RESERVATION:-0.5}"
           memory: "${N8N_MEM_RESERVATION:-256M}"
+
     restart: unless-stopped
+
     logging:
       driver: "${LOG_DRIVER:-json-file}"
       options:
         max-size: "${LOG_MAX_SIZE:-10m}"
         max-file: "${LOG_MAX_FILE:-3}"
+
     security_opt:
       - no-new-privileges:true
+
     depends_on:
       db:
         condition: service_healthy
+
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5678/healthz"]
+      test:
+        - CMD
+        - wget
+        - --spider
+        - -q
+        - http://localhost:5678/healthz
       interval: 30s
       timeout: 10s
       retries: 5
@@ -70,8 +93,10 @@
   clamav:
     image: clamav/clamav:1.4
     container_name: truxify-clamav
+
     volumes:
       - clamav_data:/var/lib/clamav
+
     deploy:
       resources:
         limits:
@@ -80,16 +105,22 @@
         reservations:
           cpus: "${CLAMAV_CPU_RESERVATION:-0.5}"
           memory: "${CLAMAV_MEM_RESERVATION:-512M}"
+
     restart: unless-stopped
+
     logging:
       driver: "${LOG_DRIVER:-json-file}"
       options:
         max-size: "${LOG_MAX_SIZE:-10m}"
         max-file: "${LOG_MAX_FILE:-3}"
+
     security_opt:
       - no-new-privileges:true
+
     healthcheck:
-      test: ["CMD-SHELL", "clamdscan --ping 1:1 || exit 1"]
+      test:
+        - CMD-SHELL
+        - clamdscan --ping 1:1 || exit 1
       interval: 60s
       timeout: 10s
       retries: 5
@@ -99,14 +130,19 @@
 volumes:
   postgres_data:
     name: truxify_postgres_data
+
   mongo_data:
     name: truxify_mongo_data
+
   redis_data:
     name: truxify_redis_data
+
   ml_models_data:
     name: truxify_ml_models
+
   n8n_data:
     name: truxify_n8n_data
+
   clamav_data:
     name: truxify_clamav_data
 
@@ -115,3 +151,4 @@ networks:
   default:
     name: truxify_prod
     driver: bridge
+

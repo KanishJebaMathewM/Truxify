@@ -1,28 +1,19 @@
 
-# ==========================================
-# Truxify API - Root Context Dockerfile
-# ==========================================
-# Build command:
-# docker build -t truxify/api:latest -f Dockerfile.api .
+# Truxify API Dockerfile
+# Build: docker build -t truxify/api:latest -f Dockerfile.api .
 
 FROM node:20-alpine
 
-# Set working directory
 WORKDIR /app
 
-# Create a non-root application user
-RUN addgroup -g 1001 -S appgroup \
-    && adduser -S appuser -u 1001 -G appgroup
+# Create non-root user
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
-# Copy API package configuration
+# Install API dependencies
 COPY backend/api/package.json ./
-
-# Install production dependencies
-# npm install is used because no package-lock.json is committed.
 RUN npm install --omit=dev --legacy-peer-deps
 
-# Copy required application directories
-# The root repository structure is preserved for relative imports.
+# Copy required application files
 COPY --chown=appuser:appgroup backend ./backend
 COPY --chown=appuser:appgroup ebpf ./ebpf
 COPY --chown=appuser:appgroup wasi ./wasi
@@ -30,19 +21,13 @@ COPY --chown=appuser:appgroup wasm ./wasm
 COPY --chown=appuser:appgroup snyk ./snyk
 COPY --chown=appuser:appgroup database/liquibase ./database/liquibase
 
-# Do not copy .env files.
-# Supply configuration through environment variables at runtime.
-
-# Run as a non-root user
 USER appuser
 
-# Expose API port
 EXPOSE 5000
 
-# Check API health
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD ["node", "-e", "fetch('http://localhost:5000/api/health/live').then(r => { if (!r.ok) throw new Error('Unhealthy') }).catch(() => process.exit(1))"]
+  CMD ["node", "-e", "fetch('http://localhost:5000/api/health/live').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
 
-# Start the API server
 CMD ["node", "backend/api/src/index.js"]
+
 
